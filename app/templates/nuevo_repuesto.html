@@ -1,0 +1,174 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-11">
+        <div class="card shadow-lg border-0">
+            <div class="card-header bg-dark py-3 text-center border-bottom border-pink" style="border-width: 4px !important;">
+                <h4 class="mb-0 fw-bold text-white text-uppercase">Registro Técnico de Radiador</h4>
+            </div>
+            <div class="card-body p-4 text-dark">
+                <form method="POST">
+                    
+                    <!-- SECCIÓN 1: IDENTIFICACIÓN Y CÓDIGOS -->
+                    <div class="mb-4">
+                        <h5 class="text-pink border-bottom pb-2 mb-3"><i class="bi bi-upc-scan"></i> Identificación y Códigos</h5>
+                        <div class="row">
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold">SKU PROVEEDOR (Principal)</label>
+                                <input type="text" name="sku" class="form-control border-dark" placeholder="Ej: 336 o DN-100" required autofocus>
+                                <small class="text-muted">Código que figura en la caja.</small>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold text-pink">SKU MAESTRO (VACAN)</label>
+                                <input type="text" name="sku_vacan" class="form-control border-pink fw-bold text-pink" value="{{ sugerencia_sku }}" placeholder="VAC-000000">
+                                <small class="text-muted">Unifica distintos proveedores.</small>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold">CÓDIGO OEM (Fábrica)</label>
+                                <input type="text" name="codigo_oem" class="form-control border-dark" placeholder="N° pieza original">
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold text-primary">SUCURSAL DESTINO</label>
+                                <select name="sucursal_id" class="form-select border-primary" required>
+                                    <option value="" disabled selected>Seleccione Sucursal...</option>
+                                    {% for s in sucursales %}
+                                    <option value="{{ s.id }}">{{ s.nombre }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold">PROVEEDOR</label>
+                                <select name="proveedor_id" class="form-select border-dark" required>
+                                    <option value="" disabled selected>Seleccione Proveedor...</option>
+                                    {% for p in proveedores %}
+                                    <option value="{{ p.id }}" {% if repuesto and p.id == repuesto.proveedor_id %}selected{% endif %}>
+                                        {{ p.razon_social }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12 mb-3">
+                                <label class="form-label fw-bold">NOMBRE DEL PRODUCTO</label>
+                                <input type="text" name="nombre" class="form-control border-dark" placeholder="Ej: RADIADOR DE AGUA TOYOTA HILUX 2.5/3.0 2016+" required>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN 2: CLASIFICACIÓN Y VALORES -->
+                    <div class="mb-4 bg-light p-3 rounded border">
+                        <h5 class="text-dark border-bottom border-secondary pb-2 mb-3"><i class="bi bi-tags"></i> Clasificación y Costos</h5>
+                        <div class="row">
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold small">RUBRO</label>
+                                <input type="text" name="rubro" class="form-control" placeholder="Ej: RADIADORES">
+                            </div>
+                            <div class="col-md-3 mb-3">
+                                <label class="form-label fw-bold small">SUB-RUBRO</label>
+                                <input type="text" name="subrubro" class="form-control" placeholder="Ej: ALUMINIO">
+                            </div>
+                            <div class="col-md-2 mb-3">
+                                <label class="form-label fw-bold text-danger">COSTO COMPRA ($)</label>
+                                <input type="number" step="0.01" name="costo" class="form-control border-danger fw-bold" placeholder="0.00" required>
+                            </div>
+                            <div class="col-md-2 mb-3">
+                                <label class="form-label fw-bold text-success">VENTA ($)</label>
+                                <input type="number" step="0.01" name="precio" class="form-control border-success fw-bold" placeholder="0.00" required>
+                            </div>
+                            <div class="col-md-2 mb-3">
+                                <label class="form-label fw-bold">STOCK INICIAL</label>
+                                <input type="number" name="stock" class="form-control border-dark" value="0" required>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-12 text-end">
+                                <span id="margen_calculado" class="fw-bold"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SECCIÓN 3: EQUIVALENCIAS Y COMPATIBILIDAD -->
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h5 class="text-dark border-bottom pb-2 mb-3">Equivalencias Auxiliares</h5>
+                            <div class="row g-2">
+                                <div class="col-6 mb-2">
+                                    <label class="small fw-bold">CROMOSOL</label>
+                                    <input type="text" name="sku_cromosol" class="form-control form-control-sm" placeholder="SKU Cromo">
+                                </div>
+                                <div class="col-6 mb-2">
+                                    <label class="small fw-bold">DENSO</label>
+                                    <input type="text" name="sku_denso" class="form-control form-control-sm" placeholder="SKU Denso">
+                                </div>
+                                <div class="col-6 mb-2">
+                                    <label class="small fw-bold">EXPOYER</label>
+                                    <input type="text" name="sku_expoyer" class="form-control form-control-sm" placeholder="SKU Expoyer">
+                                </div>
+                                <div class="col-6 mb-2">
+                                    <label class="small fw-bold">OTROS</label>
+                                    <input type="text" name="otros_codigos" class="form-control form-control-sm" placeholder="Valeo, Behr, etc.">
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <label class="form-label fw-bold small">DESCRIPCIÓN / NOTAS INTERNAS</label>
+                                <textarea name="descripcion" class="form-control" rows="2"></textarea>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <h5 class="text-pink border-bottom pb-2 mb-3">Vehículos Compatibles (Opcional)</h5>
+                            <label class="form-label small text-muted">Mantén Ctrl presionado para seleccionar varios o ninguno</label>
+                            <select name="modelos" class="form-select" multiple size="8" style="font-size: 0.85rem; border-left: 5px solid var(--vacan-pink);">
+                                {% for m in modelos %}
+                                <option value="{{ m.id }}">{{ m.marca }} - {{ m.modelo }} ({{ m.anio_inicio }} a {{ m.anio_fin if m.anio_fin else 'Actualidad' }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="d-grid gap-2 mt-4">
+                        <button type="submit" class="btn btn-pink btn-lg fw-bold shadow">GUARDAR RADIADOR EN SISTEMA</button>
+                        <a href="{{ url_for('inventory.index') }}" class="btn btn-outline-secondary">Cancelar y Volver</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const costoInput = document.querySelector('input[name="costo"]');
+    const precioInput = document.querySelector('input[name="precio"]');
+    const margenText = document.getElementById('margen_calculado');
+
+    function calcularMargen() {
+        const c = parseFloat(costoInput.value) || 0;
+        const p = parseFloat(precioInput.value) || 0;
+        if (p > 0) {
+            const m = (((p - c) / p) * 100).toFixed(1);
+            margenText.innerText = `Margen de Ganancia: ${m}%`;
+            if (m > 25) {
+                margenText.className = 'fw-bold text-success';
+            } else if (m > 0) {
+                margenText.className = 'fw-bold text-warning';
+            } else {
+                margenText.className = 'fw-bold text-danger';
+            }
+        } else {
+            margenText.innerText = '';
+        }
+    }
+
+    costoInput.addEventListener('input', calcularMargen);
+    precioInput.addEventListener('input', calcularMargen);
+</script>
+
+<style>
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-pink:hover { background-color: #d4006a; color: white; transform: translateY(-2px); transition: 0.2s; }
+    .border-pink { border: 2px solid var(--vacan-pink) !important; }
+    .italic { font-style: italic; }
+</style>
+{% endblock %}

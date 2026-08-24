@@ -1,0 +1,257 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12 mb-4">
+        <h2 class="fw-bold"><span class="text-pink">Panel</span> de Control Superadmin</h2>
+        <p class="text-muted">Gestión global de sucursales y personal de Vacan Radiadores</p>
+    </div>
+
+    <!-- Gestión de Sucursales -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow">
+            <div class="card-header card-header-vacan d-flex justify-content-between align-items-center">
+                <span>Sucursales de Vacan</span>
+                <button class="btn btn-sm btn-light fw-bold" data-bs-toggle="modal" data-bs-target="#modalSucursal">
+                    <i class="bi bi-plus-lg"></i> +
+                </button>
+            </div>
+            <ul class="list-group list-group-flush">
+                {% for s in sucursales %}
+                <li class="list-group-item d-flex justify-content-between align-items-center {{ 'bg-light text-muted' if not s.activo }}">
+                    <div>
+                        <strong class="{{ 'text-decoration-line-through' if not s.activo }}">{{ s.nombre }}</strong>
+                        {% if s.cuit %}<small class="badge bg-light text-dark border ms-2">CUIT: {{ s.cuit }}</small>{% endif %}
+                        <br><small class="d-block text-dark">{{ s.direccion }}</small>
+                        <small class="text-muted">
+                            {% if s.localidad %}{{ s.localidad }}{% endif %}{% if s.provincia %}, {{ s.provincia }}{% endif %}
+                            {% if s.celular %}<br><i class="bi bi-telephone"></i> {{ s.celular }}{% endif %}
+                        </small>
+                        {% if not s.activo %}<span class="badge bg-secondary ms-2">Inactiva</span>{% endif %}
+                    </div>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-primary border-0" data-bs-toggle="modal" data-bs-target="#editSucursal{{ s.id }}">
+                            Editar
+                        </button>
+                        <a href="{{ url_for('admin.toggle_sucursal', id=s.id) }}" 
+                           class="btn btn-sm {{ 'btn-outline-success' if not s.activo else 'btn-outline-danger' }} border-0">
+                            {{ 'Activar' if not s.activo else 'Inactivar' }}
+                        </a>
+                    </div>
+                </li>
+
+                <!-- MODAL EDITAR SUCURSAL -->
+                <div class="modal fade" id="editSucursal{{ s.id }}" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <form action="{{ url_for('admin.editar_sucursal', id=s.id) }}" method="POST" class="modal-content text-start">
+                            <div class="modal-header"><h5>Editar Sucursal: {{ s.nombre }}</h5></div>
+                            <div class="modal-body text-dark">
+                                <div class="row">
+                                    <div class="col-md-8 mb-3">
+                                        <label class="form-label fw-bold">Nombre de Sucursal</label>
+                                        <input type="text" name="nombre" class="form-control" value="{{ s.nombre }}" required>
+                                    </div>
+                                    <div class="col-md-4 mb-3">
+                                        <label class="form-label fw-bold">CUIT</label>
+                                        <input type="text" name="cuit" class="form-control" value="{{ s.cuit or '' }}" placeholder="XX-XXXXXXXX-X">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Dirección</label>
+                                        <input type="text" name="direccion" class="form-control" value="{{ s.direccion or '' }}">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Localidad</label>
+                                        <input type="text" name="localidad" class="form-control" value="{{ s.localidad or '' }}">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Provincia</label>
+                                        <input type="text" name="provincia" class="form-control" value="{{ s.provincia or '' }}">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Celular</label>
+                                        <input type="text" name="celular" class="form-control" value="{{ s.celular or '' }}">
+                                    </div>
+                                    <div class="col-md-6 mb-3">
+                                        <label class="form-label">Celular Alternativo</label>
+                                        <input type="text" name="celular_alternativo" class="form-control" value="{{ s.celular_alternativo or '' }}">
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cerrar</button>
+                                <button type="submit" class="btn btn-vacan">Guardar Cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    <!-- Gestión de Usuarios -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow">
+            <div class="card-header card-header-vacan d-flex justify-content-between align-items-center">
+                <span>Usuarios / Empleados</span>
+                <button class="btn btn-sm btn-light fw-bold" data-bs-toggle="modal" data-bs-target="#modalUsuario">
+                    <i class="bi bi-person-plus"></i> +
+                </button>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm mb-0">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Rol</th>
+                            <th>Sucursal</th>
+                            <th class="text-end">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for u in usuarios %}
+                        <tr class="{{ 'table-light text-muted' if not u.activo }}">
+                            <td>
+                                <span class="{{ 'text-decoration-line-through' if not u.activo }}">{{ u.username }}</span>
+                                {% if not u.activo %}<br><small class="text-danger">Inactivo</small>{% endif %}
+                            </td>
+                            <td><span class="badge bg-info text-dark">{{ u.rol }}</span></td>
+                            <td>{{ u.sucursal.nombre if u.sucursal else 'Global' }}</td>
+                            <td class="text-end">
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-link text-primary" data-bs-toggle="modal" data-bs-target="#editUser{{ u.id }}">Editar</button>
+                                    {% if u.id != current_user.id %}
+                                    <a href="{{ url_for('admin.toggle_usuario', id=u.id) }}" 
+                                       class="btn btn-sm btn-link {{ 'text-success' if not u.activo else 'text-danger' }}">
+                                        {{ 'Activar' if not u.activo else 'Inactivar' }}
+                                    </a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- MODAL EDITAR USUARIO -->
+                        <!-- MODAL EDITAR USUARIO -->
+                        <div class="modal fade" id="editUser{{ u.id }}" tabindex="-1" aria-hidden="true">
+                            <div class="modal-dialog modal-dialog-centered"> <!-- Añadí centrado para mejor visual -->
+                                <div class="modal-content shadow-lg"> <!-- Añadí sombra fuerte -->
+                                    <div class="modal-header bg-dark text-white">
+                                        <h5 class="modal-title">Editar Usuario: {{ u.username }}</h5>
+                                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                                    </div>
+                                    <form action="{{ url_for('admin.editar_usuario', id=u.id) }}" method="POST">
+                                        <div class="modal-body text-start">
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold text-dark">Nueva Contraseña</label>
+                                                <input type="password" name="password" class="form-control" placeholder="Dejar en blanco para no cambiar">
+                                            </div>
+                                            
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold text-dark">Rol del Empleado</label>
+                                                <select name="rol" class="form-select">
+                                                    <option value="vendedor" {% if u.rol == 'vendedor' %}selected{% endif %}>Vendedor</option>
+                                                    <option value="admin" {% if u.rol == 'admin' %}selected{% endif %}>Administrador</option>
+                                                    <option value="superadmin" {% if u.rol == 'superadmin' %}selected{% endif %}>Superadmin</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="mb-3">
+                                                <label class="form-label fw-bold text-dark">Asignar Sucursal</label>
+                                                <select name="sucursal_id" class="form-select">
+                                                    <option value="">Sin Sucursal / Global</option>
+                                                    {% for s in sucursales %}
+                                                    <option value="{{ s.id }}" {% if u.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </div>
+                                        </div>
+                                        <div class="modal-footer bg-light">
+                                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                            <button type="submit" class="btn btn-vacan">Actualizar Datos</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL NUEVA SUCURSAL -->
+<div class="modal fade" id="modalSucursal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <form action="{{ url_for('admin.nueva_sucursal') }}" method="POST" class="modal-content text-start">
+            <div class="modal-header"><h5>Nueva Sucursal Vacan</h5></div>
+            <div class="modal-body text-dark">
+                <div class="row">
+                    <div class="col-md-8 mb-3">
+                        <label class="form-label fw-bold">Nombre de Sucursal</label>
+                        <input type="text" name="nombre" class="form-control" placeholder="Ej: Sucursal Centro" required>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label class="form-label fw-bold">CUIT</label>
+                        <input type="text" name="cuit" class="form-control" placeholder="XX-XXXXXXXX-X">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Dirección</label>
+                        <input type="text" name="direccion" class="form-control" placeholder="Calle y número">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Localidad</label>
+                        <input type="text" name="localidad" class="form-control" placeholder="Ej: Rosario">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Provincia</label>
+                        <input type="text" name="provincia" class="form-control" placeholder="Ej: Santa Fe">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Celular</label>
+                        <input type="text" name="celular" class="form-control" placeholder="Ej: 3416555555">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Celular Alternativo</label>
+                        <input type="text" name="celular_alternativo" class="form-control" placeholder="Opcional">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-vacan">Crear Sucursal</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- MODAL NUEVO USUARIO -->
+<div class="modal fade" id="modalUsuario" tabindex="-1">
+    <div class="modal-dialog">
+        <form action="{{ url_for('admin.nuevo_usuario') }}" method="POST" class="modal-content text-start">
+            <div class="modal-header"><h5>Nuevo Usuario</h5></div>
+            <div class="modal-body text-dark">
+                <input type="text" name="username" class="form-control mb-2" placeholder="Username" required>
+                <input type="password" name="password" class="form-control mb-2" placeholder="Contraseña" required>
+                <select name="rol" class="form-select mb-2">
+                    <option value="vendedor">Vendedor</option>
+                    <option value="admin">Administrador de Sucursal</option>
+                    <option value="superadmin">Superadmin</option>
+                </select>
+                <select name="sucursal_id" class="form-select text-dark">
+                    <option value="">Sin Sucursal (Solo Superadmin)</option>
+                    {% for s in sucursales %}
+                        {% if s.activo %} 
+                        <option value="{{ s.id }}">{{ s.nombre }}</option>
+                        {% endif %}
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-vacan">Crear Usuario</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Orden de Pago Vacan #{{ mov.id }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css">
+    <style>
+        body { background: #fff; font-family: Arial, sans-serif; font-size: 13px; color: #000; }
+        .op-container { 
+            width: 210mm; 
+            min-height: 297mm; 
+            padding: 15mm; 
+            margin: auto; 
+            border: 1px solid #ccc; 
+            position: relative; 
+            background-color: white;
+        }
+        .logo-print { height: 60px; }
+        .tipo-comp-box { 
+            position: absolute; 
+            left: 50%; 
+            top: 15mm; 
+            transform: translateX(-50%); 
+            border: 2px solid #000; 
+            width: 45px; 
+            height: 45px; 
+            text-align: center; 
+            font-size: 32px; 
+            font-weight: bold; 
+            line-height: 40px;
+            background: #fff;
+        }
+        .header-line { border-bottom: 2px solid #000; margin-bottom: 20px; padding-bottom: 10px; }
+        .table-bordered border-dark td, .table-bordered border-dark th { border: 1px solid #000 !important; }
+        
+        @media print { 
+            .no-print { display: none; } 
+            .op-container { border: none; padding: 5mm; } 
+            body { background: none; }
+        }
+        .text-pink { color: #ff007f !important; }
+        .italic { font-style: italic; }
+    </style>
+</head>
+<body>
+    <!-- BARRA DE HERRAMIENTAS -->
+    <div class="no-print text-center py-3 bg-dark text-white sticky-top">
+        <p class="mb-2 small">Vista previa de comprobante para el Proveedor - Vacan Gestión</p>
+        <button onclick="window.print()" class="btn btn-primary fw-bold px-4">
+            <i class="bi bi-printer"></i> IMPRIMIR ORDEN DE PAGO
+        </button>
+        <button onclick="window.close()" class="btn btn-outline-light ms-2">CERRAR</button>
+    </div>
+
+    <div class="op-container">
+        <!-- Letra Identificatoria -->
+        <div class="tipo-comp-box">X</div>
+        
+        <!-- ENCABEZADO -->
+        <div class="row header-line">
+            <div class="col-6">
+                <img src="{{ url_for('static', filename='img/logo.jpg') }}" class="logo-print mb-2">
+                <h4 class="fw-bold mb-0">VACAN RADIADORES</h4>
+                <p class="small mb-0">
+                    Comprobante de Egreso de Fondos<br>
+                    Distribución de Sistemas de Enfriamiento
+                </p>
+            </div>
+            <div class="col-6 text-end">
+                <h2 class="fw-bold mb-0">ORDEN DE PAGO</h2>
+                <p class="mb-0 text-muted">Documento no válido como factura</p>
+                <!-- Usamos la referencia u el ID de la operación -->
+                <h4 class="mt-2 text-dark">N° {{ mov.referencia if mov.referencia else "OP-"+mov.id|string }}</h4>
+                <p class="fw-bold">Fecha: {{ mov.fecha.strftime('%d/%m/%Y %H:%M') }}</p>
+            </div>
+        </div>
+
+        <!-- DATOS DEL PROVEEDOR -->
+        <div class="row bg-light p-3 border mb-4">
+            <div class="col-8">
+                <p class="mb-1"><strong>PROVEEDOR:</strong> {{ mov.proveedor.razon_social }}</p>
+                <p class="mb-0"><strong>DOMICILIO:</strong> {{ mov.proveedor.direccion or 'S/D' }}</p>
+            </div>
+            <div class="col-4 text-end">
+                <p class="mb-1"><strong>CUIT:</strong> {{ mov.proveedor.cuit }}</p>
+                <p class="mb-0"><strong>IVA:</strong> {{ mov.proveedor.condicion_iva }}</p>
+            </div>
+        </div>
+
+        <h6 class="fw-bold text-uppercase border-bottom pb-1 mb-3">Detalle de la Operación</h6>
+        <p class="mb-4 text-muted">{{ mov.descripcion }}</p>
+
+        <!-- PUNTO 4: TABLA DE DESGLOSE DE PAGOS VINCULADA FÍSICAMENTE -->
+        <table class="table table-bordered border-dark align-middle">
+            <thead class="table-secondary border-dark">
+                <tr class="text-center">
+                    <th width="35%">ORIGEN / CUENTA</th>
+                    <th width="40%">DETALLE MEDIO DE PAGO</th>
+                    <th width="25%" class="text-end">IMPORTE</th>
+                </tr>
+            </thead>
+            <tbody>
+                <!-- Recorremos los movimientos de caja asociados a este pago específico -->
+                {% for d in mov.detalles_caja %}
+                <tr>
+                    <td>{{ d.caja.nombre }}</td>
+                    <td>
+                        <span class="text-uppercase fw-bold">{{ d.metodo_detalle|replace('_', ' ') }}</span>
+                        
+                        <!-- Si el medio es cheque, buscamos los datos técnicos del cheque entregado -->
+                        {% if d.metodo_detalle == 'CHEQUE_TERCEROS' %}
+                            {% for ch in mov.cheques_entregados %}
+                                <!-- Filtramos para mostrar el detalle del cheque que coincide con el monto de la fila -->
+                                {% if ch.monto == d.monto %}
+                                    <div class="mt-1 p-2 bg-light border-start border-4 border-primary" style="font-size: 11px;">
+                                        <strong>BANCO:</strong> {{ ch.banco }}<br>
+                                        <strong>N°:</strong> {{ ch.numero }} | 
+                                        <strong>VTO:</strong> {{ ch.fecha_vencimiento.strftime('%d/%m/%Y') }}<br>
+                                        <small class="text-muted">Emisor: {{ ch.emisor }}</small>
+                                    </div>
+                                {% endif %}
+                            {% endfor %}
+                        {% endif %}
+                    </td>
+                    <td class="text-end fw-bold">
+                        ${{ "{:,.2f}".format(d.monto) }}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3" class="text-center py-4 text-muted italic">
+                        No se encontraron detalles de caja vinculados a esta Orden de Pago.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr class="table-dark">
+                    <td colspan="2" class="text-end fw-bold">TOTAL PAGADO:</td>
+                    <td class="text-end fw-bold h5 mb-0">${{ "{:,.2f}".format(mov.monto|abs) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+
+        <!-- PIE DE FIRMAS -->
+        <div class="row" style="margin-top: 60px;">
+            <div class="col-7">
+                <div class="border p-3" style="min-height: 120px; border-style: dashed !important;">
+                    <small class="text-muted d-block mb-3 fw-bold">OBSERVACIONES ADICIONALES:</small>
+                    <p class="small text-muted">La presente Orden de Pago constituye un registro interno de la empresa y avala la entrega de los valores detallados en la tabla superior a favor del beneficiario.</p>
+                </div>
+            </div>
+            <div class="col-5 text-center">
+                <div style="margin-top: 80px; border-top: 1px solid #000; width: 80%; margin-left: auto; margin-right: auto;"></div>
+                <p class="fw-bold mb-0">Firma Autorizada</p>
+                <small>Vacan Radiadores - Depto. Tesorería</small>
+            </div>
+        </div>
+
+        <div class="text-center" style="margin-top: 70px;">
+            <hr style="border-top: 1px solid #eee;">
+            <small class="text-muted">Documento generado por el ERP de Vacan Radiadores - Original para Archivo</small>
+        </div>
+    </div>
+</body>
+</html>

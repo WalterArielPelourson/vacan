@@ -1,0 +1,140 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .modal-content { background-color: white !important; color: #333 !important; }
+    .table-vacan thead { background-color: var(--vacan-blue); color: white; }
+</style>
+
+<div class="row mb-4 align-items-center">
+    <div class="col-md-6">
+        <h2 class="fw-bold"><span class="text-pink">Matriz</span> de Vehículos</h2>
+        <p class="text-muted">Configura los autos para asociar la compatibilidad de los radiadores.</p>
+    </div>
+    <div class="col-md-6 text-md-end">
+        <button class="btn btn-vacan shadow" data-bs-toggle="modal" data-bs-target="#modalNuevoModelo">
+            <i class="bi bi-plus-circle"></i> Agregar Nuevo Vehículo
+        </button>
+    </div>
+</div>
+
+<div class="card shadow border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-dark text-white">
+                    <tr>
+                        <th>Marca</th>
+                        <th>Modelo</th>
+                        <th>Años (Desde - Hasta)</th>
+                        <th class="text-end px-4">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in modelos %}
+                    <tr>
+                        <td><span class="fw-bold">{{ m.marca }}</span></td>
+                        <td>{{ m.modelo }}</td>
+                        <td>
+                            <span class="badge bg-light text-dark border">
+                                {% if m.anio_inicio %}{{ m.anio_inicio }}{% else %}---{% endif %} 
+                                a 
+                                {% if m.anio_fin %}{{ m.anio_fin }}{% else %}Actualidad{% endif %}
+                            </span>
+                        </td>
+                        <td class="text-end px-4">
+                            <!-- Botón para abrir el modal -->
+                            <button class="btn btn-sm btn-outline-primary me-2" data-bs-toggle="modal" data-bs-target="#editModal{{ m.id }}">
+                                <i class="bi bi-pencil"></i> Editar
+                            </button>
+                            <a href="{{ url_for('inventory.eliminar_modelo', id=m.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Eliminar este vehículo de la matriz?')">
+                                <i class="bi bi-trash"></i> Borrar
+                            </a>
+                        </td>
+                    </tr>
+
+                    <!-- MODAL EDITAR MODELO (Ubicado dentro del bucle para tener el ID, pero con fix de transparencia) -->
+                    <div class="modal fade" id="editModal{{ m.id }}" tabindex="-1" aria-labelledby="editModalLabel{{ m.id }}" aria-hidden="true">
+                        <div class="modal-dialog modal-dialog-centered">
+                            <!-- El estilo inline background-color: white forzado elimina la transparencia -->
+                            <div class="modal-content text-start shadow-lg" style="background-color: white !important; opacity: 1 !important;">
+                                <div class="modal-header bg-dark text-white">
+                                    <h5 class="modal-title" id="editModalLabel{{ m.id }}">Editar {{ m.marca }} {{ m.modelo }}</h5>
+                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                                </div>
+                                <form action="{{ url_for('inventory.editar_modelo', id=m.id) }}" method="POST">
+                                    <div class="modal-body text-dark">
+                                        <div class="row">
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label fw-bold">Marca</label>
+                                                <input type="text" name="marca" class="form-control" value="{{ m.marca }}" required>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label fw-bold">Modelo</label>
+                                                <input type="text" name="modelo" class="form-control" value="{{ m.modelo }}" required>
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label fw-bold">Año Inicio</label>
+                                                <input type="number" name="anio_inicio" class="form-control" value="{{ m.anio_inicio }}">
+                                            </div>
+                                            <div class="col-md-6 mb-3">
+                                                <label class="form-label fw-bold">Año Fin</label>
+                                                <input type="number" name="anio_fin" class="form-control" value="{{ m.anio_fin }}">
+                                            </div>
+                                        </div>
+                                        <p class="small text-muted mt-2">Nota: Si dejas el "Año Fin" vacío, se mostrará como "Actualidad".</p>
+                                    </div>
+                                    <div class="modal-footer bg-light">
+                                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                                        <button type="submit" class="btn btn-vacan">Guardar Cambios</button>
+                                    </div>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" class="text-center py-5 text-muted">No hay vehículos registrados en la matriz de Vacan.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL NUEVO VEHÍCULO -->
+<div class="modal fade" id="modalNuevoModelo" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('inventory.nuevo_modelo') }}" method="POST" class="modal-content text-start">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Agregar a la Matriz</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Marca</label>
+                        <input type="text" name="marca" class="form-control" placeholder="Ej: TOYOTA" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Modelo</label>
+                        <input type="text" name="modelo" class="form-control" placeholder="Ej: HILUX" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Año Inicio</label>
+                        <input type="number" name="anio_inicio" class="form-control" placeholder="2015">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Año Fin</label>
+                        <input type="number" name="anio_fin" class="form-control" placeholder="2024">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-vacan w-100 py-2">Registrar Vehículo</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

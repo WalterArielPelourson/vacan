@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="fw-bold mb-4">Historial de <span class="text-pink">Arqueos y Cierres</span></h2>
+
+<div class="card shadow border-0">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-dark">
+                <tr>
+                    <th>Fecha y Hora</th>
+                    <th>Caja</th>
+                    <th>Usuario</th>
+                    <th class="text-end">Sistema</th>
+                    <th class="text-end">Real</th>
+                    <th class="text-end">Diferencia</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ci in cierres %}
+                <tr>
+                    <td>{{ ci.fecha_cierre.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td>{{ ci.caja.nombre }}</td>
+                    <td>{{ ci.usuario_rel.username }}</td>
+                    <td class="text-end">${{ "{:,.2f}".format(ci.saldo_esperado) }}</td>
+                    <td class="text-end fw-bold">${{ "{:,.2f}".format(ci.saldo_real) }}</td>
+                    <td class="text-end">
+                        {% if ci.diferencia == 0 %}
+                            <span class="text-success fw-bold">OK</span>
+                        {% elif ci.diferencia > 0 %}
+                            <span class="text-primary fw-bold">+ ${{ "{:,.2f}".format(ci.diferencia) }} (SOBRANTE)</span>
+                        {% else %}
+                            <span class="text-danger fw-bold">${{ "{:,.2f}".format(ci.diferencia) }} (FALTANTE)</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

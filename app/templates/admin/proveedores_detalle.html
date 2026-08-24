@@ -1,0 +1,296 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-6">
+        <a href="{{ url_for('admin.lista_saldos_proveedores') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Volver a Listado</a>
+        <h2 class="fw-bold text-dark mt-2">{{ proveedor.razon_social }}</h2>
+        <h5 class="text-muted">Ficha de Cuenta Corriente (Proveedor)</h5>
+    </div>
+    <div class="col-md-6 text-md-end">
+        <h3 class="fw-bold {{ 'text-danger' if saldo > 0 else 'text-success' }}">
+            SALDO A PAGAR: ${{ "{:,.2f}".format(saldo) }}
+        </h3>
+        <button class="btn btn-pink fw-bold shadow px-4 py-2" data-bs-toggle="modal" data-bs-target="#modalPagoProv">
+            <i class="bi bi-patch-plus-fill"></i> REGISTRAR PAGO COMPUESTO
+        </button>
+    </div>
+</div>
+
+<div class="card shadow border-0">
+    <div class="card-header bg-dark text-white fw-bold">HISTORIAL DE FACTURAS Y PAGOS</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Concepto / Detalle</th>
+                        <th class="text-end">Debe (Facturas +)</th>
+                        <th class="text-end">Haber (Pagos -)</th>
+                        <th class="text-center">Acción</th> 
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in movimientos %}
+                    <tr class="{% if m.monto > 0 and m.compra and m.compra.esta_pagada %} table-success {% endif %}">
+                        <td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>
+                            {{ m.descripcion }}
+                            {% if m.monto > 0 and m.compra %}
+                                <br><small class="text-muted">Factura: <strong>#{{ m.compra.nro_factura }}</strong></small>
+                                {% if m.compra.esta_pagada %}
+                                    <span class="badge bg-success ms-1">PAGADA</span>
+                                {% elif m.compra.total_pagado > 0 %}
+                                    <br><small class="text-primary fw-bold text-uppercase" style="font-size: 10px;">Abonado: ${{ "{:,.2f}".format(m.compra.total_pagado) }}</small>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+                        <td class="text-end text-danger fw-bold">
+                            {{ "${:,.2f}".format(m.monto) if m.monto > 0 else '-' }}
+                        </td>
+                        <td class="text-end text-success fw-bold">
+                            {{ "${:,.2f}".format(m.monto|abs) if m.monto < 0 else '-' }}
+                        </td>
+                        <td class="text-center">
+                            {% if m.monto < 0 %}
+                            <a href="{{ url_for('admin.imprimir_pago_proveedor', movimiento_id=m.id) }}" target="_blank" class="btn btn-sm btn-outline-dark">
+                                <i class="bi bi-printer"></i>
+                            </a>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center py-5">No hay movimientos registrados con este proveedor.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     MODAL DE PAGO COMPUESTO (CARRITO DE PAGOS)
+     ========================================== -->
+<div class="modal fade" id="modalPagoProv" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content shadow-lg border-0">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold"><i class="bi bi-wallet2 text-pink"></i> Armar Pago Compuesto: {{ proveedor.razon_social }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4 text-dark" style="background-color: white !important;">
+                <div class="row">
+                    <!-- COLUMNA IZQUIERDA -->
+                    <div class="col-md-5 border-end">
+                        <h6 class="fw-bold text-pink mb-3 text-uppercase">1. Valores a Entregar</h6>
+                        
+                        <div class="mb-3">
+                            <label class="small fw-bold">Cuenta de Origen</label>
+                            <select id="sel_caja" class="form-select border-dark">
+                                {% for caja in cajas %}
+                                <option value="{{ caja.id }}" data-nombre="{{ caja.nombre }}">
+                                    {{ caja.nombre }} (Saldo: ${{ "{:,.2f}".format(caja.saldo_actual) }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="small fw-bold">Medio de Pago</label>
+                            <select id="sel_medio" class="form-select border-dark" onchange="toggleFormEndoso(this.value)">
+                                <option value="EFECTIVO">Efectivo</option>
+                                <option value="TRANSFERENCIA">Transferencia / Banco</option>
+                                <option value="CHEQUE_TERCEROS">Endosar Cheque (Cartera)</option>
+                            </select>
+                        </div>
+
+                        <div id="wrapper_cheque" class="mb-3 d-none p-2 bg-light border border-pink rounded">
+                            <label class="small fw-bold text-primary">Cheque a entregar:</label>
+                            <select id="sel_cheque" class="form-select">
+                                {% for ch in cheques_en_cartera %}
+                                <option value="{{ ch.id }}" data-monto="{{ ch.monto }}" data-info="{{ ch.banco }} N°{{ ch.numero }}">
+                                    {{ ch.banco }} | N°{{ ch.numero }} (${{ ch.monto }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="small fw-bold">Monto de este medio ($)</label>
+                            <input type="number" id="inp_monto" step="0.01" class="form-control form-control-lg border-primary" placeholder="0.00">
+                        </div>
+
+                        <button class="btn btn-dark w-100 fw-bold mb-4 shadow-sm" onclick="agregarPagoALista()">+ AÑADIR PAGO A LA BOLSA</button>
+
+                        <!-- PUNTO 3: SECCIÓN CONCILIACIÓN DE FACTURAS -->
+                        <h6 class="fw-bold text-danger mb-2 text-uppercase">2. Aplicar pago a Facturas</h6>
+                        <div class="border rounded p-2 bg-light shadow-sm" style="max-height: 250px; overflow-y: auto;">
+                            {% for m in movimientos %}
+                                {# 
+                                Mostramos el ítem si:
+                                1. El monto es mayor a 0 (es una deuda, no un pago anterior).
+                                2. El movimiento tiene una compra asociada (m.compra existe).
+                                3. La compra no está totalmente pagada.
+                                #}
+                                {% if m.monto > 0 and m.compra and not m.compra.esta_pagada %}
+                                <div class="row align-items-center border-bottom py-2 g-2 bg-white mb-1 mx-0 rounded shadow-sm">
+                                    <div class="col-7">
+                                        <div class="form-check">
+                                            <input class="form-check-input chk-compra" type="checkbox" value="{{ m.compra.id }}" id="c{{ m.compra.id }}" onchange="toggleMontoImputar(this)">
+                                            <label class="form-check-label small" for="c{{ m.compra.id }}">
+                                                Factura <strong>#{{ m.compra.nro_factura }}</strong><br>
+                                                <span class="text-muted small">Deuda: <strong>${{ "{:,.2f}".format(m.compra.total - m.compra.total_pagado) }}</strong></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-5">
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text">$</span>
+                                            <input type="number" step="0.01" class="form-control" 
+                                                id="monto_imp{{ m.compra.id }}" 
+                                                data-max="{{ m.compra.total - m.compra.total_pagado }}" 
+                                                placeholder="0.00" disabled>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- COLUMNA DERECHA -->
+                    <div class="col-md-7 px-4">
+                        <h6 class="fw-bold text-muted mb-3 text-uppercase">3. Resumen de la Operación</h6>
+                        <div class="table-responsive" style="min-height: 200px;">
+                            <table class="table table-sm align-middle">
+                                <thead class="table-light"><tr class="small"><th>Origen</th><th>Detalle</th><th class="text-end">Monto</th><th></th></tr></thead>
+                                <tbody id="tbody_pagos"></tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="card bg-dark text-white p-3 mt-4 border-0 shadow">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="h5 mb-0 fw-light">TOTAL A ENTREGAR:</span>
+                                <span id="label_total_pagar" class="h3 mb-0 fw-bold text-pink">$0.00</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">CANCELAR</button>
+                <button class="btn btn-pink px-5 py-2 fw-bold shadow" onclick="finalizarPagoProveedor()">
+                    <i class="bi bi-check-all"></i> CONFIRMAR PAGO Y CONCILIAR
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let listaPagos = [];
+
+function toggleFormEndoso(val) {
+    const div = document.getElementById('wrapper_cheque');
+    const input = document.getElementById('inp_monto');
+    if(val === 'CHEQUE_TERCEROS') {
+        div.classList.remove('d-none');
+        input.readOnly = true;
+        const sel = document.getElementById('sel_cheque');
+        if(sel.value) input.value = sel.options[sel.selectedIndex].getAttribute('data-monto');
+    } else {
+        div.classList.add('d-none');
+        input.readOnly = false;
+        input.value = "";
+    }
+}
+
+document.getElementById('sel_cheque').addEventListener('change', function() {
+    document.getElementById('inp_monto').value = this.options[this.selectedIndex].getAttribute('data-monto');
+});
+
+// NUEVO: Función para habilitar monto parcial al tildar factura
+function toggleMontoImputar(checkbox) {
+    const input = document.getElementById('monto_imp' + checkbox.value);
+    input.disabled = !checkbox.checked;
+    if (checkbox.checked) {
+        input.value = input.getAttribute('data-max');
+        input.focus();
+    } else {
+        input.value = "";
+    }
+}
+
+function agregarPagoALista() {
+    const caja = document.getElementById('sel_caja');
+    const medio = document.getElementById('sel_medio').value;
+    const monto = parseFloat(document.getElementById('inp_monto').value);
+    if (isNaN(monto) || monto <= 0) return alert("Ingrese un monto válido.");
+
+    let item = {
+        caja_id: caja.value,
+        caja_nombre: caja.options[caja.selectedIndex].getAttribute('data-nombre'),
+        medio: medio,
+        monto: monto
+    };
+
+    if (medio === 'CHEQUE_TERCEROS') {
+        const selCh = document.getElementById('sel_cheque');
+        if (!selCh.value) return alert("Seleccione un cheque.");
+        item.cheque_id = selCh.value;
+        item.detalle = "ENDOSO: " + selCh.options[selCh.selectedIndex].getAttribute('data-info');
+    } else { item.detalle = medio; }
+
+    listaPagos.push(item);
+    dibujarTablaPagos();
+    document.getElementById('inp_monto').value = "";
+}
+
+function dibujarTablaPagos() {
+    const tbody = document.getElementById('tbody_pagos');
+    tbody.innerHTML = '';
+    let total = 0;
+    listaPagos.forEach((p, index) => {
+        total += p.monto;
+        tbody.innerHTML += `<tr><td>${p.caja_nombre}</td><td>${p.detalle}</td><td class="text-end fw-bold">$${p.monto.toLocaleString('es-AR', {minimumFractionDigits: 2})}</td><td class="text-end"><button class="btn btn-sm text-danger" onclick="listaPagos.splice(${index},1);dibujarTablaPagos()">×</button></td></tr>`;
+    });
+    document.getElementById('label_total_pagar').innerText = `$${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+}
+
+async function finalizarPagoProveedor() {
+    if (listaPagos.length === 0) return alert("Cargue medios de pago.");
+    
+    // Capturamos conciliaciones parciales
+    const conciliaciones = [];
+    document.querySelectorAll('.chk-compra:checked').forEach(cb => {
+        conciliaciones.push({
+            compra_id: cb.value,
+            monto: parseFloat(document.getElementById('monto_imp' + cb.value).value)
+        });
+    });
+
+    const response = await fetch(`/admin/proveedores/pago-compuesto/{{ proveedor.id }}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ pagos: listaPagos, conciliaciones: conciliaciones })
+    });
+
+    if (response.ok) {
+        const res = await response.json();
+        alert("¡Operación exitosa en Vacan!");
+        if(confirm("¿Imprimir Orden de Pago?")) window.open(`/admin/proveedores/imprimir-pago/${res.movimiento_id}`, '_blank');
+        location.reload();
+    } else {
+        alert("Error al procesar el pago.");
+    }
+}
+</script>
+
+<style>
+    .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 15px; overflow: hidden; }
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-pink:hover { background-color: #d4006a; color: white; }
+    .table-success { background-color: rgba(25, 135, 84, 0.1) !important; }
+</style>
+{% endblock %}

@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <div class="col-md-12">
+        <h2 class="fw-bold"><i class="bi bi-calendar-range text-pink"></i> Historial de <span class="text-pink">Valores y Cheques</span></h2>
+        <p class="text-muted">Trazabilidad total: Origen del cliente, Destino a proveedor y Estados de cobro.</p>
+    </div>
+</div>
+
+<!-- FILTROS AVANZADOS -->
+<div class="card mb-4 border-0 shadow-sm bg-dark text-white">
+    <div class="card-body py-3">
+        <form action="{{ url_for('admin.reporte_historico_cheques') }}" method="GET" class="row g-2 align-items-end">
+            <!-- RANGO DE FECHAS -->
+            <div class="col-md-2">
+                <label class="x-small fw-bold text-pink">VENCIMIENTO DESDE</label>
+                <input type="date" name="inicio" class="form-control form-control-sm bg-light" value="{{ request.args.get('inicio','') }}">
+            </div>
+            <div class="col-md-2">
+                <label class="x-small fw-bold text-pink">VENCIMIENTO HASTA</label>
+                <input type="date" name="fin" class="form-control form-control-sm bg-light" value="{{ request.args.get('fin','') }}">
+            </div>
+
+             <!-- FILTRO DE CLIENTE (EL QUE FALTABA) -->
+            <div class="col-md-2">
+                <label class="x-small fw-bold text-pink">CLIENTE ORIGEN</label>
+                <select name="cliente_id" class="form-select form-select-sm bg-light" onchange="this.form.submit()">
+                    <option value="">-- Todos --</option>
+                    {% for c in clientes_list %}
+                    <option value="{{ c.id }}" {% if request.args.get('cliente_id')|int == c.id %}selected{% endif %}>
+                        {{ c.razon_social }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- OTROS FILTROS -->
+            <div class="col-md-2">
+                <label class="x-small fw-bold text-pink">ESTADO</label>
+                <select name="estado" class="form-select form-select-sm bg-light" onchange="this.form.submit()">
+                    <option value="">-- Todos --</option>
+                    <option value="EN_CARTERA" {% if request.args.get('estado') == 'EN_CARTERA' %}selected{% endif %}>EN CARTERA</option>
+                    <option value="ENTREGADO" {% if request.args.get('estado') == 'ENTREGADO' %}selected{% endif %}>ENTREGADO (ENDOSADO)</option>
+                    <option value="DEPOSITADO" {% if request.args.get('estado') == 'DEPOSITADO' %}selected{% endif %}>DEPOSITADO</option>
+                    <option value="RECHAZADO" {% if request.args.get('estado') == 'RECHAZADO' %}selected{% endif %}>RECHAZADO</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="x-small fw-bold text-pink">N° CHEQUE O EMISOR</label>
+                <input type="text" name="q" class="form-control form-control-sm bg-light" placeholder="Escriba para buscar..." value="{{ request.args.get('q','') }}">
+            </div>
+            <div class="col-md-3">
+                <div class="btn-group w-100">
+                    <button type="submit" class="btn btn-sm btn-pink fw-bold px-4">FILTRAR</button>
+                    <a href="{{ url_for('admin.reporte_historico_cheques') }}" class="btn btn-sm btn-outline-light">LIMPIAR</a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- RESUMEN DE CARTERA (IGUAL QUE ANTES) -->
+<div class="row mb-4 text-center">
+    <div class="col-md-3 mb-2">
+        <div class="card border-0 shadow-sm p-3 bg-white h-100">
+            <h6 class="text-muted small fw-bold text-uppercase">Total Filtrado</h6>
+            <h3 class="fw-bold mb-0 text-dark">${{ "{:,.2f}".format(stats.total_monto) }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3 mb-2">
+        <div class="card border-0 shadow-sm p-3 bg-info text-dark h-100">
+            <h6 class="fw-bold small text-uppercase">En Mano</h6>
+            <h3 class="fw-bold mb-0">{{ stats.en_cartera }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3 mb-2">
+        <div class="card border-0 shadow-sm p-3 bg-dark text-white h-100">
+            <h6 class="text-pink small fw-bold text-uppercase">Entregados</h6>
+            <h3 class="fw-bold mb-0">{{ stats.entregados }}</h3>
+        </div>
+    </div>
+    <div class="col-md-3 mb-2">
+        <div class="card border-0 shadow-sm p-3 bg-danger text-white h-100">
+            <h6 class="fw-bold small text-uppercase">Rechazados</h6>
+            <h3 class="fw-bold mb-0">{{ stats.rechazados }}</h3>
+        </div>
+    </div>
+</div>
+
+<!-- TABLA DE TRAZABILIDAD (Mantenida) -->
+<div class="card shadow border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                <thead class="table-light text-uppercase">
+                    <tr>
+                        <th>Cheque / Vto.</th>
+                        <th>Origen (Quién lo dio)</th>
+                        <th>Destino (Ubicación actual)</th>
+                        <th class="text-end">Importe</th>
+                        <th class="text-center">Estado</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for ch in cheques %}
+                    <tr class="{% if ch.estado == 'RECHAZADO' %}table-danger{% endif %}">
+                        <td>
+                            <strong class="text-dark">{{ ch.banco }}</strong><br>
+                            <small class="text-muted">N° {{ ch.numero }} | <strong>Vence: {{ ch.fecha_vencimiento.strftime('%d/%m/%Y') }}</strong></small>
+                        </td>
+                        
+                        <td>
+                            <i class="bi bi-person-fill text-muted"></i> {{ ch.cliente_rel.razon_social if ch.cliente_rel else 'Venta Directa' }}<br>
+                            <small class="text-muted italic">{{ ch.emisor }}</small>
+                        </td>
+
+                        <td>
+                            {% if ch.estado == 'EN_CARTERA' %}
+                                <span class="text-info fw-bold"><i class="bi bi-safe2"></i> En Cartera Vacan</span>
+                            {% elif ch.estado == 'ENTREGADO' %}
+                                <span class="text-dark fw-bold"><i class="bi bi-truck"></i> {{ ch.proveedor.razon_social if ch.proveedor else 'Proveedor' }}</span>
+                                <br><small class="text-muted">Ref. OP: {{ ch.pago_prov_id or 'S/R' }}</small>
+                            {% elif ch.estado == 'DEPOSITADO' %}
+                                <span class="text-success fw-bold"><i class="bi bi-bank"></i> Depositado</span>
+                            {% else %}
+                                <span class="text-danger fw-bold"><i class="bi bi-x-octagon"></i> Devuelto/Rechazado</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end fw-bold text-dark fs-5">
+                            ${{ "{:,.2f}".format(ch.monto) }}
+                        </td>
+
+                        <td class="text-center">
+                            <span class="badge {% if ch.estado == 'EN_CARTERA' %}bg-info text-dark{% elif ch.estado == 'RECHAZADO' %}bg-danger{% else %}bg-success{% endif %}">
+                                {{ ch.estado|replace('_', ' ') }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center py-5">No hay valores que coincidan con los filtros.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+    .text-pink { color: var(--vacan-pink) !important; }
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .x-small { font-size: 0.65rem; }
+    .italic { font-style: italic; }
+    .table-danger { --bs-table-bg: rgba(220, 53, 69, 0.05); }
+</style>
+{% endblock %}

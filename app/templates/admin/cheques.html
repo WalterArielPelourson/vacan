@@ -1,0 +1,247 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <h2 class="fw-bold"><span class="text-pink">Cartera</span> de Valores</h2>
+        <p class="text-muted">Gestión de cheques. Controla vencimientos, depósitos y devoluciones de clientes o proveedores.</p>
+    </div>
+</div>
+
+<!-- NAVEGACIÓN POR ESTADOS (NUEVO) -->
+<ul class="nav nav-pills mb-4 bg-white p-2 rounded shadow-sm" id="pills-tab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active fw-bold" id="pills-cartera-tab" data-bs-toggle="pill" data-bs-target="#pills-cartera" type="button" role="tab">
+            <i class="bi bi-wallet2"></i> EN CARTERA (DISPONIBLES)
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold" id="pills-procesados-tab" data-bs-toggle="pill" data-bs-target="#pills-procesados" type="button" role="tab">
+            <i class="bi bi-clock-history"></i> PROCESADOS / ENTREGADOS
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="pills-tabContent">
+    
+    <!-- PESTAÑA 1: VALORES EN MANO -->
+    <div class="tab-pane fade show active" id="pills-cartera" role="tabpanel">
+        <div class="card shadow border-0">
+            <div class="card-header bg-dark text-white fw-bold">CHEQUES DISPONIBLES EN CAJA</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Vencimiento</th>
+                                <th>Banco / Emisor</th>
+                                <th>Número</th>
+                                <th>Monto</th>
+                                <th class="text-end px-4">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set count_cartera = namespace(value=0) %}
+                            {% for ch in cheques if ch.estado == 'EN_CARTERA' %}
+                            {% set count_cartera.value = count_cartera.value + 1 %}
+                            <tr class="{% if ch.fecha_vencimiento <= hoy %}table-warning{% endif %}">
+                                <td class="fw-bold">
+                                    {{ ch.fecha_vencimiento.strftime('%d/%m/%Y') }}
+                                    {% if ch.fecha_vencimiento <= hoy %}<br><small class="text-danger fw-bold">VENCIDO</small>{% endif %}
+                                </td>
+                                <td><strong>{{ ch.banco }}</strong><br><small>{{ ch.emisor }}</small></td>
+                                <td><code>{{ ch.numero }}</code></td>
+                                <td class="fw-bold h5 text-dark">${{ "{:,.2f}".format(ch.monto) }}</td>
+                                <td class="text-end px-4">
+                                    <div class="btn-group">
+                                        <button class="btn btn-sm btn-vacan fw-bold px-3" data-bs-toggle="modal" data-bs-target="#modalLiquidar{{ ch.id }}">LIQUIDAR</button>
+                                        <button class="btn btn-sm btn-outline-danger fw-bold ms-1" data-bs-toggle="modal" data-bs-target="#modalRechazo{{ ch.id }}">RECHAZO</button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% if count_cartera.value == 0 %}
+                            <tr><td colspan="5" class="text-center py-5 text-muted">No hay cheques físicos en cartera.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PESTAÑA 2: HISTORIAL Y ENTREGADOS -->
+    <div class="tab-pane fade" id="pills-procesados" role="tabpanel">
+        <div class="card shadow border-0">
+            <div class="card-header bg-secondary text-white fw-bold">HISTORIAL DE VALORES PROCESADOS</div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Vencimiento</th>
+                                <th>Banco / Emisor</th>
+                                <th>Monto</th>
+                                <th>Estado / Ubicación</th>
+                                <th class="text-end px-4">Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% set count_proc = namespace(value=0) %}
+                            {% for ch in cheques if ch.estado != 'EN_CARTERA' %}
+                            {% set count_proc.value = count_proc.value + 1 %}
+                            <tr class="{% if ch.estado == 'RECHAZADO' %}table-danger{% endif %}">
+                                <td>{{ ch.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
+                                <td><strong>{{ ch.banco }}</strong><br><small>N° {{ ch.numero }}</small></td>
+                                <td class="fw-bold">${{ "{:,.2f}".format(ch.monto) }}</td>
+                                <td>
+                                    {% if ch.estado == 'DEPOSITADO' %}
+                                        <span class="badge bg-success">DEPOSITADO</span>
+                                    {% elif ch.estado == 'COBRADO' %}
+                                        <span class="badge bg-primary">COBRADO</span>
+                                    {% elif ch.estado == 'RECHAZADO' %}
+                                        <span class="badge bg-danger">RECHAZADO</span>
+                                    {% elif ch.estado == 'ENTREGADO' %}
+                                        <span class="badge bg-dark">ENTREGADO A: {{ ch.proveedor.razon_social if ch.proveedor else 'Proveedor' }}</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end px-4">
+                                    {% if ch.estado == 'ENTREGADO' %}
+                                    <button class="btn btn-sm btn-warning fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#modalDevolver{{ ch.id }}">
+                                        <i class="bi bi-arrow-left-circle"></i> DEVOLVER A CARTERA
+                                    </button>
+                                    {% endif %}
+                                    {% if ch.estado in ['DEPOSITADO', 'COBRADO'] %}
+                                    <button class="btn btn-sm btn-outline-danger fw-bold" data-bs-toggle="modal" data-bs-target="#modalRechazo{{ ch.id }}">RECHAZO</button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                            {% if count_proc.value == 0 %}
+                            <tr><td colspan="5" class="text-center py-5 text-muted">No hay historial de cheques procesados.</td></tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     SECCIÓN DE MODALES (FUERA DE LAS TABLAS)
+     ========================================== -->
+
+{% for ch in cheques %}
+    
+    <!-- 1. MODAL LIQUIDAR -->
+    <div class="modal fade" id="modalLiquidar{{ ch.id }}" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header text-white" style="background-color: var(--vacan-blue); border-bottom: 4px solid var(--vacan-pink);">
+                    <h5 class="modal-title fw-bold">Liquidar Cheque N° {{ ch.numero }}</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <form action="{{ url_for('admin.procesar_cheque_pro', id=ch.id) }}" method="POST">
+                    <div class="modal-body p-4" style="background-color: white !important;">
+                        <div class="text-center mb-4 p-3 rounded bg-light border">
+                            <small class="text-muted text-uppercase fw-bold">Monto a Acreditar</small>
+                            <h2 class="fw-bold text-dark mb-0">${{ "{:,.2f}".format(ch.monto) }}</h2>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-bold small">1. ¿CÓMO SE LIQUIDA?</label>
+                            <div class="row g-2">
+                                <div class="col-6">
+                                    <input type="radio" class="btn-check" name="accion" id="depo{{ch.id}}" value="DEPOSITO" checked>
+                                    <label class="btn btn-outline-primary w-100 py-3 fw-bold" for="depo{{ch.id}}">DEPÓSITO</label>
+                                </div>
+                                <div class="col-6">
+                                    <input type="radio" class="btn-check" name="accion" id="cash{{ch.id}}" value="COBRO_EFECTIVO">
+                                    <label class="btn btn-outline-success w-100 py-3 fw-bold" for="cash{{ch.id}}">EFECTIVO</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-bold small">2. CAJA / CUENTA DE DESTINO</label>
+                            <select name="caja_id" class="form-select border-dark shadow-none" required>
+                                {% for caja in cajas %}
+                                    <option value="{{ caja.id }}">{{ caja.nombre }} (Saldo: ${{ "{:,.2f}".format(caja.saldo_actual) }})</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light border-0">
+                        <button type="submit" class="btn btn-pink px-4 py-2 fw-bold shadow">CONFIRMAR ACREDITACIÓN</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. MODAL RECHAZO CLIENTE -->
+    <div class="modal fade" id="modalRechazo{{ ch.id }}" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title fw-bold">Rechazo de Cheque</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <form action="{{ url_for('admin.rechazar_cheque', id=ch.id) }}" method="POST">
+                    <div class="modal-body p-4" style="background-color: white !important;">
+                        <p class="text-dark">Se anulará el pago y se cargará la deuda por <strong>${{ "{:,.2f}".format(ch.monto) }}</strong>.</p>
+                        <div class="mb-2">
+                            <label class="form-label fw-bold text-dark">Gastos Bancarios por Rechazo ($)</label>
+                            <input type="number" step="0.01" name="gastos" class="form-control border-danger" value="0.00">
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light border-0">
+                        <button type="submit" class="btn btn-danger fw-bold px-4">CONFIRMAR RECHAZO</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. MODAL DEVOLUCIÓN DE PROVEEDOR -->
+    <div class="modal fade" id="modalDevolver{{ ch.id }}" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow-lg">
+                <div class="modal-header bg-warning text-dark">
+                    <h5 class="modal-title fw-bold">Devolución de Proveedor a Cartera</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <form action="{{ url_for('admin.devolver_cheque_cartera', id=ch.id) }}" method="POST">
+                    <div class="modal-body p-4" style="background-color: white !important;">
+                        <p class="text-dark">El proveedor <strong>{{ ch.proveedor.razon_social if ch.proveedor else 'Proveedor' }}</strong> devolvió el cheque <strong>N° {{ ch.numero }}</strong>.</p>
+                        <div class="alert alert-info small">
+                            <strong>Efecto:</strong> El cheque vuelve a estar disponible en tu cartera y tu deuda con el proveedor aumentará por <strong>${{ "{:,.2f}".format(ch.monto) }}</strong>.
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label fw-bold text-dark">Recargos por devolución ($)</label>
+                            <input type="number" step="0.01" name="gastos" class="form-control border-warning" value="0.00">
+                        </div>
+                    </div>
+                    <div class="modal-footer bg-light border-0">
+                        <button type="submit" class="btn btn-warning fw-bold px-4">CONFIRMAR REINGRESO A CARTERA</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+{% endfor %}
+
+<style>
+    .btn-vacan, .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-vacan:hover, .btn-pink:hover { background-color: #d4006a; color: white; }
+    .nav-pills .nav-link { color: var(--vacan-blue); }
+    .nav-pills .nav-link.active { background-color: var(--vacan-pink) !important; color: white; }
+    
+    .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 12px; }
+    .modal-backdrop { z-index: 1040 !important; }
+    .modal { z-index: 1050 !important; }
+    .table-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
+    .table-danger { background-color: rgba(220, 53, 69, 0.1) !important; }
+    .italic { font-style: italic; }
+</style>
+{% endblock %}

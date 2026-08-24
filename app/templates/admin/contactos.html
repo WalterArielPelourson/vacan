@@ -1,0 +1,267 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="fw-bold"><span class="text-pink">Agenda</span> Comercial y Fiscal</h2>
+        <p class="text-muted">Gestión de datos impositivos, edición y estado de contactos de Vacan Radiadores.</p>
+    </div>
+</div>
+
+<!-- Nav tabs -->
+<ul class="nav nav-tabs mb-4" id="contactosTab" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link active fw-bold" id="clientes-tab" data-bs-toggle="tab" data-bs-target="#clientes" type="button" role="tab">
+            <i class="bi bi-people"></i> CLIENTES
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link fw-bold" id="proveedores-tab" data-bs-toggle="tab" data-bs-target="#proveedores" type="button" role="tab">
+            <i class="bi bi-truck"></i> PROVEEDORES
+        </button>
+    </li>
+</ul>
+
+<!-- Tab panes -->
+<div class="tab-content" id="contactosTabContent">
+    
+    <!-- SECCIÓN CLIENTES -->
+    <div class="tab-pane fade show active" id="clientes" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="fw-bold">Padrón de Clientes</h4>
+            <button class="btn btn-vacan shadow-sm" data-bs-toggle="modal" data-bs-target="#modalCliente">
+                <i class="bi bi-plus-circle"></i> Nuevo Cliente
+            </button>
+        </div>
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Razón Social</th>
+                            <th>CUIT/CUIL</th>
+                            <th>Condición IVA</th>
+                            <th>Estado</th>
+                            <th class="text-end px-4">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in clientes %}
+                        <tr class="{{ 'bg-light text-muted' if not c.activo }}">
+                            <td><strong class="{{ 'text-decoration-line-through' if not c.activo }}">{{ c.razon_social }}</strong></td>
+                            <td>{{ c.cuit or 'S/D' }}</td>
+                            <td><span class="badge bg-light text-dark border">{{ c.condicion_iva }}</span></td>
+                            <td>
+                                <span class="badge {{ 'bg-success' if c.activo else 'bg-danger' }}">
+                                    {{ 'ACTIVO' if c.activo else 'INACTIVO' }}
+                                </span>
+                            </td>
+                            <td class="text-end px-4">
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editCliente{{ c.id }}">
+                                        <i class="bi bi-pencil"></i> Editar
+                                    </button>
+                                    <a href="{{ url_for('admin.toggle_cliente', id=c.id) }}" 
+                                       class="btn btn-sm {{ 'btn-outline-danger' if c.activo else 'btn-outline-success' }}">
+                                        {{ 'Inactivar' if c.activo else 'Activar' }}
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECCIÓN PROVEEDORES -->
+    <div class="tab-pane fade" id="proveedores" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+            <h4 class="fw-bold">Nuestros Proveedores</h4>
+            <button class="btn btn-dark shadow-sm" data-bs-toggle="modal" data-bs-target="#modalProveedor">
+                <i class="bi bi-plus-circle"></i> Nuevo Proveedor
+            </button>
+        </div>
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive text-dark">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Proveedor</th>
+                            <th>CUIT</th>
+                            <th>Estado</th>
+                            <th class="text-end px-4">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in proveedores %}
+                        <tr class="{{ 'bg-light text-muted' if not p.activo }}">
+                            <td><strong class="{{ 'text-decoration-line-through' if not p.activo }}">{{ p.razon_social }}</strong></td>
+                            <td>{{ p.cuit or 'S/D' }}</td>
+                            <td>
+                                <span class="badge {{ 'bg-success' if p.activo else 'bg-danger' }}">
+                                    {{ 'ACTIVO' if p.activo else 'INACTIVO' }}
+                                </span>
+                            </td>
+                            <td class="text-end px-4">
+                                <div class="btn-group">
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editProv{{ p.id }}">
+                                        <i class="bi bi-pencil"></i> Editar
+                                    </button>
+                                    <a href="{{ url_for('admin.toggle_proveedor', id=p.id) }}" 
+                                       class="btn btn-sm {{ 'btn-outline-danger' if p.activo else 'btn-outline-success' }}">
+                                        {{ 'Inactivar' if p.activo else 'Activar' }}
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     MODALES DE EDICIÓN (FUERA DE LAS TABLAS)
+     ========================================== -->
+
+<!-- Modales Editar Clientes -->
+{% for c in clientes %}
+<div class="modal fade" id="editCliente{{ c.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form action="{{ url_for('admin.editar_cliente', id=c.id) }}" method="POST" class="modal-content shadow-lg">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Editar Cliente: {{ c.razon_social }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark text-start" style="background-color: white !important;">
+                <div class="row">
+                    <div class="col-md-8 mb-3"><label class="form-label fw-bold">Razón Social</label><input type="text" name="razon_social" class="form-control" value="{{ c.razon_social }}" required></div>
+                    <div class="col-md-4 mb-3"><label class="form-label fw-bold">CUIT</label><input type="text" name="cuit" class="form-control" value="{{ c.cuit or '' }}"></div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Condición IVA</label>
+                        <select name="condicion_iva" class="form-select">
+                            {% for cond in condiciones %}<option value="{{ cond }}" {% if c.condicion_iva == cond %}selected{% endif %}>{{ cond }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">IIBB</label><input type="text" name="iibb" class="form-control" value="{{ c.iibb or '' }}"></div>
+                    <div class="col-md-4 mb-3"><label class="form-label">Provincia</label><input type="text" name="provincia" class="form-control" value="{{ c.provincia or '' }}"></div>
+                    <div class="col-md-4 mb-3"><label class="form-label">Localidad</label><input type="text" name="localidad" class="form-control" value="{{ c.localidad or '' }}"></div>
+                    <div class="col-md-4 mb-3"><label class="form-label">Teléfono</label><input type="text" name="telefono" class="form-control" value="{{ c.telefono or '' }}"></div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-vacan px-4">Guardar Cambios</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Modales Editar Proveedores -->
+{% for p in proveedores %}
+<div class="modal fade" id="editProv{{ p.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form action="{{ url_for('admin.editar_proveedor', id=p.id) }}" method="POST" class="modal-content shadow-lg">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Editar Proveedor: {{ p.razon_social }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark text-start" style="background-color: white !important;">
+                <div class="row">
+                    <div class="col-md-8 mb-3"><label class="form-label fw-bold">Razón Social</label><input type="text" name="razon_social" class="form-control" value="{{ p.razon_social }}" required></div>
+                    <div class="col-md-4 mb-3"><label class="form-label fw-bold">CUIT</label><input type="text" name="cuit" class="form-control" value="{{ p.cuit or '' }}"></div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Condición IVA</label>
+                        <select name="condicion_iva" class="form-select">
+                            {% for cond in condiciones %}<option value="{{ cond }}" {% if p.condicion_iva == cond %}selected{% endif %}>{{ cond }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">IIBB</label><input type="text" name="iibb" class="form-control" value="{{ p.iibb or '' }}"></div>
+                    <div class="col-md-6 mb-3"><label class="form-label">Dirección</label><input type="text" name="direccion" class="form-control" value="{{ p.direccion or '' }}"></div>
+                    <div class="col-md-6 mb-3"><label class="form-label">Teléfono</label><input type="text" name="telefono" class="form-control" value="{{ p.telefono or '' }}"></div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                <button type="submit" class="btn btn-dark px-4">Guardar Cambios</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+
+<!-- MODALES PARA NUEVOS -->
+<div class="modal fade" id="modalCliente" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form action="{{ url_for('admin.nuevo_cliente') }}" method="POST" class="modal-content shadow-lg">
+            <div class="modal-header bg-dark text-white"><h5>Alta de Cliente Fiscal</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body text-dark text-start" style="background-color: white !important;">
+                <div class="row">
+                    <div class="col-md-8 mb-3"><label class="form-label fw-bold">Razón Social</label><input type="text" name="razon_social" class="form-control" required></div>
+                    <div class="col-md-4 mb-3"><label class="form-label fw-bold">CUIT / CUIL</label><input type="text" name="cuit" class="form-control"></div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Condición IVA</label>
+                        <select name="condicion_iva" class="form-select">{% for cond in condiciones %}<option value="{{ cond }}">{{ cond }}</option>{% endfor %}</select>
+                    </div>
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">IIBB</label><input type="text" name="iibb" class="form-control"></div>
+                    <div class="col-md-4 mb-3"><label class="form-label">Provincia</label><input type="text" name="provincia" class="form-control"></div>
+                    <div class="col-md-4 mb-3"><label class="form-label">Localidad</label><input type="text" name="localidad" class="form-control"></div>
+                    <div class="col-md-4 mb-3"><label class="form-label">Teléfono</label><input type="text" name="telefono" class="form-control"></div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light"><button type="submit" class="btn btn-vacan w-100">Guardar Cliente</button></div>
+        </form>
+    </div>
+</div>
+
+<div class="modal fade" id="modalProveedor" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form action="{{ url_for('admin.nuevo_proveedor') }}" method="POST" class="modal-content shadow-lg">
+            <div class="modal-header bg-dark text-white"><h5>Registrar Nuevo Proveedor</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body text-dark text-start" style="background-color: white !important;">
+                <div class="row">
+                    <div class="col-md-8 mb-3"><label class="form-label fw-bold">Razón Social</label><input type="text" name="razon_social" class="form-control" required></div>
+                    <div class="col-md-4 mb-3"><label class="form-label fw-bold">CUIT</label><input type="text" name="cuit" class="form-control"></div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Condición IVA</label>
+                        <select name="condicion_iva" class="form-select">{% for cond in condiciones %}<option value="{{ cond }}">{{ cond }}</option>{% endfor %}</select>
+                    </div>
+                    <div class="col-md-6 mb-3"><label class="form-label fw-bold">IIBB</label><input type="text" name="iibb" class="form-control"></div>
+                    <div class="col-md-6 mb-3"><label class="form-label">Dirección</label><input type="text" name="direccion" class="form-control"></div>
+                    <div class="col-md-6 mb-3"><label class="form-label">Teléfono</label><input type="text" name="telefono" class="form-control"></div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light"><button type="submit" class="btn btn-dark w-100">Registrar Proveedor</button></div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .nav-tabs .nav-link { color: #666; border: none; border-bottom: 3px solid transparent; transition: 0.3s; }
+    .nav-tabs .nav-link.active { color: var(--vacan-pink) !important; border-bottom: 3px solid var(--vacan-pink) !important; background: transparent; }
+    .table-dark { background-color: var(--vacan-blue) !important; }
+    
+    /* Solución Definitiva Transparencia y Posición */
+    .modal-content {
+        background-color: #ffffff !important;
+        opacity: 1 !important;
+        color: #212529 !important;
+        border: none;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.5) !important;
+    }
+    
+    .modal-backdrop {
+        background-color: var(--vacan-blue) !important;
+        opacity: 0.7 !important;
+    }
+
+    tr.text-muted strong {
+        color: #adb5bd !important;
+    }
+</style>
+{% endblock %}

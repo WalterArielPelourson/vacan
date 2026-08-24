@@ -1,0 +1,56 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-8">
+        <a href="{{ url_for('admin.tesoreria_dashboard') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Volver a Tesorería</a>
+        <h2 class="fw-bold mt-2">Detalle: <span class="text-pink">{{ caja.nombre }}</span></h2>
+    </div>
+    <div class="col-md-4 text-md-end">
+        <div class="p-3 bg-white shadow-sm rounded border">
+            <small class="text-muted d-block">Saldo Actual</small>
+            <h3 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(caja.saldo_actual) }}</h3>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow border-0">
+    <div class="card-header bg-dark text-white fw-bold">ÚLTIMOS MOVIMIENTOS</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Rubro / Categoría</th>
+                        <th>Concepto / Motivo</th>
+                        <th class="text-end">Ingreso (+)</th>
+                        <th class="text-end">Egreso (-)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in movimientos %}
+                    <tr>
+                        <td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>
+                            <span class="badge bg-light text-dark border">
+                                {{ m.categoria.nombre if m.categoria else 'General' }}
+                            </span>
+                        </td>
+                        <td>
+                            {{ m.motivo }}
+                            {% if m.es_transferencia %}<i class="bi bi-arrow-left-right text-primary ms-1"></i>{% endif %}
+                        </td>
+                        <td class="text-end text-success fw-bold">
+                            {{ "${:,.2f}".format(m.monto) if m.tipo == 'INGRESO' else '-' }}
+                        </td>
+                        <td class="text-end text-danger fw-bold">
+                            {{ "${:,.2f}".format(m.monto) if m.tipo == 'EGRESO' else '-' }}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

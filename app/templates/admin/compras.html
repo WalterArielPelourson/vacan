@@ -1,0 +1,349 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h2 class="fw-bold"><i class="bi bi-box-arrow-in-down"></i> <span class="text-pink">Ingreso</span> de Mercadería</h2>
+        <p class="text-muted">Suma o resta stock, actualiza costos y define márgenes por sucursal.</p>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0">
+    <div class="card-header bg-dark p-0">
+        <ul class="nav nav-tabs border-0" id="comprasTab" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active fw-bold text-white py-3 px-4" data-bs-toggle="tab" data-bs-target="#manual">CARGA MANUAL</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link fw-bold text-white py-3 px-4" data-bs-toggle="tab" data-bs-target="#excel">IMPORTAR EXCEL</button>
+            </li>
+        </ul>
+    </div>
+    <div class="card-body p-4 text-dark">
+        <div class="tab-content">
+            
+            <!-- MODO MANUAL -->
+            <div class="tab-pane fade show active" id="manual">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="fw-bold small">1. DATOS DE CABECERA</label>
+                        
+                        <!-- TIPO DE COMPROBANTE (NUEVO PUNTO 3) -->
+                        <select id="m_tipo_comprobante" class="form-select mb-2 border-primary fw-bold" onchange="actualizarInterfazCompra(this.value)">
+                            <option value="FACTURA">FACTURA DE COMPRA (+ STOCK)</option>
+                            <option value="NC">NOTA DE CRÉDITO (- STOCK)</option>
+                            <option value="ND">NOTA DE DÉBITO (SÓLO DEUDA)</option>
+                        </select>
+                        <div id="aviso_nc" class="alert alert-warning p-2 mb-2 d-none small">
+                            <i class="bi bi-info-circle"></i> Se restarán unidades del inventario.
+                        </div>
+
+                        <select id="m_proveedor_id" class="form-select mb-2 border-dark">
+                            <option value="" disabled selected>Seleccione Proveedor...</option>
+                            {% for p in proveedores %}<option value="{{p.id}}">{{p.razon_social}}</option>{% endfor %}
+                        </select>
+
+                        <select id="m_sucursal_id" class="form-select mb-2 border-primary fw-bold">
+                            <option value="" disabled selected>¿A qué sucursal ingresa?</option>
+                            {% for s in sucursales %}
+                            <option value="{{ s.id }}">{{ s.nombre }}</option>
+                            {% endfor %}
+                        </select>
+
+                        <div class="row g-2 mb-2">
+                            <div class="col-7">
+                                <label class="x-small fw-bold">NRO FACTURA</label>
+                                <input type="text" id="m_nro_factura" class="form-control form-control-sm" placeholder="0001-0000...">
+                            </div>
+                            <div class="col-5">
+                                <label class="x-small fw-bold">PLAZO (DÍAS)</label>
+                                <input type="number" id="m_plazo_pago" class="form-control form-control-sm" value="30">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="fw-bold small text-pink">% GANANCIA SUGERIDA</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" id="m_margen_sugerido" class="form-control border-pink fw-bold text-center" value="30" step="0.1">
+                                <span class="input-group-text bg-pink text-white border-pink">%</span>
+                            </div>
+                        </div>
+                        
+                        <label class="fw-bold small">2. SELECCIONAR ARTÍCULO</label>
+                        <div class="d-grid mb-2">
+                            <button class="btn btn-sm btn-outline-primary fw-bold shadow-sm" onclick="modoItemNuevo()">+ ARTÍCULO NO REGISTRADO</button>
+                            <!-- NUEVO BOTÓN PARA AJUSTES DE SALDO -->
+                            <button class="btn btn-sm btn-outline-secondary fw-bold" onclick="modoAjusteLibre()">
+                                <i class="bi bi-calculator"></i> + AÑADIR AJUSTE DE SALDO (S/STOCK)
+                            </button>
+                        </div>
+                        <input type="text" id="prodSearch" class="form-control mb-2" placeholder="Filtrar stock local...">
+                        
+                        <div class="list-group shadow-sm" id="listaStock" style="max-height: 250px; overflow-y: auto;">
+                            {% for r in productos %}
+                            <button class="list-group-item list-group-item-action small product-item" 
+                                    data-info="{{ r.nombre|lower }} {{ r.sku|lower }}"
+                                    onclick="prepItem('{{r.id}}', '{{r.nombre}}', {{r.costo}})">
+                                {{r.nombre}} <small class="text-muted">({{ r.sucursal.nombre if r.sucursal else 'S/D' }})</small>
+                                <span class="badge bg-light text-dark border float-end">${{ "{:,.2f}".format(r.costo) }}</span>
+                            </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div class="col-md-8 border-start px-4">
+                        <div id="prepArea" class="bg-light p-3 rounded mb-3 d-none border-pink" style="border-left: 5px solid var(--vacan-pink);">
+                            <h6 id="prepNombre" class="fw-bold text-pink text-uppercase"></h6>
+                            <div class="row g-2">
+                                <div class="col-md-3">
+                                    <label class="x-small fw-bold">Cantidad</label>
+                                    <input type="number" id="prepCant" class="form-control" value="1" min="1">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="x-small fw-bold">Costo Unitario ($)</label>
+                                    <input type="number" step="0.01" id="prepCosto" class="form-control">
+                                </div>
+                                <div class="col-md-5 d-flex align-items-end">
+                                    <button class="btn btn-dark w-100 fw-bold" onclick="addToCart()">AÑADIR A LISTA</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <table class="table table-sm align-middle">
+                            <thead class="table-light">
+                                <tr><th>Producto</th><th class="text-center">Cant</th><th class="text-end">Costo</th><th class="text-end">Subtotal</th><th></th></tr>
+                            </thead>
+                            <tbody id="buyItems"></tbody>
+                        </table>
+
+                        <div class="bg-light p-3 rounded border mt-4">
+                            <div class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="x-small fw-bold">SUBTOTAL ITEMS ($)</label>
+                                    <input type="number" id="m_subtotal" class="form-control fw-bold" readonly value="0.00">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="x-small fw-bold">IVA (%)</label>
+                                    <select id="m_iva_porc" class="form-select" onchange="recalcularTotales()">
+                                        <option value="21">21%</option><option value="10.5">10.5%</option><option value="0">0%</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-5">
+                                    <label class="x-small fw-bold">PERCEPCIONES / OTROS ($)</label>
+                                    <input type="number" id="m_percepciones" class="form-control" value="0.00" step="0.01" oninput="recalcularTotales()">
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="d-flex justify-content-between h3 mb-0">
+                                <span class="fw-light">TOTAL COMPROBANTE:</span>
+                                <span id="buyTotal" class="text-pink fw-bold">$0.00</span>
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-pink w-100 fw-bold py-3 mt-3 shadow" onclick="saveManualPurchase()">
+                            <i class="bi bi-check-all"></i> CONFIRMAR OPERACIÓN Y ACTUALIZAR
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MODO EXCEL -->
+            <div class="tab-pane fade" id="excel">
+                <form action="{{ url_for('admin.procesar_compra') }}" method="POST" enctype="multipart/form-data" class="py-4 text-center">
+                    <div class="row justify-content-center text-start">
+                        <div class="col-md-8">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label class="fw-bold small">TIPO COMPROBANTE</label>
+                                    <select name="tipo_comprobante" class="form-select border-primary mb-3">
+                                        <option value="FACTURA">FACTURA DE COMPRA</option>
+                                        <option value="NC">NOTA DE CRÉDITO</option>
+                                        <option value="ND">NOTA DE DÉBITO</option>
+                                    </select>
+
+                                    <label class="fw-bold small">PROVEEDOR</label>
+                                    <select name="proveedor_id" class="form-select border-dark mb-3">
+                                        {% for p in proveedores %}<option value="{{p.id}}">{{p.razon_social}}</option>{% endfor %}
+                                    </select>
+
+                                    <label class="fw-bold small text-primary">SUCURSAL DE DESTINO</label>
+                                    <select name="sucursal_id" class="form-select mb-3 border-primary fw-bold" required>
+                                        <option value="" disabled selected>Seleccione Sucursal...</option>
+                                        {% for s in sucursales %}<option value="{{ s.id }}">{{ s.nombre }}</option>{% endfor %}
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="fw-bold small">NRO DE FACTURA</label>
+                                    <input type="text" name="nro_factura" class="form-control border-dark mb-3" required>
+                                    
+                                    <label class="fw-bold small">% GANANCIA SUGERIDA</label>
+                                    <input type="number" name="margen_sugerido" class="form-control border-pink mb-3" value="30">
+                                    
+                                    <label class="fw-bold small">PLAZO (DÍAS)</label>
+                                    <input type="number" name="plazo_pago" class="form-control border-dark mb-3" value="30">
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="fw-bold small">IVA (%)</label>
+                                    <select name="iva_porcentaje" class="form-select border-dark">
+                                        <option value="21">21%</option><option value="10.5">10.5%</option><option value="0">0%</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="fw-bold small">PERCEPCIONES ($)</label>
+                                    <input type="number" step="0.01" name="impuestos_monto" class="form-control border-dark" value="0.00">
+                                </div>
+                                <div class="col-md-12 mt-3">
+                                    <label class="fw-bold small">ARCHIVO EXCEL</label>
+                                    <input type="file" name="archivo_excel" class="form-control border-pink" required accept=".xlsx, .xls">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-pink btn-lg mt-4 px-5 fw-bold shadow">IMPORTAR Y PROCESAR</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let buyCart = [];
+let currentItem = null;
+
+function actualizarInterfazCompra(tipo) {
+    const aviso = document.getElementById('aviso_nc');
+    tipo === 'NC' ? aviso.classList.remove('d-none') : aviso.classList.add('d-none');
+}
+
+// Buscador
+document.getElementById('prodSearch').addEventListener('input', function(e) {
+    const text = e.target.value.toLowerCase();
+    document.querySelectorAll('.product-item').forEach(item => {
+        item.style.display = item.getAttribute('data-info').includes(text) ? '' : 'none';
+    });
+});
+
+function prepItem(id, nombre, costo) {
+    currentItem = {id, nombre, costo};
+    document.getElementById('prepArea').classList.remove('d-none');
+    document.getElementById('prepNombre').innerText = nombre;
+    document.getElementById('prepCosto').value = costo;
+    document.getElementById('prepCant').focus();
+}
+
+function modoItemNuevo() {
+    const nom = prompt("Nombre del nuevo artículo:");
+    if (!nom) return;
+    const sku = prompt("Asigne un SKU:");
+    if (!sku) return;
+    prepItem("NEW_" + sku, nom.toUpperCase(), 0);
+}
+
+function addToCart() {
+    const cant = parseInt(document.getElementById('prepCant').value);
+    const costo = parseFloat(document.getElementById('prepCosto').value);
+    if(isNaN(costo) || cant < 1) return alert("Monto o cantidad inválida");
+    buyCart.push({...currentItem, cantidad: cant, costo: costo});
+    renderBuyCart();
+    document.getElementById('prepArea').classList.add('d-none');
+}
+
+function renderBuyCart() {
+    const tbody = document.getElementById('buyItems');
+    tbody.innerHTML = '';
+    buyCart.forEach((item, index) => {
+        const sub = item.costo * item.cantidad;
+        tbody.innerHTML += `<tr><td><strong>${item.nombre}</strong></td><td class="text-center">${item.cantidad}</td><td class="text-end">$${item.costo.toFixed(2)}</td><td class="text-end fw-bold">$${sub.toFixed(2)}</td><td class="text-end"><button class="btn btn-sm text-danger" onclick="buyCart.splice(${index},1);renderBuyCart()">×</button></td></tr>`;
+    });
+    recalcularTotales();
+}
+
+function recalcularTotales() {
+    let subtotalItems = 0;
+    buyCart.forEach(item => { subtotalItems += (item.costo * item.cantidad); });
+    document.getElementById('m_subtotal').value = subtotalItems.toFixed(2);
+    const ivaPorc = parseFloat(document.getElementById('m_iva_porc').value) / 100;
+    const percepciones = parseFloat(document.getElementById('m_percepciones').value) || 0;
+    const totalFinal = subtotalItems * (1 + ivaPorc) + percepciones;
+    document.getElementById('buyTotal').innerText = `$${totalFinal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+}
+
+// Función para cargar conceptos que no mueven stock (Fletes, Intereses, Descuentos)
+function modoAjusteLibre() {
+    const motivos = [
+        "Fletes / Logística", 
+        "Intereses por Mora", 
+        "Diferencia de Precio", 
+        "Bonificación Especial", 
+        "Ajuste de Saldo",
+        "Garantía Aceptada (Solo Crédito)"
+    ];
+    
+    let menu = "Seleccione el motivo del ajuste:\n";
+    motivos.forEach((m, i) => menu += `${i+1}. ${m}\n`);
+    
+    const opcion = prompt(menu);
+    if (!opcion || isNaN(opcion) || opcion > motivos.length) return;
+    
+    const motivoSeleccionado = motivos[opcion - 1];
+    
+    // ID especial 'ADJ_' para que Python sepa que NO debe tocar el stock
+    currentItem = {
+        id: "ADJ_" + Date.now(), 
+        nombre: motivoSeleccionado.toUpperCase(), 
+        costo: 0
+    };
+    
+    document.getElementById('prepArea').classList.remove('d-none');
+    document.getElementById('prepNombre').innerText = "AJUSTE: " + currentItem.nombre;
+    document.getElementById('prepCosto').value = 0;
+    document.getElementById('prepCant').value = 1;
+    document.getElementById('prepCosto').focus();
+}
+
+async function saveManualPurchase() {
+    if(buyCart.length === 0) return alert("El listado está vacío");
+    const nroFact = document.getElementById('m_nro_factura').value;
+    const sucId = document.getElementById('m_sucursal_id').value;
+    const margen = document.getElementById('m_margen_sugerido').value;
+    const tipo = document.getElementById('m_tipo_comprobante').value;
+    
+    if(!nroFact || !sucId) return alert("Complete Nro Factura y Sucursal");
+
+    const data = {
+        tipo_comprobante: tipo,
+        proveedor_id: document.getElementById('m_proveedor_id').value,
+        sucursal_id: sucId,
+        nro_factura: nroFact,
+        margen_sugerido: parseFloat(margen),
+        plazo_pago: document.getElementById('m_plazo_pago').value,
+        subtotal: parseFloat(document.getElementById('m_subtotal').value),
+        iva_porcentaje: parseFloat(document.getElementById('m_iva_porc').value),
+        impuestos_monto: parseFloat(document.getElementById('m_percepciones').value) || 0,
+        items: buyCart
+    };
+
+    const response = await fetch('/admin/compras/procesar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+
+    if(response.ok) {
+        alert("Operación exitosa: " + tipo);
+        location.reload();
+    } else {
+        alert("Error al procesar la compra.");
+    }
+}
+</script>
+
+<style>
+    .nav-tabs .nav-link { color: rgba(255,255,255,0.6); border: none; transition: 0.3s; }
+    #comprasTab .nav-link.active[data-bs-target="#manual"] { background-color: #198754 !important; color: white !important; border-bottom: 4px solid #0f5132; }
+    #comprasTab .nav-link.active[data-bs-target="#excel"] { background-color: #0dcaf0 !important; color: #000 !important; border-bottom: 4px solid #0aa2c0; }
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; font-weight: bold; }
+    .x-small { font-size: 0.65rem; }
+    .italic { font-style: italic; }
+</style>
+{% endblock %}

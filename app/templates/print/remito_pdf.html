@@ -1,0 +1,13 @@
+<style>
+    body { font-family: sans-serif; }
+    .header { border-bottom: 2px solid #ff007f; padding-bottom: 10px; }
+    .monto { font-size: 24px; font-weight: bold; color: #ff007f; }
+</style>
+<div class="header">
+    <h1>VACAN RADIADORES</h1>
+    <p>RECIBO DE PAGO #{{ m.id }}</p>
+</div>
+<p>Fecha: {{ m.fecha.strftime('%d/%m/%Y') }}</p>
+<p>Recibimos de: <strong>{{ m.cliente.razon_social }}</strong></p>
+<p>Concepto: {{ m.descripcion }}</p>
+<div class="monto">TOTAL: ${{ "{:,.2f}".format(m.monto|abs) }}</div>

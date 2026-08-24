@@ -1,0 +1,69 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2 class="fw-bold mb-4">Gestión de <span class="text-pink">Ventas y Remitos</span></h2>
+
+<div class="card shadow border-0">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-dark">
+                <tr>
+                    <th>ID / Fecha</th>
+                    <th>Cliente</th>
+                    <th>Total</th>
+                    <th>Estado Fiscal</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in ventas %}
+                <tr>
+                    <td>
+                        #{{ v.id }}<br>
+                        <small class="text-muted">{{ v.fecha.strftime('%d/%m/%Y %H:%M') }}</small>
+                    </td>
+                    <td>{{ v.cliente.razon_social }}</td>
+                    <td class="fw-bold">${{ "{:,.2f}".format(v.total) }}</td>
+                    <td>
+                        {% if v.estado_arca == 'PENDIENTE' %}
+                            <span class="badge bg-warning text-dark">PENDIENTE FACTURA</span>
+                        {% else %}
+                            <span class="badge bg-success">FACTURADO</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        <div class="btn-group">
+                            <!-- BOTÓN FACTURAR -->
+                            {% if v.estado_arca == 'PENDIENTE' %}
+                            <a href="{{ url_for('inventory.marcar_facturado', id=v.id) }}" class="btn btn-sm btn-outline-primary">Marcar Facturado</a>
+                            {% endif %}
+                            
+                            <!-- BOTÓN EDITAR FECHA -->
+                            <button class="btn btn-sm btn-outline-dark" data-bs-toggle="modal" data-bs-target="#modalFecha{{ v.id }}">Fecha</button>
+                            
+                            <!-- BOTÓN REIMPRIMIR -->
+                            <a href="{{ url_for('inventory.imprimir_comprobante', id=v.id, tipo='remito') }}" target="_blank" class="btn btn-sm btn-vacan">Imprimir</a>
+                        </div>
+                    </td>
+                </tr>
+
+                <!-- MODAL EDITAR FECHA -->
+                <div class="modal fade" id="modalFecha{{ v.id }}" tabindex="-1">
+                    <div class="modal-dialog">
+                        <form action="{{ url_for('inventory.cambiar_fecha_venta', id=v.id) }}" method="POST" class="modal-content">
+                            <div class="modal-header"><h5>Cambiar Fecha Operación #{{ v.id }}</h5></div>
+                            <div class="modal-body">
+                                <label class="form-label">Nueva Fecha y Hora</label>
+                                <input type="datetime-local" name="nueva_fecha" class="form-control" value="{{ v.fecha.strftime('%Y-%m-%dT%H:%M') }}" required>
+                            </div>
+                            <div class="modal-footer">
+                                <button type="submit" class="btn btn-primary">Guardar Nueva Fecha</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

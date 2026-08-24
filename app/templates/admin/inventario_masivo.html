@@ -1,0 +1,47 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow-lg border-0">
+            <div class="card-header bg-dark text-white py-3">
+                <h4 class="mb-0 fw-bold"><i class="bi bi-layers text-pink"></i> Ajuste Masivo de <span class="text-pink">Inventario</span></h4>
+            </div>
+            <div class="card-body p-4 text-dark">
+                <div class="alert alert-warning">
+                    <h6 class="fw-bold"><i class="bi bi-exclamation-triangle"></i> IMPORTANTE:</h6>
+                    <p class="small mb-0">Esta herramienta **reemplaza** el stock actual por el que figure en el Excel. Ideal para inventarios físicos.</p>
+                </div>
+
+                <div class="bg-light p-3 rounded border mb-4">
+                    <h6 class="fw-bold small mb-2 text-uppercase">Formato de Excel Requerido:</h6>
+                    <table class="table table-sm table-bordered bg-white mb-0" style="font-size: 0.75rem;">
+                        <thead class="table-secondary">
+                            <tr><th>codigo</th><th>nombre</th><th>cantidad</th><th>costo</th><th>precio</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>857916</td><td>Radiador Hilux</td><td>10</td><td>45000</td><td>65000</td></tr>
+                            <tr><td>(vacio)</td><td>Tapa Universal</td><td>5</td><td>1200</td><td>1800</td></tr>
+                        </tbody>
+                    </table>
+                    <small class="text-muted d-block mt-2">* Si dejas el <strong>codigo</strong> vacío, se creará un SKU automático tipo <strong>VAC-000000</strong>.</small>
+                </div>
+
+                <form action="{{ url_for('admin.carga_masiva_stock') }}" method="POST" enctype="multipart/form-data">
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Seleccionar Archivo Excel (.xlsx)</label>
+                        <input type="file" name="archivo_excel" class="form-control form-control-lg border-pink" accept=".xlsx" required>
+                    </div>
+
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-pink btn-lg fw-bold shadow">
+                            IMPACTAR CAMBIOS EN SISTEMA
+                        </button>
+                        <a href="{{ url_for('inventory.index') }}" class="btn btn-outline-secondary">Cancelar</a>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

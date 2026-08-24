@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row justify-content-center align-items-center" style="min-height: 70vh;">
+    <div class="col-md-4">
+        <div class="card shadow-lg border-0">
+            <div class="card-header text-center py-4" style="background-color: var(--vacan-blue); border-bottom: 4px solid var(--vacan-pink);">
+                <img src="{{ url_for('static', filename='img/logo.jpg') }}" alt="Vacan Logo" style="height: 60px;" class="mb-2">
+                <h4 class="text-white fw-bold mb-0">ACCESO AL SISTEMA</h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Usuario</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-person"></i></span>
+                            <input type="text" name="username" class="form-control" placeholder="Tu usuario" required autofocus>
+                        </div>
+                    </div>
+                    <div class="mb-4">
+                        <label class="form-label fw-bold">Contraseña</label>
+                        <div class="input-group">
+                            <span class="input-group-text bg-light"><i class="bi bi-lock"></i></span>
+                            <input type="password" name="password" class="form-control" placeholder="••••••••" required>
+                        </div>
+                    </div>
+                    <div class="d-grid">
+                        <button type="submit" class="btn btn-vacan btn-lg py-2">INGRESAR</button>
+                    </div>
+                </form>
+            </div>
+            <div class="card-footer text-center bg-white border-0 pb-4">
+                <small class="text-muted">Vacan Radiadores &copy; 2024</small>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

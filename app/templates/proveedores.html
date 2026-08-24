@@ -1,0 +1,208 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 text-center">
+    <div class="col-12">
+        <h2 class="fw-bold text-dark"><span class="text-pink">Vacan</span> - Buscador Total de Proveedores</h2>
+        {% if repuesto %}
+            <p class="text-muted">Comparando equivalencias para: <strong>{{ repuesto.nombre }}</strong></p>
+        {% else %}
+            <p class="text-muted">Escribe el SKU una vez y abre los 7 catálogos en pestañas nuevas.</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- BUSCADOR UNIVERSAL -->
+<div class="row justify-content-center mb-5">
+    <div class="col-md-8">
+        <div class="card shadow-lg border-pink">
+            <div class="card-body p-4 text-center">
+                <div class="input-group input-group-lg">
+                    <span class="input-group-text bg-dark text-white border-0"><i class="bi bi-search"></i></span>
+                    <input type="text" id="skuSearch" class="form-control" 
+                           placeholder="Ingresar SKU o Código de Pieza..." 
+                           value="{{ repuesto.sku if repuesto else '' }}">
+                    <button class="btn btn-vacan px-4 fw-bold" type="button" onclick="abrirTodo()">BUSCAR EN TODO</button>
+                </div>
+                
+                {% if repuesto %}
+                <div class="mt-3 p-2 bg-light rounded border">
+                    <small class="text-dark fw-bold">Equivalencias detectadas en Vacan:</small><br>
+                    <small class="text-muted">
+                        OEM: {{ repuesto.codigo_oem or 'N/A' }} | 
+                        Denso: {{ repuesto.sku_denso or 'N/A' }} | 
+                        Cromosol: {{ repuesto.sku_cromosol or 'N/A' }}
+                    </small>
+                </div>
+                {% endif %}
+
+                <div class="alert alert-warning mt-3 mb-0 py-2 small">
+                    <i class="bi bi-exclamation-triangle-fill"></i> <strong>IMPORTANTE:</strong> Tu navegador bloqueará las pestañas. Debes elegir <strong>"Permitir siempre ventanas emergentes"</strong>.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    {% set provs = [
+        {'n': 'CROMOSOL', 'u': 'http://slaweb.cromosol.com/products/', 'd': 'Búsqueda Directa', 'id': 'cromosol'},
+        {'n': 'DENSO STORE', 'u': 'https://store.catalogodenso.com.ar/search/part/result?part_id=&mode=search_part&keyword=', 'd': 'Búsqueda Directa', 'id': 'denso'},
+        {'n': 'EXPOYER', 'u': 'https://www.expoyerweb.com.ar/catalogo', 'd': 'Acceso al Portal', 'id': 'expoyer'},
+        {'n': 'REPUESTOS JL', 'u': 'https://catalogo.repuestosjl.com.ar/catalogo/index.asp', 'd': 'Acceso al Portal', 'id': 'jl'},
+        {'n': 'FACOR ROSARIO', 'u': 'http://facorsarosario.no-ip.org/SISVISUAL.NET/APPWEB/#/pages/productos-descripcion', 'd': 'Acceso al Portal', 'id': 'facor'},
+        {'n': 'ALTRI', 'u': 'https://www.altri.com.ar/index.pl', 'd': 'Acceso al Portal', 'id': 'altri'},
+        {'n': 'ROSPARTS', 'u': 'https://www.rosparts.com.ar/page/Carrito', 'd': 'Acceso al Portal', 'id': 'rosparts'}
+    ] %}
+
+    {% for p in provs %}
+    <div class="col-md-3">
+        <div class="card h-100 shadow-sm border-0 provider-card">
+            <div class="card-body text-center p-3">
+                <h6 class="fw-bold mb-1">{{ p.n }}</h6>
+                <p class="x-small text-muted mb-2">{{ p.d }}</p>
+                <a href="{{ p.u }}" id="link-{{ p.id }}" target="_blank" class="btn btn-sm btn-outline-dark w-100">Abrir</a>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- LÓGICA NIVEL 3: EQUIVALENCIAS INTELIGENTES -->
+<script>
+// Si venimos de un repuesto específico, cargamos sus códigos aquí
+const equivalencias = {
+    oem: "{{ repuesto.codigo_oem if repuesto else '' }}",
+    cromosol: "{{ repuesto.sku_cromosol if repuesto else '' }}",
+    denso: "{{ repuesto.sku_denso if repuesto else '' }}",
+    expoyer: "{{ repuesto.sku_expoyer if repuesto else '' }}",
+    jl: "{{ repuesto.sku_repuestos_jl if repuesto else '' }}",
+    facor: "{{ repuesto.sku_facor if repuesto else '' }}",
+    altri: "{{ repuesto.sku_altri if repuesto else '' }}",
+    rosparts: "{{ repuesto.sku_rosparts if repuesto else '' }}"
+};
+
+function abrirTodo() {
+    const skuManual = document.getElementById('skuSearch').value.trim();
+    if (!skuManual) {
+        alert("Ingresa un código para buscar.");
+        return;
+    }
+
+    // La lógica inteligente:
+    // Si el usuario escribió el mismo SKU de Vacan, usamos las equivalencias de la DB.
+    // Si escribió algo distinto, usamos ese código para todos.
+    const usarEquivalencias = (skuManual === "{{ repuesto.sku if repuesto else '' }}");
+
+    const sitios = {
+        cromosol: `http://slaweb.cromosol.com/products/${usarEquivalencias ? (equivalencias.cromosol || equivalencias.oem || skuManual) : skuManual}`,
+        denso: `https://store.catalogodenso.com.ar/search/part/result?part_id=&mode=search_part&keyword=${usarEquivalencias ? (equivalencias.denso || equivalencias.oem || skuManual) : skuManual}`,
+        expoyer: `https://www.expoyerweb.com.ar/catalogo`, 
+        jl: `https://catalogo.repuestosjl.com.ar/catalogo/index.asp`,
+        facor: `http://facorsarosario.no-ip.org/SISVISUAL.NET/APPWEB/#/pages/productos-descripcion`,
+        altri: `https://www.altri.com.ar/index.pl`,
+        rosparts: `https://www.rosparts.com.ar/page/Carrito`
+    };
+
+    for (let key in sitios) {
+        window.open(sitios[key], '_blank');
+        let el = document.getElementById('link-' + key);
+        if(el) el.href = sitios[key];
+    }
+}
+
+document.getElementById("skuSearch").addEventListener("keypress", function(e) {
+    if (e.key === "Enter") abrirTodo();
+});
+</script>
+
+<style>
+    .border-pink { border: 2px solid var(--vacan-pink) !important; }
+    .x-small { font-size: 0.75rem; }
+    .provider-card { transition: 0.2s; border-bottom: 3px solid transparent !important; }
+    .provider-card:hover { transform: translateY(-3px); border-bottom: 3px solid var(--vacan-pink) !important; }
+</style>
+
+<!-- ... (resto del código de arriba) ... -->
+
+<script>
+    // --- DEFINICIÓN DE EQUIVALENCIAS (Nivel 3) ---
+    const equivalencias = {
+        oem: "{{ repuesto.codigo_oem if repuesto else '' }}",
+        cromosol: "{{ repuesto.sku_cromosol if repuesto else '' }}",
+        denso: "{{ repuesto.sku_denso if repuesto else '' }}",
+        expoyer: "{{ repuesto.sku_expoyer if repuesto else '' }}",
+        jl: "{{ repuesto.sku_repuestos_jl if repuesto else '' }}",
+        facor: "{{ repuesto.sku_facor if repuesto else '' }}",
+        altri: "{{ repuesto.sku_altri if repuesto else '' }}",
+        rosparts: "{{ repuesto.sku_rosparts if repuesto else '' }}"
+    };
+
+    function abrirTodo() {
+        const skuManual = document.getElementById('skuSearch').value.trim();
+        if (!skuManual) return;
+
+        // Determinamos si usamos los códigos auxiliares de la DB o el texto manual
+        // Si el texto en el buscador coincide con el SKU de Vacan, usamos equivalencias.
+        const usarEquivalencias = (skuManual === "{{ repuesto.sku if repuesto else '' }}");
+
+        const sitios = {
+            cromosol: `http://slaweb.cromosol.com/products/${usarEquivalencias ? (equivalencias.cromosol || equivalencias.oem || skuManual) : skuManual}`,
+            denso: `https://store.catalogodenso.com.ar/search/part/result?part_id=&mode=search_part&keyword=${usarEquivalencias ? (equivalencias.denso || equivalencias.oem || skuManual) : skuManual}`,
+            jl: `https://catalogo.repuestosjl.com.ar/catalogo/index.asp`,
+            facor: `http://facorsarosario.no-ip.org/SISVISUAL.NET/APPWEB/#/pages/productos-descripcion`,
+            altri: `https://www.altri.com.ar/index.pl`,
+            rosparts: `https://www.rosparts.com.ar/page/Carrito`,
+            expoyer: `https://www.expoyerweb.com.ar/catalogo`
+        };
+
+        // Apertura masiva de pestañas
+        for (let key in sitios) {
+            window.open(sitios[key], '_blank');
+            // Actualizamos los links de los botones individuales por si el usuario quiere volver a entrar
+            let el = document.getElementById('link-' + key);
+            if(el) el.href = sitios[key];
+        }
+    }
+
+    // --- PUNTO 3: EJECUCIÓN AUTOMÁTICA AL CARGAR ---
+    window.onload = function() {
+        // Caso A: Venimos de un repuesto que SI tenemos (Lupa)
+        {% if repuesto %}
+            console.log("Vacan detectó un repuesto específico. Iniciando comparación...");
+            setTimeout(function() {
+                abrirTodo();
+            }, 1000); 
+
+        // Caso B: Venimos de una búsqueda que NO tenemos en stock (Salto automático)
+        {% elif query_manual %}
+            console.log("Búsqueda externa automática para: {{ query_manual }}");
+            document.getElementById('skuSearch').value = "{{ query_manual }}";
+            setTimeout(function() {
+                abrirTodo();
+            }, 1000);
+        {% endif %}
+    };
+
+    // Enter para buscar manualmente desde el cuadro
+    document.getElementById("skuSearch").addEventListener("keypress", function(e) {
+        if (e.key === "Enter") {
+            e.preventDefault();
+            abrirTodo();
+        }
+    });
+</script>
+
+<style>
+    .border-pink { border: 2px solid var(--vacan-pink) !important; }
+    .x-small { font-size: 0.75rem; }
+    .provider-card { transition: 0.2s; border-bottom: 3px solid transparent !important; }
+    .provider-card:hover { transform: translateY(-3px); border-bottom: 3px solid var(--vacan-pink) !important; }
+    /* Estilo para el input de búsqueda resaltado */
+    #skuSearch:focus {
+        border-color: var(--vacan-pink);
+        box-shadow: 0 0 0 0.25 mil rem rgba(255, 0, 127, 0.25);
+    }
+</style>
+
+{% endblock %}

@@ -1,0 +1,236 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <!--<div class="col-md-4">
+        <h2 class="fw-bold" style="color: var(--vacan-blue);"><i class="bi bi-box-seam"></i> Stock <span class="text-pink">Vacan</span></h2>
+    </div>-->
+
+    <style>
+        /* Ajustes para maximizar el espacio en pantalla */
+        .container-fluid { padding-left: 10px; padding-right: 10px; }
+        
+        /* Tipografía compacta profesional */
+        table { font-size: 0.78rem !important; }
+        .badge { font-size: 0.65rem !important; padding: 0.35em 0.5em !important; }
+        
+        /* Eliminar espacios desperdiciados */
+        .card-body { padding: 0 !important; }
+        .table td, .table th { padding: 0.4rem 0.3rem !important; border-bottom: 1px solid #e2e8f0; }
+
+        /* Estilo de precios */
+        .price-col { white-space: nowrap; width: 85px; }
+        .text-xs { font-size: 0.65rem; display: block; line-height: 1; }
+        
+        /* Botones de acción ultra-pequeños */
+        .btn-xs { padding: 2px 5px; font-size: 0.7rem; line-height: 1.2; }
+        
+        /* Fix para que el texto largo no rompa la pantalla */
+        .text-truncate-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            line-height: 1.1;
+        }
+    </style>
+
+
+    <!-- BUSCADOR PRINCIPAL -->
+    <div class="col-md-5">
+        <form action="{{ url_for('inventory.buscar') }}" method="GET" class="d-flex shadow-sm">
+            <input class="form-control me-2 border-dark" type="search" name="q" 
+                placeholder="Nombre, marca o cualquier código..." value="{{ busqueda or '' }}">
+            <button class="btn btn-dark fw-bold px-4" type="submit">BUSCAR</button>
+        </form>
+    </div>
+
+    {% if current_user.rol in ['admin', 'superadmin'] %}
+    <div class="col-md-7 text-md-end">
+        <a href="{{ url_for('inventory.nuevo_repuesto') }}" class="btn btn-vacan shadow-sm fw-bold text-uppercase">
+            <i class="bi bi-plus-circle"></i> Nuevo Repuesto
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- BARRA DE FILTROS AVANZADOS -->
+<div class="card mb-4 border-0 shadow-sm bg-dark text-white">
+    <div class="card-body py-2">
+        <form action="{{ url_for('inventory.index') }}" method="GET" class="row g-4 align-items-end">
+            <div class="col-md-3">
+                <label class="x-small fw-bold text-pink">RUBRO</label>
+                <select name="rubro" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
+                    <option value="">-- Todos los Rubros --</option>
+                    {% for rub in rubros_list %}
+                    <option value="{{ rub }}" {% if request.args.get('rubro') == rub %}selected{% endif %}>{{ rub }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="x-small fw-bold text-pink">SUB-RUBRO</label>
+                <select name="subrubro" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
+                    <option value="">-- Todos los Subrubros --</option>
+                    {% for sub in subrubros_list %}
+                    <option value="{{ sub }}" {% if request.args.get('subrubro') == sub %}selected{% endif %}>{{ sub }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="x-small fw-bold text-pink">SUCURSAL</label>
+                <select name="sucursal_id" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
+                    <option value="">-- Todas las Sucursales --</option>
+                    {% for suc in sucursales_list %}
+                    <option value="{{ suc.id }}" {% if request.args.get('sucursal_id')|int == suc.id %}selected{% endif %}>{{ suc.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <!-- NUEVO SELECTOR DE ESTADO DE STOCK -->
+            <div class="col-md-3">
+                <label class="text-pink fw-bold" style="font-size: 0.6rem;">DISPONIBILIDAD</label>
+                <select name="stock_status" class="form-select form-select-sm bg-light" onchange="this.form.submit()">
+                    <option value="">-- Mostrar Todo --</option>
+                    <option value="disponible" {% if request.args.get('stock_status') == 'disponible' %}selected{% endif %}>Con Stock (Mercadería en estante)</option>
+                    <option value="agotado" {% if request.args.get('stock_status') == 'agotado' %}selected{% endif %}>Sin Stock (Faltantes / En Cero)</option>
+                </select>
+            </div>
+            <div class="col-md-3 text-end">
+                <a href="{{ url_for('inventory.index') }}" class="btn btn-sm btn-outline-light w-100 fw-bold">
+                    <i class="bi bi-filter-left"></i> LIMPIAR FILTROS
+                </a>
+            </div>
+
+           
+
+        </form>
+    </div>
+</div>
+
+<!-- PANEL DE BÚSQUEDA EXTERNA -->
+{% if busqueda %}
+<div class="card border-info mb-4 shadow-sm" style="background-color: #f0faff;">
+    <div class="card-body d-flex justify-content-between align-items-center py-2">
+        <div>
+            <i class="bi bi-globe2 text-info fs-5 me-2"></i> 
+            <span class="fw-bold text-dark">¿Consultar "{{ busqueda }}" en proveedores externos?</span>
+        </div>
+        <button class="btn btn-sm btn-info text-white fw-bold px-4 shadow-sm" onclick="buscarAfuera('{{ busqueda }}')">
+            <i class="bi bi-box-arrow-up-right"></i> CONSULTAR TODO AFUERA
+        </button>
+    </div>
+</div>
+{% endif %}
+
+<div class="card shadow-sm border-0">
+    <div class="card-header card-header-vacan d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 text-uppercase small fw-bold">Listado de Inventario Detallado</h5>
+        <small class="text-white-50">Total: {{ repuestos|length }} ítems</small>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr style="font-size: 0.75rem;" class="text-uppercase text-muted">
+                        <th style="width: 7%;">SKU Prov.</th>
+                        <th style="width: 7%;">Maestro</th>
+                        <th style="width: 12%;">Proveedor</th>
+                        <th style="width: 20%;">Descripción / Rubro</th>
+                        <th style="width: 10%;">Sucursal</th>
+                        <th style="width: 6%;" class="text-center">Stock</th>
+                        <th style="width: 9%;" class="text-end">Costo s/IVA</th>
+                        <th style="width: 8%;" class="text-end text-danger">Costo c/IVA</th> <!-- NUEVA -->
+                        <th style="width: 9%;" class="text-end">Venta s/IVA</th>
+                        <th style="width: 10%;" class="text-end text-primary">Venta c/IVA</th>
+                        <th class="text-center" style="width: 10%;">Acciones</th> 
+                    </tr>
+                </thead>
+                <tbody style="font-size: 0.82rem;">
+                    {% for r in repuestos %}
+                    <tr>
+                        <td><span class="badge bg-dark w-100">{{ r.sku }}</span></td>
+                        <td><span class="badge bg-secondary w-100">{{ r.sku_vacan or '---' }}</span></td>
+                        
+                        <!-- COLUMNA PROVEEDOR -->
+                        <td>
+                            <strong class="text-dark">{{ r.proveedor.razon_social if r.proveedor else 'S/D' }}</strong>
+                        </td>
+
+                        <td>
+                            <strong class="text-dark">{{ r.nombre }}</strong><br>
+                            <span class="text-pink fw-bold" style="font-size: 0.68rem;">
+                                {{ r.rubro or 'General' }} > {{ r.subrubro or 'General' }}
+                            </span>
+                            {% if r.codigo_oem %}<br><small class="text-muted" style="font-size: 0.65rem;">OEM: {{ r.codigo_oem }}</small>{% endif %}
+                        </td>
+
+                        <td>
+                            <span class="small fw-bold">
+                                <i class="bi bi-geo-alt text-danger"></i> {{ r.sucursal.nombre if r.sucursal else 'S/D' }}
+                            </span>
+                        </td>
+
+                        <td class="text-center">
+                            <span class="badge {% if r.stock > 5 %}bg-success{% elif r.stock > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %} px-2 py-1">
+                                {{ r.stock }}
+                            </span>
+                        </td>
+                        
+                        <!-- COLUMNA COSTO -->
+                        <td class="text-end fw-bold text-danger">
+                            ${{ "{:,.2f}".format(r.costo or 0) }}
+                        </td>
+                         <!-- COLUMNA COSTO con IVA-->
+                        <td class="text-end fw-bold text-danger">${{ "{:,.2f}".format((r.costo or 0) * 1.21) }}</td>
+
+                        <!-- PRECIO SIN IVA -->
+                        <td class="text-end fw-bold text-muted">${{ "{:,.2f}".format(r.precio or 0) }}</td>
+
+                        <!-- PRECIO CON IVA -->
+                        <td class="text-end fw-bold text-primary">${{ "{:,.2f}".format((r.precio or 0) * 1.21) }}</td>
+                        
+                        <td class="text-center">
+                            <div class="btn-group">
+                                <a href="{{ url_for('inventory.catalogos_proveedores', id=r.id) }}" class="btn btn-xs btn-info text-white" title="Comparar"><i class="bi bi-search"></i></a>
+                                <a href="{{ url_for('inventory.historial_precios', id=r.id) }}" class="btn btn-xs btn-dark" title="Historial"><i class="bi bi-clock-history"></i></a>
+                                {% if current_user.rol in ['admin', 'superadmin'] %}
+                                    <a href="{{ url_for('inventory.editar_repuesto', id=r.id) }}" class="btn btn-xs btn-primary" title="Editar"><i class="bi bi-pencil"></i></a>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="10" class="text-center py-5">No se encontraron artículos con estos criterios.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+function buscarAfuera(query) {
+    if (!query) return;
+    const sitios = [
+        `https://store.catalogodenso.com.ar/search/part/result?part_id=&mode=search_part&keyword=${query}`,
+        `http://slaweb.cromosol.com/products/${query}`,
+        `https://catalogo.repuestosjl.com.ar/catalogo/index.asp`,
+        `http://facorsarosario.no-ip.org/SISVISUAL.NET/APPWEB/#/pages/productos-descripcion`,
+        `https://www.altri.com.ar/index.pl`,
+        `https://www.rosparts.com.ar/page/Carrito`,
+        `https://www.expoyerweb.com.ar/catalogo`
+    ];
+    sitios.forEach(url => window.open(url, '_blank'));
+}
+</script>
+
+<style>
+    .btn-vacan { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-vacan:hover { background-color: #d4006a; color: white; }
+    .badge { font-weight: 500; font-size: 0.65rem; }
+    .x-small { font-size: 0.65rem; letter-spacing: 0.5px; }
+    .btn-xs { padding: 0.2rem 0.4rem; font-size: 0.8rem; }
+    .table-hover tbody tr:hover { background-color: rgba(255, 0, 127, 0.02); }
+</style>
+{% endblock %}

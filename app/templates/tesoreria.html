@@ -1,0 +1,213 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <div class="col-md-5">
+        <!-- He cambiado el título para que confirmes que es la versión nueva -->
+        <h2 class="fw-bold"><i class="bi bi-bank text-pink"></i> CAJAS Y MOVIMIENTOS</h2>
+        <p class="text-muted">Versión de Tesorería Actualizada</p>
+    </div>
+    
+    <div class="col-md-7 text-md-end">
+        <!-- BOTONES SEPARADOS PARA ASEGURAR VISIBILIDAD -->
+        <button class="btn btn-outline-dark fw-bold shadow-sm px-3 mb-1" data-bs-toggle="modal" data-bs-target="#modalTransferencia">
+            <i class="bi bi-arrow-left-right"></i> TRASPASO ENTRE CAJAS
+        </button>
+        
+        <button class="btn btn-dark fw-bold shadow-sm px-3 mb-1" data-bs-toggle="modal" data-bs-target="#modalMovimientoManual">
+            <i class="bi bi-plus-circle"></i> NUEVO MOVIMIENTO (GASTO/INGRESO)
+        </button>
+        
+        <button class="btn btn-pink fw-bold shadow-sm px-3 mb-1" data-bs-toggle="modal" data-bs-target="#modalNuevaCaja">
+            + HABILITAR CUENTA O CAJA
+        </button>
+    </div>
+</div>
+
+<!-- PANEL DE RESUMEN -->
+<div class="row mb-4">
+    <div class="col-md-6 mb-2">
+        <div class="card bg-dark text-white border-0 shadow-sm">
+            <div class="card-body p-4 d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-white-50 mb-0 small">EFECTIVO EN CAJAS</h6>
+                    <h2 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(total_efectivo or 0) }}</h2>
+                </div>
+                <i class="bi bi-cash-stack fs-1 opacity-25"></i>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-2">
+        <div class="card bg-dark text-white border-0 shadow-sm border-start border-pink border-5">
+            <div class="card-body p-4 d-flex justify-content-between align-items-center">
+                <div>
+                    <h6 class="text-white-50 mb-0 small">BANCOS / VIRTUAL</h6>
+                    <h2 class="fw-bold mb-0 text-info">${{ "{:,.2f}".format(total_virtual or 0) }}</h2>
+                </div>
+                <i class="bi bi-credit-card fs-1 opacity-25"></i>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- LISTADO DE CAJAS -->
+<div class="row">
+    <div class="col-md-6 mb-4">
+        <div class="card shadow border-0">
+            <div class="card-header bg-dark text-white fw-bold">CAJAS DE SUCURSALES</div>
+            <ul class="list-group list-group-flush">
+                {% for c in fisicas %}
+                <li class="list-group-item d-flex justify-content-between align-items-center py-3">
+                    <div>
+                        <h5 class="mb-0 fw-bold">{{ c.nombre }}</h5>
+                        <small class="text-muted">Efectivo para el día</small>
+                    </div>
+                    <div class="text-end">
+                        <h4 class="fw-bold text-success mb-0">${{ "{:,.2f}".format(c.saldo_actual) }}</h4>
+                        <a href="{{ url_for('admin.detalle_caja', id=c.id) }}" class="small text-decoration-none">Ver Movimientos →</a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+    <div class="col-md-6 mb-4">
+        <div class="card shadow border-0">
+            <div class="card-header bg-pink text-white fw-bold">CUENTAS VIRTUALES</div>
+            <ul class="list-group list-group-flush">
+                {% for v in virtuales %}
+                <li class="list-group-item d-flex justify-content-between align-items-center py-3">
+                    <div>
+                        <h5 class="mb-0 fw-bold">{{ v.nombre }}</h5>
+                        <small class="text-muted">Bancos y Billeteras</small>
+                    </div>
+                    <div class="text-end">
+                        <h4 class="fw-bold text-primary mb-0">${{ "{:,.2f}".format(v.saldo_actual) }}</h4>
+                        <a href="{{ url_for('admin.detalle_caja', id=v.id) }}" class="small text-decoration-none text-pink">Ver Movimientos →</a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- MODALES (FUERA DE TODO PARA QUE FUNCIONEN) -->
+
+<!-- 1. NUEVO MOVIMIENTO -->
+<div class="modal fade" id="modalMovimientoManual" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.movimiento_manual') }}" method="POST" class="modal-content border-0">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Registrar Ingreso / Egreso Manual</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">1. Caja a afectar</label>
+                    <select name="caja_id" class="form-select border-dark" required>
+                        {% for c in fisicas + virtuales %}
+                        <option value="{{ c.id }}">{{ c.nombre }} (Saldo: ${{ "{:,.2f}".format(c.saldo_actual) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <label class="form-label fw-bold">2. Tipo</label>
+                        <select name="tipo" class="form-select border-dark">
+                            <option value="EGRESO">EGRESO (Gasto)</option>
+                            <option value="INGRESO">INGRESO (Entrada)</option>
+                        </select>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <label class="form-label fw-bold">3. Monto ($)</label>
+                        <input type="number" step="0.01" name="monto" class="form-control border-dark" required>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="small fw-bold">4. Sub-Rubro (Categoría)</label>
+                    <select name="categoria_id" class="form-select border-dark" required>
+                        <option value="" disabled selected>Seleccione una categoría...</option>
+                        {% for cat in categorias %}
+                            <option value="{{ cat.id }}">[{{ cat.tipo }}] {{ cat.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-1">
+                    <label class="form-label fw-bold">5. Concepto</label>
+                    <input type="text" name="motivo" class="form-control border-dark" placeholder="Ej: Pago de flete" required>
+                </div>
+            </div>
+            <div class="modal-footer bg-light"><button type="submit" class="btn btn-pink w-100 py-2">REGISTRAR</button></div>
+        </form>
+    </div>
+</div>
+
+<!-- 2. TRASPASO -->
+<div class="modal fade" id="modalTransferencia" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.transferencia_fondos') }}" method="POST" class="modal-content border-0">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Traspaso entre Cuentas</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-danger">ORIGEN (Sale dinero)</label>
+                    <select name="origen_id" class="form-select" required>
+                        {% for c in fisicas + virtuales %}
+                        <option value="{{ c.id }}">{{ c.nombre }} (${{ "{:,.2f}".format(c.saldo_actual) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-success">DESTINO (Entra dinero)</label>
+                    <select name="destino_id" class="form-select" required>
+                        {% for c in fisicas + virtuales %}
+                        <option value="{{ c.id }}">{{ c.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">MONTO A TRASPASAR ($)</label>
+                    <input type="number" step="0.01" name="monto" class="form-control form-control-lg border-primary" required>
+                </div>
+            </div>
+            <div class="modal-footer bg-light"><button type="submit" class="btn btn-primary w-100">EJECUTAR TRASPASO</button></div>
+        </form>
+    </div>
+</div>
+
+<!-- 3. NUEVA CAJA -->
+<div class="modal fade" id="modalNuevaCaja" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.nueva_caja') }}" method="POST" class="modal-content border-0">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Habilitar Nueva Cuenta/Caja</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark p-4">
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Nombre de la Cuenta</label>
+                    <input type="text" name="nombre" class="form-control" placeholder="Ej: Banco Nación" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Tipo</label>
+                    <select name="tipo" class="form-select">
+                        <option value="FISICA">CAJA FÍSICA (Efectivo)</option>
+                        <option value="VIRTUAL">CUENTA VIRTUAL / BANCO</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer bg-light"><button type="submit" class="btn btn-pink w-100 py-2">CREAR CUENTA</button></div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-pink:hover { background-color: #d4006a; color: white; }
+    .text-pink { color: var(--vacan-pink) !important; }
+    .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 12px; overflow: hidden; }
+</style>
+{% endblock %}

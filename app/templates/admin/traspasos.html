@@ -1,0 +1,220 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-6">
+        <h2 class="fw-bold"><i class="bi bi-arrow-left-right text-pink"></i> Movimiento de <span class="text-pink">Mercadería</span></h2>
+        <p class="text-muted small">Transfiere stock entre sucursales de forma segura.</p>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- COLUMNA IZQUIERDA: CONFIGURACIÓN -->
+    <div class="col-md-4">
+        <div class="card shadow border-0 mb-3">
+            <div class="card-header bg-dark text-white fw-bold">1. RUTA DEL MOVIMIENTO</div>
+            <div class="card-body">
+                <label class="small fw-bold">DESDE (Origen)</label>
+                <select id="t_origen" class="form-select mb-3 border-danger shadow-sm">
+                    <option value="" disabled selected>Seleccione Origen...</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}">{{ s.nombre }}</option>
+                    {% endfor %}
+                </select>
+
+                <label class="small fw-bold">HACIA (Destino)</label>
+                <select id="t_destino" class="form-select mb-3 border-success shadow-sm">
+                    <option value="" disabled selected>Seleccione Destino...</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}">{{ s.nombre }}</option>
+                    {% endfor %}
+                </select>
+                
+                <label class="small fw-bold">OBSERVACIONES</label>
+                <textarea id="t_obs" class="form-control mb-2" rows="2" placeholder="Notas internas del traspaso..."></textarea>
+            </div>
+        </div>
+
+        <div class="card shadow border-0">
+            <div class="card-header bg-secondary text-white fw-bold">2. BUSCAR PRODUCTO EN ORIGEN</div>
+            <div class="card-body p-2">
+                <!-- INPUT QUE DISPARA LA BÚSQUEDA DINÁMICA -->
+                <input type="text" id="t_search" class="form-control form-control-sm mb-2 border-primary" 
+                       placeholder="Escribe marca, modelo o SKU..." oninput="tipearBusqueda(this.value)">
+                
+                <div id="t_stock_list" class="list-group" style="max-height: 400px; overflow-y: auto;">
+                    <p class="text-center text-muted small p-4">Selecciona origen y escribe arriba para ver stock disponible.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COLUMNA DERECHA: CARRITO DE TRASPASO -->
+    <div class="col-md-8">
+        <div class="card shadow border-0 h-100">
+            <div class="card-header bg-pink text-white fw-bold">3. LISTADO PARA TRASPASAR</div>
+            <div class="card-body d-flex flex-column">
+                <div class="table-responsive flex-grow-1">
+                    <table class="table table-hover align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Radiador / SKU</th>
+                                <th>Disponible</th>
+                                <th width="120px">Cantidad a Mover</th>
+                                <th class="text-end">Acción</th>
+                            </tr>
+                        </thead>
+                        <tbody id="t_items">
+                            <!-- Se llena con JS -->
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="d-grid mt-4">
+                    <button class="btn btn-pink btn-lg fw-bold shadow py-3" onclick="finalizarTraspaso()">
+                        <i class="bi bi-check-all"></i> CONFIRMAR TRASPASO DE STOCK
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let t_cart = [];
+let timeoutBusqueda = null;
+
+// FUNCIÓN PARA EVITAR SOBRECARGA (Debounce)
+function tipearBusqueda(valor) {
+    clearTimeout(timeoutBusqueda);
+    const sucId = document.getElementById('t_origen').value;
+    
+    if(!sucId) {
+        alert("Primero debe seleccionar una sucursal de origen.");
+        document.getElementById('t_search').value = "";
+        return;
+    }
+
+    if (valor.length >= 2) {
+        timeoutBusqueda = setTimeout(() => {
+            ejecutarBusquedaFiltrada(sucId, valor);
+        }, 300); // Espera 300ms antes de llamar al servidor
+    }
+}
+
+// LLAMADA A LA API FILTRADA
+async function ejecutarBusquedaFiltrada(sucId, texto) {
+    const list = document.getElementById('t_stock_list');
+    list.innerHTML = '<div class="text-center p-3"><div class="spinner-border spinner-border-sm text-pink"></div> Buscando...</div>';
+
+    try {
+        // Usamos la nueva ruta que acepta el parámetro 'q'
+        const res = await fetch(`/admin/traspasos/obtener-stock/${sucId}?q=${texto}`);
+        const productos = await res.json();
+        
+        list.innerHTML = '';
+        if (productos.length === 0) {
+            list.innerHTML = '<p class="text-center text-muted small p-3">No se encontraron productos con stock en este local.</p>';
+            return;
+        }
+
+        productos.forEach(p => {
+            const btn = document.createElement('button');
+            btn.className = "list-group-item list-group-item-action small d-flex justify-content-between align-items-center";
+            btn.innerHTML = `
+                <div>
+                    <strong class="text-dark">${p.nombre}</strong><br>
+                    <small class="text-muted">SKU: ${p.sku}</small>
+                </div>
+                <span class="badge bg-dark rounded-pill">${p.stock} u.</span>
+            `;
+            btn.onclick = () => addTraspaso(p.id, p.nombre, p.stock, p.sku);
+            list.appendChild(btn);
+        });
+    } catch (e) {
+        list.innerHTML = '<p class="text-danger small p-3">Error de conexión.</p>';
+    }
+}
+
+function addTraspaso(id, nombre, stock, sku) {
+    // Si ya está en la lista, no lo agregamos de nuevo
+    if(t_cart.find(i => i.id === id)) return;
+    
+    t_cart.push({id, nombre, stock, sku, cantidad: 1});
+    renderTTable();
+}
+
+function renderTTable() {
+    const tbody = document.getElementById('t_items');
+    tbody.innerHTML = '';
+    t_cart.forEach((item, index) => {
+        tbody.innerHTML += `
+            <tr class="border-bottom">
+                <td>
+                    <strong>${item.nombre}</strong><br>
+                    <small class="text-muted">${item.sku}</small>
+                </td>
+                <td class="text-muted">${item.stock} uds</td>
+                <td>
+                    <input type="number" class="form-control form-control-sm border-dark fw-bold" 
+                           value="${item.cantidad}" min="1" max="${item.stock}"
+                           onchange="actualizarCantidad(${index}, this.value)">
+                </td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-danger border-0" onclick="t_cart.splice(${index},1);renderTTable()">
+                        <i class="bi bi-trash"></i>
+                    </button>
+                </td>
+            </tr>`;
+    });
+}
+
+function actualizarCantidad(index, val) {
+    const maxVal = t_cart[index].stock;
+    if (parseInt(val) > maxVal) {
+        alert("No puedes traspasar más de lo que hay disponible (" + maxVal + ")");
+        t_cart[index].cantidad = maxVal;
+    } else {
+        t_cart[index].cantidad = parseInt(val);
+    }
+    renderTTable();
+}
+
+async function finalizarTraspaso() {
+    const origen = document.getElementById('t_origen').value;
+    const destino = document.getElementById('t_destino').value;
+    
+    if(!origen || !destino) return alert("Debe seleccionar origen y destino.");
+    if(origen === destino) return alert("Origen y destino no pueden ser la misma sucursal.");
+    if(t_cart.length === 0) return alert("El listado de traspaso está vacío.");
+
+    const data = {
+        origen_id: origen,
+        destino_id: destino,
+        observaciones: document.getElementById('t_obs').value,
+        items: t_cart
+    };
+
+    const res = await fetch('/admin/traspasos/procesar', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(data)
+    });
+
+    if(res.ok) {
+        alert("¡Traspaso de mercadería realizado exitosamente!");
+        location.reload();
+    } else {
+        const err = await res.json();
+        alert("Error al procesar: " + err.message);
+    }
+}
+</script>
+
+<style>
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-pink:hover { background-color: #d4006a; color: white; transform: translateY(-2px); }
+    .list-group-item-action:hover { background-color: rgba(255, 0, 127, 0.05); }
+    .border-pink { border: 2px solid var(--vacan-pink) !important; }
+</style>
+{% endblock %}

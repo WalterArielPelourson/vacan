@@ -1,0 +1,145 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <div class="col-md-4">
+        <h2 class="fw-bold"><i class="bi bi-exclamation-octagon text-danger"></i> Control de <span class="text-pink">Morosidad</span></h2>
+        <p class="text-muted">Listado de comprobantes con saldo pendiente.</p>
+    </div>
+    
+    <!-- BUSCADOR INTELIGENTE (NUEVO) -->
+    <div class="col-md-4">
+        <div class="input-group shadow-sm">
+            <span class="input-group-text bg-white border-dark"><i class="bi bi-search text-pink"></i></span>
+            <input type="text" id="moraSearch" class="form-control border-dark" placeholder="Filtrar por Cliente o CUIT...">
+        </div>
+    </div>
+
+    <div class="col-md-4 text-md-end">
+        <div class="btn-group shadow-sm">
+            <a href="{{ url_for('admin.reporte_morosidad', filtro='vencidas') }}" 
+               class="btn {{ 'btn-danger' if filtro == 'vencidas' else 'btn-outline-danger' }} fw-bold px-3">
+               VENCIDAS + de 30 Dias
+            </a>
+            <a href="{{ url_for('admin.reporte_morosidad', filtro='proximas') }}" 
+               class="btn {{ 'btn-warning' if filtro == 'proximas' else 'btn-outline-warning text-dark' }} fw-bold px-3">
+               A VENCER - de 30 Dias
+            </a>
+        </div>
+    </div>
+</div>
+
+<!-- TARJETAS DE RESUMEN -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card bg-dark text-white border-0 shadow-sm p-3">
+            <h6 class="text-white-50 small text-uppercase fw-bold mb-1">Deuda en este Filtro</h6>
+            <h2 class="fw-bold mb-0 text-pink">${{ "{:,.2f}".format(total) }}</h2>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-white border-0 shadow-sm p-3 border-start border-primary border-5">
+            <h6 class="text-muted small text-uppercase fw-bold">Facturas Listadas</h6>
+            <h2 class="fw-bold mb-0 text-dark" id="countMora">{{ reporte|length }}</h2>
+        </div>
+    </div>
+</div>
+
+<!-- TABLA DE DETALLE -->
+<div class="card shadow border-0">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light border-bottom">
+                    <tr>
+                        <th>Cliente / Contacto</th>
+                        <th>Comprobante</th>
+                        <th>Fecha Emisión</th>
+                        <th class="text-center">Estado de Plazo</th>
+                        <th class="text-end">Importe Total</th>
+                        <th class="text-end">Saldo Pendiente</th>
+                        <th class="text-center">Acción</th>
+                    </tr>
+                </thead>
+                <tbody id="tableMora">
+                    {% for item in reporte %}
+                    <!-- Agregamos clase 'mora-row' y data-info para el filtro inteligente -->
+                    <tr class="mora-row {% if filtro == 'vencidas' %} table-danger {% else %} table-warning {% endif %}" 
+                        data-info="{{ item.cliente.razon_social|lower }} {{ item.cliente.cuit|replace('-', '') if item.cliente.cuit else '' }}"
+                        style="--bs-table-bg: transparent;">
+                        <td>
+                            <strong class="text-dark">{{ item.cliente.razon_social }}</strong><br>
+                            <small class="text-muted">CUIT: {{ item.cliente.cuit }} | Tel: {{ item.cliente.telefono or 'S/D' }}</small>
+                        </td>
+                        <td>
+                            <span class="badge bg-dark">REMITO #{{ item.venta.id }}</span>
+                        </td>
+                        <td>{{ item.venta.fecha.strftime('%d/%m/%Y') }}</td>
+                        <td class="text-center">
+                            {% if filtro == 'vencidas' %}
+                                <span class="text-danger fw-bold">
+                                    <i class="bi bi-calendar-x"></i> VENCIDO<br>
+                                    <small>{{ item.dias_excedidos }} días de mora</small>
+                                </span>
+                            {% else %}
+                                <span class="text-dark fw-bold">
+                                    <i class="bi bi-clock"></i> En Término<br>
+                                    <small>Vence en {{ item.dias_restantes }} días</small>
+                                </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end text-muted">${{ "{:,.2f}".format(item.venta.total) }}</td>
+                        <td class="text-end fw-bold text-dark fs-5">${{ "{:,.2f}".format(item.saldo) }}</td>
+                        <td class="text-center">
+                            <a href="{{ url_for('admin.detalle_cta_cte', cliente_id=item.cliente.id) }}" class="btn btn-sm btn-dark fw-bold shadow-sm">
+                                <i class="bi bi-cash-coin"></i> COBRAR
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5">
+                            <i class="bi bi-check-circle text-success display-4"></i>
+                            <p class="mt-2 fw-bold text-muted">¡No hay deudas en esta categoría!</p>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- LÓGICA DE BÚSQUEDA INTELIGENTE PARA MOROSIDAD ---
+document.getElementById('moraSearch').addEventListener('input', function(e) {
+    const term = e.target.value.toLowerCase().trim().replace(/-/g, ""); // Limpiamos guiones para CUIT
+    const words = term.split(" "); 
+    const rows = document.querySelectorAll('.mora-row');
+    let visibleCount = 0;
+
+    rows.forEach(row => {
+        const info = row.getAttribute('data-info');
+        // El registro debe coincidir con todas las palabras ingresadas (Fuzzy search)
+        const match = words.every(word => info.includes(word));
+
+        if (match) {
+            row.style.display = '';
+            visibleCount++;
+        } else {
+            row.style.display = 'none';
+        }
+    });
+
+    // Actualizamos el contador dinámico de facturas visibles
+    document.getElementById('countMora').innerText = visibleCount;
+});
+</script>
+
+<style>
+    .text-pink { color: var(--vacan-pink) !important; }
+    #moraSearch:focus { border-color: var(--vacan-pink); box-shadow: 0 0 12px rgba(255, 0, 127, 0.2); }
+    .table-danger { background-color: rgba(220, 53, 69, 0.1) !important; }
+    .table-warning { background-color: rgba(255, 193, 7, 0.1) !important; }
+</style>
+{% endblock %}

@@ -1,0 +1,198 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4 align-items-center">
+    <div class="col-md-5">
+        <h2 class="fw-bold"><i class="bi bi-bank text-pink"></i> Tesorería y <span class="text-pink">Cajas</span></h2>
+        <p class="text-muted">Gestión financiera y arqueos de Vacan Radiadores.</p>
+    </div>
+    <div class="col-md-7 text-md-end">
+        <div class="btn-group shadow-sm">
+            <a href="{{ url_for('admin.historial_cierres') }}" class="btn btn-outline-secondary fw-bold px-3">
+                <i class="bi bi-clock-history"></i> CIERRES PASADOS
+            </a>
+            <button class="btn btn-outline-dark fw-bold px-3" data-bs-toggle="modal" data-bs-target="#modalTransferencia">
+                <i class="bi bi-arrow-left-right"></i> TRASPASO
+            </button>
+            <button class="btn btn-dark fw-bold px-3" data-bs-toggle="modal" data-bs-target="#modalMovimientoManual">
+                <i class="bi bi-plus-circle"></i> NUEVO MOVIMIENTO
+            </button>
+            <button class="btn btn-pink fw-bold px-3" data-bs-toggle="modal" data-bs-target="#modalNuevaCaja">
+                + HABILITAR CAJA
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- RESUMEN DE SALDOS -->
+<div class="row mb-4">
+    <div class="col-md-6 mb-2">
+        <div class="card bg-dark text-white border-0 shadow-sm p-3">
+            <h6 class="text-white-50 small">TOTAL EFECTIVO (CAJAS)</h6>
+            <h2 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(total_efectivo or 0) }}</h2>
+        </div>
+    </div>
+    <div class="col-md-6 mb-2">
+        <div class="card bg-dark text-white border-0 shadow-sm border-start border-pink border-5 p-3">
+            <h6 class="text-white-50 small">TOTAL BANCOS / VIRTUAL</h6>
+            <h2 class="fw-bold mb-0 text-info">${{ "{:,.2f}".format(total_virtual or 0) }}</h2>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <!-- CAJAS FÍSICAS -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow border-0">
+            <div class="card-header bg-dark text-white fw-bold">CAJAS DE SUCURSALES</div>
+            <ul class="list-group list-group-flush">
+                {% for c in fisicas %}
+                <li class="list-group-item d-flex justify-content-between align-items-center py-3">
+                    <div>
+                        <h5 class="mb-0 fw-bold">{{ c.nombre }}</h5>
+                        <small class="text-muted">ID: #{{ c.id }}</small>
+                    </div>
+                    <div class="text-end">
+                        <h4 class="fw-bold text-success mb-0">${{ "{:,.2f}".format(c.saldo_actual) }}</h4>
+                        <div class="mt-1">
+                            <a href="{{ url_for('admin.detalle_caja', id=c.id) }}" class="small text-decoration-none me-2 fw-bold text-primary">Historial</a>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalArqueo{{ c.id }}">
+                                Arqueo
+                            </button>
+                        </div>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+
+    <!-- CUENTAS VIRTUALES -->
+    <div class="col-md-6 mb-4">
+        <div class="card shadow border-0">
+            <div class="card-header bg-dark text-white fw-bold">CUENTAS VIRTUALES / BANCOS</div>
+            <ul class="list-group list-group-flush">
+                {% for v in virtuales %}
+                <li class="list-group-item d-flex justify-content-between align-items-center py-3">
+                    <div>
+                        <h5 class="mb-0 fw-bold">{{ v.nombre }}</h5>
+                        <small class="text-muted">{{ v.tipo }}</small>
+                    </div>
+                    <div class="text-end">
+                        <h4 class="fw-bold text-primary mb-0">${{ "{:,.2f}".format(v.saldo_actual) }}</h4>
+                        <a href="{{ url_for('admin.detalle_caja', id=v.id) }}" class="small text-decoration-none text-pink fw-bold">Ver Movimientos →</a>
+                    </div>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     MODALES (FUERA DE LAS TABLAS)
+     ========================================== -->
+
+<!-- 1. MODAL NUEVO MOVIMIENTO -->
+<div class="modal fade" id="modalMovimientoManual" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.movimiento_manual') }}" method="POST" class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-dark text-white"><h5>Ingreso / Egreso Manual</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body text-dark p-4" style="background-color: white !important;">
+                <label class="small fw-bold">Caja a afectar</label>
+                <select name="caja_id" class="form-select mb-3 border-dark" required>
+                    {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }}</option>{% endfor %}
+                </select>
+                <div class="row">
+                    <div class="col-6 mb-3">
+                        <label class="small fw-bold">Tipo</label>
+                        <select name="tipo" class="form-select border-dark"><option value="EGRESO">EGRESO</option><option value="INGRESO">INGRESO</option></select>
+                    </div>
+                    <div class="col-6 mb-3">
+                        <label class="small fw-bold">Monto ($)</label>
+                        <input type="number" step="0.01" name="monto" class="form-control border-dark" required>
+                    </div>
+                </div>
+                <label class="small fw-bold">Sub-Rubro</label>
+                <select name="categoria_id" class="form-select mb-3 border-dark" required>
+                    {% for cat in categorias %}<option value="{{ cat.id }}">{{ cat.nombre }}</option>{% endfor %}
+                </select>
+                <label class="small fw-bold">Concepto</label>
+                <input type="text" name="motivo" class="form-control border-dark" placeholder="Ej: Pago de flete" required>
+            </div>
+            <div class="modal-footer bg-light border-0"><button type="submit" class="btn btn-pink w-100 py-2 fw-bold">REGISTRAR</button></div>
+        </form>
+    </div>
+</div>
+
+<!-- 2. MODAL TRASPASO -->
+<div class="modal fade" id="modalTransferencia" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.transferencia_fondos') }}" method="POST" class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-primary text-white"><h5>Traspaso entre Cuentas</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body text-dark p-4" style="background-color: white !important;">
+                <label class="small fw-bold text-danger">Origen</label>
+                <select name="origen_id" class="form-select mb-3" required>
+                    {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }} (${{ "{:,.2f}".format(caja.saldo_actual) }})</option>{% endfor %}
+                </select>
+                <label class="small fw-bold text-success">Destino</label>
+                <select name="destino_id" class="form-select mb-3" required>
+                    {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }}</option>{% endfor %}
+                </select>
+                <label class="small fw-bold">Monto a mover ($)</label>
+                <input type="number" step="0.01" name="monto" class="form-control border-primary" required>
+            </div>
+            <div class="modal-footer bg-light border-0"><button type="submit" class="btn btn-primary w-100 py-2 fw-bold">TRANSFERIR</button></div>
+        </form>
+    </div>
+</div>
+
+<!-- 3. MODALES DE ARQUEO (Uno para cada caja física) -->
+{% for c in fisicas %}
+<div class="modal fade" id="modalArqueo{{ c.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.cerrar_caja', id=c.id) }}" method="POST" class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title fw-bold">Arqueo: {{ c.nombre }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark p-4" style="background-color: white !important;">
+                <div class="text-center mb-3">
+                    <h6 class="text-muted small">SALDO EN SISTEMA</h6>
+                    <h3 class="fw-bold">${{ "{:,.2f}".format(c.saldo_actual) }}</h3>
+                </div>
+                <label class="form-label fw-bold text-danger">SALDO REAL CONTADO ($)</label>
+                <input type="number" step="0.01" name="saldo_real" class="form-control form-control-lg border-danger" required>
+                <label class="form-label mt-3 small fw-bold">OBSERVACIONES</label>
+                <textarea name="observaciones" class="form-control" rows="2"></textarea>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="submit" class="btn btn-danger w-100 py-2 fw-bold">CERRAR CAJA Y RENDIR</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+
+<!-- 4. MODAL NUEVA CAJA -->
+<div class="modal fade" id="modalNuevaCaja" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <form action="{{ url_for('admin.nueva_caja') }}" method="POST" class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-dark text-white"><h5>Habilitar Nueva Cuenta/Caja</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body text-dark p-4" style="background-color: white !important;">
+                <label class="small fw-bold">Nombre</label>
+                <input type="text" name="nombre" class="form-control mb-3" required>
+                <label class="small fw-bold">Tipo</label>
+                <select name="tipo" class="form-select"><option value="FISICA">EFECTIVO</option><option value="VIRTUAL">BANCO / VIRTUAL</option></select>
+            </div>
+            <div class="modal-footer bg-light border-0"><button type="submit" class="btn btn-pink w-100 py-2 fw-bold">CREAR</button></div>
+        </form>
+    </div>
+</div>
+
+<style>
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-pink:hover { background-color: #d4006a; color: white; }
+    .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 12px; overflow: hidden; }
+</style>
+{% endblock %}

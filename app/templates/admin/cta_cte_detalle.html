@@ -1,0 +1,452 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<!-- ENCABEZADO DE CUENTA -->
+<div class="row mb-4">
+    <div class="col-md-6">
+        <a href="{{ url_for('admin.lista_cta_cte') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Volver a Listado</a>
+        <h2 class="fw-bold text-dark mt-2">{{ cliente.razon_social }}</h2>
+        <h5 class="text-muted">Resumen de Cuenta Corriente y Conciliación</h5>
+    </div>
+    <div class="col-md-6 text-md-end">
+        <h3 class="fw-bold {{ 'text-danger' if saldo > 0 else 'text-success' }}">
+            SALDO TOTAL: ${{ "{:,.2f}".format(saldo) }}
+        </h3>
+        <button class="btn btn-success fw-bold shadow px-4 py-2" data-bs-toggle="modal" data-bs-target="#modalPago">
+            <i class="bi bi-cash-coin"></i> REGISTRAR COBRANZA / CONCILIAR
+        </button>
+    </div>
+</div>
+
+<!-- TABLA DE MOVIMIENTOS -->
+<div class="card shadow border-0">
+    <div class="card-header bg-dark text-white fw-bold">HISTORIAL DE MOVIMIENTOS</div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Fecha</th>
+                        <th>Concepto / Detalle</th>
+                        <th style="width: 25%;">Productos Vendidos</th> <!-- NUEVA COLUMNA -->
+                        <th>Vencimiento / Plazo</th>
+                        <th>Estado Fiscal</th>
+                        <th class="text-end">Debe (+)</th>
+                        <th class="text-end">Haber (-)</th>
+                        <th class="text-center">Gestión</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for m in movimientos %}
+                    
+                    {# --- LÓGICA DE CÁLCULO DE DÍAS --- #}
+                    {% set fecha_mov = m.fecha.date() %}
+                    {% set dias_pasados = (hoy - fecha_mov).days %}
+                    {% set dias_restantes = 30 - dias_pasados %}
+
+                    {# LÓGICA DE COLORES DE FILA MEJORADA PARA PAGOS PARCIALES #}
+                    <tr class="{% if m.venta_id and m.venta.esta_pagada %} table-success 
+                               {% elif m.monto > 0 %}
+                                    {% if dias_pasados > 30 %} table-danger 
+                                    {% else %} table-warning 
+                                    {% endif %}
+                               {% endif %}">
+                        
+                        <td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>
+                            {{ m.descripcion }}
+                            {% if m.venta_id %}
+                                <br><small class="text-muted text-uppercase">Remito #{{ m.venta_id }}</small>
+                                {% if m.venta.total_pagado > 0 and not m.venta.esta_pagada %}
+                                    <br><small class="text-success fw-bold">Abonado: ${{ "{:,.2f}".format(m.venta.total_pagado) }}</small>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+
+                        <!-- PUNTO NUEVO: DETALLE DE PRODUCTOS -->
+                        <td>
+                            {% if m.venta_id and m.venta.detalles %}
+                                <div class="lh-sm">
+                                    {% for d in m.venta.detalles %}
+                                        <small class="d-block border-bottom py-1" style="font-size: 0.75rem;">
+                                            <span class="badge bg-secondary">{{ d.cantidad }}</span> 
+                                            {{ d.nombre_item or d.repuesto.nombre }}
+                                        </small>
+                                    {% endfor %}
+                                </div>
+                            {% else %}
+                                <small class="text-muted italic">Sin productos (Cobranza)</small>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-center">
+                            {% if m.monto > 0 and m.venta_id %}
+                                {% if m.venta.esta_pagada %}
+                                    <span class="badge bg-success"><i class="bi bi-check-all"></i> COMPROBANTE PAGO</span>
+                                {% else %}
+                                    {% if dias_pasados > 30 %}
+                                        <span class="badge bg-danger">VENCIDO ({{ dias_pasados - 30 }} d. excedidos)</span>
+                                    {% else %}
+                                        <span class="badge bg-dark">Plazo: {{ dias_restantes }} días</span>
+                                    {% endif %}
+                                    <div class="mt-1 small fw-bold">Pendiente: ${{ "{:,.2f}".format(m.venta.total - m.venta.total_pagado) }}</div>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted small italic">Operación de Cobro</span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if m.venta %}
+                                {% if m.venta.estado_arca == 'PENDIENTE' %}
+                                    <span class="badge bg-warning text-dark border border-dark">PENDIENTE FACTURA</span>
+                                {% elif m.venta.estado_arca == 'FACTURADO' %}
+                                    <span class="badge bg-success">FACTURADO</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">INTERNO</span>
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+
+                        <td class="text-end text-danger fw-bold">{{ "${:,.2f}".format(m.monto) if m.monto > 0 else '-' }}</td>
+                        <td class="text-end text-success fw-bold">{{ "${:,.2f}".format(m.monto|abs) if m.monto < 0 else '-' }}</td>
+                        
+                        
+                        <td class="text-center">
+                            <div class="btn-group shadow-sm">
+                                <!-- 1. BOTÓN WHATSAPP EMPRESARIAL -->
+                                {% if cliente.telefono %}
+                                    {% if m.venta_id and m.venta %}
+                                        {# --- CONSTRUCCIÓN DEL MENSAJE DE VENTA --- #}
+                                        {% set msg = "*VACAN RADIADORES*\n" %}
+                                        {% set msg = msg ~ "📄 *COMPROBANTE DE VENTA #0001-" ~ "%08d" % m.venta.id ~ "*\n" %}
+                                        {% set msg = msg ~ "📅 Fecha: " ~ m.venta.fecha.strftime('%d/%m/%Y') ~ "\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "👤 *CLIENTE:* " ~ cliente.razon_social ~ "\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "📦 *DETALLE DE MERCADERÍA:*\n" %}
+                                        
+                                        {# IMPORTANTE: Recorremos los detalles de la venta vinculada #}
+                                        {% for d in m.venta.detalles %}
+                                            {% set prod_nombre = d.nombre_item or (d.repuesto.nombre if d.repuesto else 'Repuesto') %}
+                                            {% set msg = msg ~ "• " ~ d.cantidad ~ "x " ~ prod_nombre ~ " ($" ~ "{:,.2f}".format(d.precio_unitario * d.cantidad) ~ ")\n" %}
+                                        {% endfor %}
+                                        
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "💰 *TOTAL: $" ~ "{:,.2f}".format(m.venta.total) ~ "*\n" %}
+                                        {% set msg = msg ~ "💳 Pago: " ~ m.venta.metodo_pago|replace('_', ' ') ~ "\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "🚛 _Gracias por elegir Vacan Radiadores._" %}
+                                        
+                                    {% else %}
+                                        {# --- MENSAJE DE COBRO (RECIBO) --- #}
+                                        {% set msg = "*VACAN RADIADORES*\n" %}
+                                        {% set msg = msg ~ "💰 *RECIBO DE COBRANZA #0001-" ~ "%08d" % m.id ~ "*\n" %}
+                                        {% set msg = msg ~ "📅 Fecha: " ~ m.fecha.strftime('%d/%m/%Y %H:%M') ~ "\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "👤 *RECIBIMOS DE:* " ~ cliente.razon_social ~ "\n" %}
+                                        {% set msg = msg ~ "💵 *POR LA SUMA DE: $" ~ "{:,.2f}".format(m.monto|abs) ~ "*\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "📝 *CONCEPTO:* " ~ m.descripcion ~ "\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "📉 *SALDO ACTUAL: $" ~ "{:,.2f}".format(saldo) ~ "*\n" %}
+                                        {% set msg = msg ~ "--------------------------------------------\n" %}
+                                        {% set msg = msg ~ "✅ _Comprobante oficial de pago._" %}
+                                    {% endif %}
+
+                                    <a href="https://wa.me/{{ cliente.telefono|replace('+', '')|replace(' ', '')|replace('-', '') }}?text={{ msg|urlencode }}" 
+                                    target="_blank" class="btn btn-sm btn-success" title="Enviar WhatsApp">
+                                        <i class="bi bi-whatsapp"></i> ENVIAR
+                                    </a>
+                                {% else %}
+                                    <button class="btn btn-sm btn-secondary opacity-50" title="Sin Tel." onclick="alert('Cargue el teléfono.')">
+                                        <i class="bi bi-whatsapp"></i>
+                                    </button>
+                                {% endif %}
+
+                                <!-- 2. BOTONES DE GESTIÓN (IMPRESORA Y FECHA) -->
+                                {% if m.venta_id %}
+                                    <a href="{{ url_for('inventory.imprimir_comprobante', id=m.venta_id, tipo='remito') }}" 
+                                    target="_blank" class="btn btn-sm btn-info text-white">
+                                        <i class="bi bi-printer"></i>
+                                    </a>
+                                    <button class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#modalFecha{{ m.venta_id }}">
+                                        <i class="bi bi-calendar-event"></i>
+                                    </button>
+                                {% else %}
+                                    <a href="{{ url_for('inventory.imprimir_comprobante', id=m.id, tipo='recibo') }}" 
+                                    target="_blank" class="btn btn-sm btn-outline-dark">
+                                        <i class="bi bi-printer"></i>
+                                    </a>
+                                {% endif %}
+                            </div>
+
+                            <!-- MODAL EDITAR FECHA (Solo para ventas) -->
+                            {% if m.venta_id %}
+                            <div class="modal fade" id="modalFecha{{ m.venta_id }}" tabindex="-1" aria-hidden="true">
+                                <div class="modal-dialog modal-dialog-centered">
+                                    <form action="{{ url_for('admin.editar_fecha_remito_cta', venta_id=m.venta_id) }}" method="POST" class="modal-content text-start shadow-lg">
+                                        <div class="modal-header bg-dark text-white">
+                                            <h5 class="modal-title">Editar Fecha Operación</h5>
+                                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                                        </div>
+                                        <div class="modal-body text-dark">
+                                            <label class="fw-bold">Nueva Fecha y Hora:</label>
+                                            <input type="datetime-local" name="nueva_fecha" class="form-control" value="{{ m.fecha.strftime('%Y-%m-%dT%H:%M') }}" required>
+                                        </div>
+                                        <div class="modal-footer">
+                                            <button type="submit" class="btn btn-primary w-100">GUARDAR CAMBIOS</button>
+                                        </div>
+                                    </form>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </td>                 
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="7" class="text-center py-5 text-muted">No hay movimientos en esta cuenta corriente.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ==========================================
+     MODAL COBRANZA COMPUESTA CON PAGO PARCIAL
+     ========================================== -->
+<div class="modal fade" id="modalPago" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content shadow-lg border-0">
+            <div class="modal-header bg-success text-white">
+                <h5 class="modal-title fw-bold"><i class="bi bi-cash-coin"></i> Armar Cobranza y Aplicar Pagos</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4 text-dark" style="background-color: white !important;">
+                <div class="row">
+                    <!-- COLUMNA IZQUIERDA: CARGA DE VALORES Y CONCILIACIÓN -->
+                    <div class="col-md-5 border-end">
+                        <h6 class="fw-bold text-success mb-3 text-uppercase">1. Valores Recibidos</h6>
+                        <div class="mb-3">
+                            <label class="small fw-bold">Destino de Fondos</label>
+                            <select id="sel_caja_cli" class="form-select border-dark">
+                                {% for caja in cajas %}
+                                <option value="{{ caja.id }}" data-nombre="{{ caja.nombre }}">
+                                    {{ caja.nombre }} (Saldo: ${{ "{:,.2f}".format(caja.saldo_actual) }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="small fw-bold">Medio de Cobro</label>
+                            <select id="sel_medio_cli" class="form-select border-dark" onchange="toggleFormCheque(this.value)">
+                                <option value="EFECTIVO">Efectivo</option>
+                                <option value="TRANSFERENCIA">Transferencia / Virtual</option>
+                                <option value="CHEQUE">Cheque</option>
+                            </select>
+                        </div>
+
+                        <div id="form_cheque_cli" class="d-none p-3 bg-light border border-success rounded mb-3">
+                            <h6 class="fw-bold text-success small mb-2">Datos del Cheque</h6>
+                            <input type="text" id="ch_banco" class="form-control form-control-sm mb-1" placeholder="Banco">
+                            <input type="text" id="ch_numero" class="form-control form-control-sm mb-1" placeholder="N° Cheque">
+                            <input type="text" id="ch_emisor" class="form-control form-control-sm mb-1" placeholder="Emisor">
+                            <label class="x-small fw-bold">Vencimiento:</label>
+                            <input type="date" id="ch_vencimiento" class="form-control form-control-sm mb-1">
+                            <select id="ch_tipo" class="form-select form-select-sm">
+                                <option value="FISICO">Cheque Físico</option>
+                                <option value="ECHEQ">E-Cheq</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="small fw-bold">Monto Parcial Recibido ($)</label>
+                            <input type="number" step="0.01" id="inp_monto_cli" class="form-control form-control-lg border-success" placeholder="0.00">
+                        </div>
+                        <button class="btn btn-dark w-100 fw-bold mb-4 shadow-sm" onclick="agregarMedioACobranza()">+ AÑADIR PAGO A LA BOLSA</button>
+
+                        <!-- SECCIÓN DE CONCILIACIÓN (PAGOS PARCIALES) -->
+                        <h6 class="fw-bold text-danger mb-2 text-uppercase">2. Aplicar Pago a Comprobantes</h6>
+                        <div class="border rounded p-2 bg-light" style="max-height: 250px; overflow-y: auto;">
+                            {% for m in movimientos %}
+                                {% if m.venta_id and not m.venta.esta_pagada %}
+                                <div class="row align-items-center border-bottom py-2 g-2">
+                                    <div class="col-7">
+                                        <div class="form-check">
+                                            <input class="form-check-input chk-venta" type="checkbox" value="{{ m.venta_id }}" id="v{{ m.venta_id }}" onchange="toggleMontoInput(this)">
+                                            <label class="form-check-label small" for="v{{ m.venta_id }}">
+                                                Remito #{{ m.venta_id }}<br>
+                                                <span class="text-muted">Pendiente: <strong>${{ "{:,.2f}".format(m.venta.total - m.venta.total_pagado) }}</strong></span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    <div class="col-5">
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text">$</span>
+                                            <input type="number" step="0.01" class="form-control input-monto-aplicar" 
+                                                   id="monto_imputar{{ m.venta_id }}" 
+                                                   data-max="{{ m.venta.total - m.venta.total_pagado }}" 
+                                                   placeholder="0.00" disabled>
+                                        </div>
+                                    </div>
+                                </div>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <!-- COLUMNA DERECHA: RESUMEN -->
+                    <div class="col-md-7 px-4">
+                        <h6 class="fw-bold text-muted mb-3 text-uppercase">3. Resumen de la Operación</h6>
+                        <div class="table-responsive" style="min-height: 250px;">
+                            <table class="table table-sm align-middle">
+                                <thead class="table-light"><tr class="small"><th>Caja Destino</th><th>Medio</th><th class="text-end">Monto</th><th></th></tr></thead>
+                                <tbody id="tbody_cobros"></tbody>
+                            </table>
+                        </div>
+                        
+                        <div class="card bg-success text-white p-3 mt-4 border-0 shadow">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <span class="h5 mb-0 fw-light">TOTAL COBRADO:</span>
+                                <span id="label_total_cobro" class="h3 mb-0 fw-bold">$0.00</span>
+                            </div>
+                        </div>
+                        <p class="small text-muted mt-2 italic text-center">El total cobrado debe coincidir con la suma de los montos aplicados a comprobantes.</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light border-0">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">CANCELAR</button>
+                <button class="btn btn-success px-5 py-2 fw-bold shadow" onclick="confirmarCobranzaFinal()">
+                    <i class="bi bi-check-all"></i> CONFIRMAR COBRANZA Y CONCILIAR
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let bolsaCobros = [];
+
+// Habilitar/Deshabilitar input de monto parcial al tildar el comprobante
+function toggleMontoInput(checkbox) {
+    const input = document.getElementById('monto_imputar' + checkbox.value);
+    input.disabled = !checkbox.checked;
+    if (checkbox.checked) {
+        input.value = input.getAttribute('data-max'); // Sugerimos el total pendiente
+        input.focus();
+    } else {
+        input.value = "";
+    }
+}
+
+function toggleFormCheque(val) {
+    const div = document.getElementById('form_cheque_cli');
+    val === 'CHEQUE' ? div.classList.remove('d-none') : div.classList.add('d-none');
+}
+
+function agregarMedioACobranza() {
+    const caja = document.getElementById('sel_caja_cli');
+    const medio = document.getElementById('sel_medio_cli').value;
+    const monto = parseFloat(document.getElementById('inp_monto_cli').value);
+    if (isNaN(monto) || monto <= 0) { alert("Monto inválido"); return; }
+
+    let item = {
+        caja_id: caja.value,
+        caja_nombre: caja.options[caja.selectedIndex].getAttribute('data-nombre'),
+        medio: medio,
+        monto: monto
+    };
+
+    if (medio === 'CHEQUE') {
+        const banco = document.getElementById('ch_banco').value;
+        const numero = document.getElementById('ch_numero').value;
+        const venc = document.getElementById('ch_vencimiento').value;
+        if (!banco || !numero || !venc) { alert("Complete datos del cheque"); return; }
+        item.cheque_data = { banco, numero, emisor: document.getElementById('ch_emisor').value || "{{ cliente.razon_social }}", vencimiento: venc, tipo: document.getElementById('ch_tipo').value };
+        item.detalle = "CH " + banco;
+    } else { item.detalle = medio; }
+
+    bolsaCobros.push(item);
+    dibujarBolsa();
+    document.getElementById('inp_monto_cli').value = "";
+}
+
+function dibujarBolsa() {
+    const tbody = document.getElementById('tbody_cobros');
+    tbody.innerHTML = '';
+    let total = 0;
+    bolsaCobros.forEach((p, index) => {
+        total += p.monto;
+        tbody.innerHTML += `<tr><td>${p.caja_nombre}</td><td>${p.detalle}</td><td class="text-end fw-bold">$${p.monto.toFixed(2)}</td><td class="text-end"><button class="btn btn-sm text-danger" onclick="bolsaCobros.splice(${index},1);dibujarBolsa()">×</button></td></tr>`;
+    });
+    document.getElementById('label_total_cobro').innerText = `$${total.toFixed(2)}`;
+}
+
+async function confirmarCobranzaFinal() {
+    if (bolsaCobros.length === 0) return alert("Cargue algún pago.");
+    
+    // Armamos la lista de conciliaciones con montos específicos
+    const conciliaciones = [];
+    document.querySelectorAll('.chk-venta:checked').forEach(cb => {
+        const montoImputar = document.getElementById('monto_imputar' + cb.value).value;
+        conciliaciones.push({
+            venta_id: cb.value,
+            monto_aplicado: parseFloat(montoImputar)
+        });
+    });
+
+    const response = await fetch(`/admin/cta-cte/pago-compuesto/{{ cliente.id }}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ 
+            pagos: bolsaCobros,
+            conciliaciones: conciliaciones 
+        })
+    });
+
+    if (response.ok) {
+        alert("Operación exitosa: Cobro registrado e imputado.");
+        location.reload();
+    } else {
+        const err = await response.json();
+        alert("Error: " + err.message);
+    }
+}
+
+// Agrega esta función al final de tu <script> en cta_cte_detalle.html
+async function compartirArchivo(url, nombreArchivo) {
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        const file = new File([blob], nombreArchivo, { type: 'application/pdf' });
+
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+                files: [file],
+                title: 'Comprobante Vacan',
+                text: 'Adjuntamos comprobante de Vacan Radiadores',
+            });
+        } else {
+            // Si el navegador no soporta compartir archivos (como en PC), abre el link
+            window.open(url, '_blank');
+        }
+    } catch (error) {
+        console.error('Error al compartir:', error);
+        window.open(url, '_blank');
+    }
+}
+
+</script>
+
+<style>
+    .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 15px; overflow: hidden; }
+    .table-success { background-color: rgba(25, 135, 84, 0.15) !important; }
+    .table-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
+    .table-danger { background-color: rgba(220, 53, 69, 0.15) !important; }
+    .btn-xs { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+    .italic { font-style: italic; }
+</style>
+{% endblock %}

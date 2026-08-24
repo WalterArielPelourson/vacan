@@ -1,0 +1,85 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-7">
+        <h2 class="fw-bold"><span class="text-pink">Vacan</span> - Reporte de Ventas</h2>
+        <p class="text-muted">Visualizando: <strong>{{ sucursal_actual.nombre if sucursal_actual else 'Todas las Sucursales' }}</strong></p>
+    </div>
+    
+    <!-- SELECTOR DE SUCURSAL -->
+    <div class="col-md-5">
+        <form action="{{ url_for('admin.reportes') }}" method="GET" class="card p-3 shadow-sm">
+            <label class="form-label small fw-bold text-uppercase">Filtrar por Sucursal:</label>
+            <div class="d-flex gap-2">
+                <select name="sucursal_id" class="form-select">
+                    <option value="">Todas las sucursales</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if sucursal_actual and sucursal_actual.id == s.id %}selected{% endif %}>
+                        {{ s.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="btn btn-vacan">Ver</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- TARJETAS DE RESUMEN -->
+<div class="row mb-4 text-center">
+    <div class="col-md-6">
+        <div class="card bg-dark text-white shadow">
+            <div class="card-body">
+                <h6 class="text-pink text-uppercase">Total Recaudado</h6>
+                <h2 class="fw-bold">${{ "{:,.2f}".format(total) }}</h2>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6">
+        <div class="card shadow border-pink">
+            <div class="card-body">
+                <h6 class="text-dark text-uppercase">Cantidad de Operaciones</h6>
+                <h2 class="fw-bold">{{ cantidad }} ventas</h2>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TABLA DE VENTAS DETALLADA -->
+<div class="card shadow">
+    <div class="card-header card-header-vacan">
+        <h5 class="mb-0">Detalle de Transacciones (Hora Argentina)</h5>
+    </div>
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>Fecha y Hora</th>
+                    <th>Sucursal</th>
+                    <th>Vendedor</th>
+                    <th>Total</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for v in ventas %}
+                <tr>
+                    <td>{{ v.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                    <td><span class="badge bg-outline-dark border text-dark">{{ v.sucursal.nombre }}</span></td>
+                    <td>{{ v.usuario.username }}</td>
+                    <td class="fw-bold text-success">${{ "{:,.2f}".format(v.total) }}</td>
+                    <td>
+                        <button class="btn btn-sm btn-outline-secondary">Ver Recibo</button>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="text-center py-4">No hay ventas registradas para este filtro.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

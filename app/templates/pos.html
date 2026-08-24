@@ -1,0 +1,421 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="row g-2">
+    <!-- COLUMNA 1: BUSCADOR DE STOCK (3/12) -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-header bg-dark text-white p-2 d-flex justify-content-between">
+                <small class="fw-bold text-uppercase"><i class="bi bi-search"></i> Stock</small>
+                <span class="badge bg-pink" style="font-size: 0.6rem;">PASO 1</span>
+            </div>
+            <div class="card-body p-2">
+                <input type="text" id="posSearch" class="form-control form-control-sm mb-2 border-dark" placeholder="Marca, modelo o SKU...">
+                <div class="table-responsive" style="max-height: 70vh; overflow-y: auto;">
+                    <table class="table table-sm table-hover" style="font-size: 0.75rem;">
+                        <tbody id="stockBody">
+                            {% for p in productos %}
+                            <tr class="product-row" style="cursor:pointer" 
+                                onclick="cargarParaEditar('{{p.id}}', '{{p.nombre}}', {{p.precio}}, {{p.costo}})" 
+                                data-info="{{ p.nombre|lower }} {{ p.sku|lower }}">
+                                <td class="p-2 border-bottom">
+                                    <strong>{{ p.nombre }}</strong><br>
+                                    <span class="text-pink fw-bold">${{ "{:,.2f}".format(p.precio) }}</span>
+                                    <small class="text-muted ms-1">({{ p.stock }} u.)</small>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COLUMNA 2: CARGA Y EDICIÓN (3/12) -->
+    <div class="col-md-3">
+        <div class="card shadow-sm border-pink h-100">
+            <div class="card-header bg-pink text-white p-2">
+                <small class="fw-bold text-uppercase"><i class="bi bi-pencil-square"></i> Carga / Edición</small>
+            </div>
+            <div class="card-body p-2" id="panelEdicion">
+                <div class="mb-3">
+                    <label class="small fw-bold text-dark">NOMBRE / DESCRIPCIÓN</label>
+                    <textarea id="edit_nombre" class="form-control form-control-sm border-dark" rows="3" placeholder="Descripción del item..."></textarea>
+                </div>
+                
+                <div class="row g-2 mb-3">
+                    <div class="col-6">
+                        <label class="small fw-bold text-success">PRECIO VENTA</label>
+                        <input type="number" id="edit_precio" class="form-control form-control-sm fw-bold border-success" placeholder="0.00">
+                    </div>
+                    <div class="col-6">
+                        <label class="small fw-bold text-danger">COSTO</label>
+                        <input type="number" id="edit_costo" class="form-control form-control-sm border-danger" placeholder="0.00">
+                    </div>
+                </div>
+
+                <div class="row g-2 mb-3 align-items-end">
+                    <div class="col-5">
+                        <label class="small fw-bold">CANTIDAD</label>
+                        <input type="number" id="edit_cant" class="form-control form-control-sm border-dark" value="1" min="1">
+                    </div>
+                    <div class="col-7">
+                        <input type="hidden" id="edit_id">
+                        <button class="btn btn-dark btn-sm w-100 fw-bold py-2 shadow-sm" onclick="agregarAlComprobante()">
+                            <i class="bi bi-plus-circle"></i> AGREGAR
+                        </button>
+                    </div>
+                </div>
+                <hr>
+                <div class="alert alert-light border p-2 mb-0">
+                    <small class="d-block text-center text-muted italic">Escribe arriba para cargar un <strong>item manual</strong> o haz clic en un producto de stock.</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- COLUMNA 3: COMPROBANTE Y PAGO (6/12) -->
+    <div class="col-md-6">
+        <div class="card shadow-sm border-dark h-100">
+            <div class="card-body p-3">
+                <!-- CLIENTE Y ARCA -->
+                <div class="row g-2 mb-3 align-items-end bg-light p-2 rounded border">
+                    <div class="col-md-7">
+                        <label class="small fw-bold text-uppercase">Buscador de Clientes</label>
+                        <input type="text" id="customerSearch" class="form-control form-control-sm mb-1 border-dark" placeholder="Nombre, DNI o CUIT...">
+                        <select id="cliente_id" class="form-select form-select-sm border-dark">
+                            <!-- Se llena dinámicamente con el script -->
+                        </select>
+                    </div>
+                    <div class="col-md-5">
+                        <button id="btnARCA" class="btn btn-sm btn-outline-primary w-100 fw-bold shadow-sm" onclick="consultarARCA()">
+                            <i class="bi bi-bank"></i> CONSULTA ARCA
+                        </button>
+                        <button class="btn btn-sm btn-dark w-100 mt-1 shadow-sm" data-bs-toggle="modal" data-bs-target="#modalQuickCliente">
+                            <i class="bi bi-person-plus"></i> NUEVO CLIENTE
+                        </button>
+                    </div>
+                </div>
+
+                <!-- LISTA DEL COMPROBANTE -->
+                <div class="border rounded bg-white p-2 mb-3" style="min-height: 250px; max-height: 350px; overflow-y: auto;">
+                    <table class="table table-sm table-striped">
+                        <thead class="x-small text-muted">
+                            <tr><th>DETALLE</th><th class="text-center">CANT</th><th class="text-end">UNIT</th><th class="text-end">TOTAL</th><th></th></tr>
+                        </thead>
+                        <tbody id="cartItems" style="font-size: 0.85rem;"></tbody>
+                    </table>
+                </div>
+
+                <!-- TOTAL Y PAGO -->
+                <div class="bg-dark text-white p-3 rounded shadow">
+                    <div class="d-flex justify-content-between h3 border-bottom border-secondary pb-2 mb-3">
+                        <span class="fw-light">TOTAL:</span>
+                        <span id="cartTotal" class="text-pink fw-bold">$0.00</span>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="small fw-bold text-pink mb-1">MODALIDAD DE PAGO</label>
+                        <select id="medio_pago" class="form-select form-select-sm bg-light text-dark mb-2" onchange="mostrarOpcionesPago(this.value)">
+                            <optgroup label="Caja Física">
+                                <option value="EFECTIVO">EFECTIVO</option>
+                                <option value="CHEQUE_FISICO">CHEQUE FÍSICO</option>
+                            </optgroup>
+                            <optgroup label="Virtual / Banco">
+                                <option value="TRANSFERENCIA">TRANSFERENCIA / DEPÓSITO</option>
+                                <option value="DEBITO">DÉBITO</option>
+                                <option value="CREDITO">CRÉDITO (CUOTAS)</option>
+                                <option value="ECHEQ">CHEQUE VIRTUAL (E-CHEQ)</option>
+                            </optgroup>
+                            <option value="CTA_CTE">CUENTA CORRIENTE (FIADO)</option>
+                        </select>
+
+                        <div id="extra_pago" class="row g-2 d-none mt-2 border-top border-secondary pt-2">
+                            <div class="col-4">
+                                <label class="x-small">Cuotas</label>
+                                <input type="number" id="pago_cuotas" class="form-control form-control-sm" value="1">
+                            </div>
+                            <div class="col-4">
+                                <label class="x-small">% Interés</label>
+                                <input type="number" id="pago_interes" class="form-control form-control-sm" value="0">
+                            </div>
+                            <div class="col-4">
+                                <label class="x-small">Ref/Banco</label>
+                                <input type="text" id="pago_ref" class="form-control form-control-sm" placeholder="Opcional">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <button class="btn btn-outline-light btn-sm w-100" onclick="processSale('PRESUPUESTO')">PRESUPUESTAR</button>
+                        </div>
+                        <div class="col-6">
+                            <button class="btn btn-outline-light btn-sm w-100" onclick="processSale('INTERNO')">INTERNO</button>
+                        </div>
+                        <div class="col-12 mt-2">
+                            <button class="btn btn-pink w-100 fw-bold py-3 fs-5 shadow" onclick="processSale('FACTURA')">
+                                <i class="bi bi-check-all"></i> FINALIZAR OPERACIÓN
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL ALTA RÁPIDA (CON CORRECCIÓN DE TRANSPARENCIA) -->
+<div class="modal fade" id="modalQuickCliente" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content shadow-lg" style="background-color: white !important; opacity: 1 !important;">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Registrar Cliente Nuevo</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <form action="{{ url_for('admin.nuevo_cliente', next='pos') }}" method="POST">
+                <div class="modal-body text-dark text-start">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Nombre / Razón Social</label>
+                        <input type="text" name="razon_social" class="form-control border-dark" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">CUIT / CUIL / DNI</label>
+                        <input type="text" name="cuit" class="form-control border-dark">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Condición frente al IVA</label>
+                        <select name="condicion_iva" class="form-select border-dark">
+                            <option value="Consumidor Final">Consumidor Final</option>
+                            <option value="Monotributista">Monotributista</option>
+                            <option value="Responsable Inscripto">Responsable Inscripto</option>
+                            <option value="Exento">Exento</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="submit" class="btn btn-vacan px-4">GUARDAR Y CONTINUAR</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- 1. MEMORIA DE CLIENTES (PUNTO 3) ---
+// 1. Memoria de Clientes (Aseguramos que data-search esté limpio)
+const listaOriginalClientes = [
+    { id: 1, text: "-- CONSUMIDOR FINAL --", search: "consumidor final 00000000" },
+    {% for c in clientes %}
+        {% if c.id != 1 %}
+        { 
+            id: {{ c.id }}, 
+            text: "{{ c.razon_social }} | {{ c.cuit or 'S/D' }}", 
+            // Guardamos el nombre y cuit todo en minúsculas y sin guiones para buscar fácil
+            search: "{{ c.razon_social|lower }} {{ c.cuit|replace('-', '') if c.cuit else '' }}" 
+        },
+        {% endif %}
+    {% endfor %}
+];
+
+function renderClientes(filtrados) {
+    const select = document.getElementById('cliente_id');
+    select.innerHTML = '';
+    filtrados.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c.id;
+        opt.textContent = c.text;
+        select.appendChild(opt);
+    });
+}
+
+// 2. Lógica de búsqueda con "Auto-Selección" del primer hallazgo
+document.getElementById('customerSearch').addEventListener('input', function(e) {
+    const term = e.target.value.toLowerCase().trim().replace(/-/g, "");
+    const select = document.getElementById('cliente_id');
+    const alertNoCust = document.getElementById('noCustomerAlert');
+    
+    // Si el buscador está vacío, mostramos todos y seleccionamos Consumidor Final
+    if (term === "") {
+        renderClientes(listaOriginalClientes);
+        select.selectedIndex = 0;
+        alertNoCust.classList.add('d-none');
+        return;
+    }
+
+    // Filtramos la lista: siempre incluimos Consumidor Final + lo que coincida
+    const filtrados = listaOriginalClientes.filter(c => 
+        c.id === 1 || c.search.includes(term)
+    );
+
+    // Redibujamos la lista
+    renderClientes(filtrados);
+
+    // --- CORRECCIÓN DE SELECCIÓN ---
+    if (filtrados.length > 1) {
+        // Si hay resultados además de Consumidor Final, seleccionamos el PRIMERO de la lista filtrada
+        // que no sea el ID 1. Normalmente será el índice 1.
+        select.selectedIndex = 1;
+        alertNoCust.classList.add('d-none');
+    } else {
+        // Si solo quedó Consumidor Final, lo seleccionamos y avisamos que no hay otros
+        select.selectedIndex = 0;
+        alertNoCust.classList.remove('d-none');
+    }
+});
+
+// Inicialización
+renderClientes(listaOriginalClientes);
+
+
+// --- 2. CONSULTA REAL ARCA (PUNTO 3) ---
+async function consultarARCA() {
+    const cuit = prompt("Ingrese CUIT (solo números):");
+    if (!cuit || cuit.length < 11) return;
+
+    const btn = document.getElementById('btnARCA');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>...';
+    btn.disabled = true;
+
+    try {
+        const response = await fetch(`/admin/api/arca/consultar/${cuit}`);
+        const result = await response.json();
+
+        if (result.status === 'ok') {
+            const modal = new bootstrap.Modal(document.getElementById('modalQuickCliente'));
+            modal.show();
+            document.querySelector('#modalQuickCliente input[name="razon_social"]').value = result.datos.razon_social;
+            document.querySelector('#modalQuickCliente input[name="cuit"]').value = result.datos.cuit;
+            
+            const selectIva = document.querySelector('#modalQuickCliente select[name="condicion_iva"]');
+            for(let opt of selectIva.options) {
+                if (result.datos.condicion_iva.includes(opt.value)) { opt.selected = true; break; }
+            }
+        } else { alert("ARCA: " + result.message); }
+    } catch (e) { alert("Error de conexión con el servicio."); }
+    finally { btn.innerHTML = originalText; btn.disabled = false; }
+}
+
+// --- 3. LÓGICA DE CARRITO Y STOCK ---
+let cart = [];
+
+function cargarParaEditar(id, nombre, precio, costo) {
+    document.getElementById('edit_id').value = id;
+    document.getElementById('edit_nombre').value = nombre;
+    document.getElementById('edit_precio').value = precio;
+    document.getElementById('edit_costo').value = costo;
+    document.getElementById('edit_cant').value = 1;
+    document.getElementById('edit_nombre').focus();
+}
+
+function agregarAlComprobante() {
+    const idValue = document.getElementById('edit_id').value || 'manual_' + Date.now();
+    const nombreValue = document.getElementById('edit_nombre').value; // El nombre editado
+    const precioValue = parseFloat(document.getElementById('edit_precio').value);
+    const costoValue = parseFloat(document.getElementById('edit_costo').value) || 0;
+    const cantValue = parseInt(document.getElementById('edit_cant').value);
+
+    if(!nombreValue || isNaN(precioValue)) {
+        alert("Falta el nombre o el precio.");
+        return;
+    }
+
+    // AGREGAMOS AL CARRITO CON EL NOMBRE DE CAMPO 'nombre'
+    cart.push({ 
+        id: idValue, 
+        nombre: nombreValue, // <--- ESTE ES EL DATO QUE SE ESTÁ PERDIENDO
+        precio: precioValue, 
+        costo: costoValue, 
+        cantidad: cantValue 
+    });
+    
+    renderCart();
+
+    // Limpiar el panel central de edición
+    document.getElementById('edit_id').value = "";
+    document.getElementById('edit_nombre').value = "";
+    document.getElementById('edit_precio').value = "";
+    document.getElementById('edit_costo').value = "";
+    document.getElementById('edit_cant').value = 1;
+}
+
+function renderCart() {
+    const tbody = document.getElementById('cartItems');
+    tbody.innerHTML = '';
+    let total = 0;
+    cart.forEach((item, index) => {
+        const sub = item.precio * item.cantidad;
+        total += sub;
+        tbody.innerHTML += `<tr class="align-middle">
+            <td style="font-size:0.8rem">${item.nombre}</td>
+            <td class="text-center">${item.cantidad}</td>
+            <td class="text-end">$${item.precio.toFixed(2)}</td>
+            <td class="text-end fw-bold">$${sub.toFixed(2)}</td>
+            <td class="text-end"><button class="btn btn-sm text-danger" onclick="cart.splice(${index},1);renderCart()"><i class="bi bi-trash"></i></button></td>
+        </tr>`;
+    });
+    document.getElementById('cartTotal').innerText = `$${total.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+}
+
+function mostrarOpcionesPago(val) {
+    const panel = document.getElementById('extra_pago');
+    ['CREDITO', 'DEBITO', 'TRANSFERENCIA', 'ECHEQ', 'CHEQUE_FISICO'].includes(val) ? panel.classList.remove('d-none') : panel.classList.add('d-none');
+}
+
+async function processSale(destino) {
+    if (cart.length === 0) { alert("Carrito vacío."); return; }
+    
+    const totalActual = parseFloat(document.getElementById('cartTotal').innerText.replace('$', '').replace(/\./g, '').replace(',', '.'));
+    const interes = parseFloat(document.getElementById('pago_interes').value) || 0;
+    const totalFinal = totalActual * (1 + (interes / 100));
+
+    const data = {
+        cliente_id: document.getElementById('cliente_id').value,
+        items: cart,
+        destino: destino,
+        pago: {
+            medio: document.getElementById('medio_pago').value,
+            cuotas: document.getElementById('pago_cuotas').value,
+            interes: interes,
+            referencia: document.getElementById('pago_ref').value,
+            total_final: totalFinal
+        }
+    };
+
+    const response = await fetch('/pos/procesar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data)
+    });
+
+    if (response.ok) {
+        const res = await response.json();
+        alert("Operación exitosa.");
+        if(confirm("¿Imprimir Remito/Cotización?")) {
+            const url = res.tipo === 'PRESUPUESTO' ? `/presupuesto/imprimir/${res.presupuesto_id}` : `/venta/imprimir/${res.venta_id}/remito`;
+            window.open(url, '_blank');
+        }
+        location.reload();
+    } else { alert("Error al procesar."); }
+}
+
+// Buscador Stock
+document.getElementById('posSearch').addEventListener('input', function(e) {
+    const t = e.target.value.toLowerCase();
+    document.querySelectorAll('.product-row').forEach(row => {
+        row.style.display = row.getAttribute('data-info').includes(t) ? '' : 'none';
+    });
+});
+</script>
+
+<style>
+    .bg-pink { background-color: var(--vacan-pink) !important; }
+    .text-pink { color: var(--vacan-pink) !important; }
+    .border-pink { border: 2px solid var(--vacan-pink) !important; }
+    .btn-pink { background-color: var(--vacan-pink); color: white; border: none; font-weight: bold; }
+    .italic { font-style: italic; }
+    .x-small { font-size: 0.65rem; text-transform: uppercase; }
+</style>
+{% endblock %}
