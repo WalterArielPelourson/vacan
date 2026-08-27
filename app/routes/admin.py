@@ -13,6 +13,9 @@ from xhtml2pdf import pisa
 from flask import make_response
 from sqlalchemy.orm import joinedload
 from datetime import timedelta
+from app.utils.security import roles_required, sucursal_filter, check_owner
+
+
 
 admin_bp = Blueprint('admin', __name__, url_prefix='/admin')
 
@@ -151,7 +154,8 @@ def toggle_usuario(id):
 
 @admin_bp.route('/reportes')
 @login_required
-@superadmin_required
+#@superadmin_required
+@roles_required('admin', 'superadmin')
 def reportes():
     sucursal_id = request.args.get('sucursal_id', type=int)
     sucursales = Sucursal.query.all()
@@ -337,38 +341,56 @@ def toggle_proveedor(id):
 
 @admin_bp.route('/proveedores/saldos')
 @login_required
+@roles_required('admin', 'superadmin')
 def lista_saldos_proveedores():
     # 1. Obtener todos los proveedores
     proveedores = Proveedor.query.all()
     resumen = []
-    deuda_total_general = 0 # <--- NUEVA VARIABLE PARA EL TOTAL
+    deuda_total_general = 0 
 
     for p in proveedores:
-        # Calculamos el saldo individual (Facturas - Pagos)
-        saldo = db.session.query(func.sum(MovimientoCtaCteProveedor.monto)).filter_by(proveedor_id=p.id).scalar() or 0
-        resumen.append({
-            'id': p.id, 
-            'razon_social': p.razon_social, 
-            'cuit': p.cuit, 
-            'saldo': saldo
-        })
-        # Sumamos al total general de la empresa
-        deuda_total_general += saldo
+        # --- APLICACIÓN DEL PUNTO 3-A: FILTRO DE SUCURSAL EN SALDOS ---
+        # Iniciamos la consulta de suma de movimientos para este proveedor
+        query_saldo = db.session.query(func.sum(MovimientoCtaCteProveedor.monto)).filter_by(proveedor_id=p.id)
+        
+        if current_user.rol == 'admin':
+            # El Administrador solo suma facturas y pagos realizados en SU sucursal
+            query_saldo = query_saldo.filter_by(sucursal_id=current_user.sucursal_id)
+        
+        saldo_individual = query_saldo.scalar() or 0
+        # -------------------------------------------------------------
 
-    # Variables para el Modal de Pago
-    todas_las_cajas = Caja.query.all()
+        # Solo agregamos al proveedor a la lista si tiene movimientos en esta sucursal
+        if saldo_individual != 0:
+            resumen.append({
+                'id': p.id, 
+                'razon_social': p.razon_social, 
+                'cuit': p.cuit, 
+                'saldo': saldo_individual
+            })
+            
+            # Sumamos al total general (solo si el saldo es deudor)
+            if saldo_individual > 0:
+                deuda_total_general += saldo_individual
+
+    # 2. Variables para el Modal de Pago (FILTRADAS POR SEGURIDAD)
+    # Usamos sucursal_filter para que el Admin solo vea sus propias cajas (Mostrador, Grande, etc.)
+    todas_las_cajas = sucursal_filter(Caja.query, Caja).all()
+    
+    # Los cheques en cartera se muestran todos (usualmente la cartera es compartida o central)
     cheques_en_cartera = Cheque.query.filter_by(estado='EN_CARTERA').all()
 
-    # Enviamos 'total_general' al HTML
     return render_template('admin/proveedores_saldos.html', 
                            proveedores=resumen, 
-                           total_general=deuda_total_general, # <--- ENVIADO
+                           total_general=deuda_total_general, 
                            cajas=todas_las_cajas, 
                            cheques_en_cartera=cheques_en_cartera)
     
     
+    
 @admin_bp.route('/proveedores/pago/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def registrar_pago_proveedor(id):
     prov = Proveedor.query.get_or_404(id)
     
@@ -442,18 +464,49 @@ def registrar_pago_proveedor(id):
 
    
 
+from app.utils.security import sucursal_filter # Asegúrate de que esté importado
+
 @admin_bp.route('/proveedores/detalle/<int:id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def detalle_cta_cte_proveedor(id):
     proveedor = Proveedor.query.get_or_404(id)
-    # Obtenemos los movimientos (Compras y Pagos)
-    movimientos = MovimientoCtaCteProveedor.query.filter_by(proveedor_id=id).order_by(MovimientoCtaCteProveedor.fecha.desc()).all()
     
-    # Calculamos el saldo actual
+    # --- CAPTURA DEL FILTRO DE SUCURSAL ---
+    f_sucursal = request.args.get('sucursal_id', type=int)
+    
+    # --- FILTRO DE MOVIMIENTOS POR SUCURSAL ---
+    # Iniciamos la consulta filtrando por el proveedor elegido
+    query_m = MovimientoCtaCteProveedor.query.filter_by(proveedor_id=id)
+    
+    if current_user.rol == 'admin':
+        # El Administrador solo ve las facturas y pagos de SU sucursal
+        query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
+        f_sucursal = current_user.sucursal_id # Forzamos el ID para la lógica posterior
+    elif f_sucursal:
+        # El Superadmin puede filtrar por la sucursal seleccionada
+        query_m = query_m.filter_by(sucursal_id=f_sucursal)
+    
+    # Obtenemos los movimientos ordenados por fecha
+    movimientos = query_m.order_by(MovimientoCtaCteProveedor.fecha.desc()).all()
+    
+    # 2. CALCULAR SALDO REAL SEGÚN EL FILTRO
+    # Sumamos los montos de la lista filtrada para que el saldo coincida con lo que se ve
     saldo_actual = sum(m.monto for m in movimientos)
     
-    # Variables para el Modal de Pago (Igual que en Clientes)
-    cajas = Caja.query.all()
+    # 3. VARIABLES PARA EL MODAL DE PAGO Y SELECTORES
+    # Traemos todas las sucursales para el dropdown del filtro (Superadmin)
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+
+    # Filtramos las cajas/cuentas:
+    # Si hay una sucursal filtrada, mostramos solo sus cajas para que el pago sea coherente
+    if f_sucursal:
+        cajas = Caja.query.filter_by(sucursal_id=f_sucursal).all()
+    else:
+        # Si no hay filtro, usamos el sucursal_filter estándar (que filtra si es Admin)
+        cajas = sucursal_filter(Caja.query, Caja).all()
+    
+    # Los cheques en cartera se mantienen globales (en mano)
     cheques_en_cartera = Cheque.query.filter_by(estado='EN_CARTERA').all()
     
     return render_template('admin/proveedores_detalle.html', 
@@ -461,35 +514,50 @@ def detalle_cta_cte_proveedor(id):
                            movimientos=movimientos, 
                            saldo=saldo_actual,
                            cajas=cajas,
+                           sucursales=sucursales,
+                           f_sucursal=f_sucursal,
                            cheques_en_cartera=cheques_en_cartera)
-
+    
+    
 @admin_bp.route('/cta-cte')
 @login_required
+@roles_required('admin', 'superadmin')
 def lista_cta_cte():
-    clientes = Cliente.query.all()
     saldos = []
-    deuda_total_global = 0 # <--- NUEVA VARIABLE PARA LA SUMATORIA
+    total_global_sucursal = 0
+
+    # 1. Filtro de Clientes: Solo traer clientes que operaron en MI sucursal
+    if current_user.rol == 'admin':
+        clientes = Cliente.query.join(MovimientoCtaCte).filter(
+            MovimientoCtaCte.sucursal_id == current_user.sucursal_id
+        ).distinct().all()
+    else:
+        clientes = Cliente.query.all()
 
     for c in clientes:
-        # Sumamos movimientos (Deuda - Pagos)
-        saldo_individual = db.session.query(func.sum(MovimientoCtaCte.monto)).filter_by(cliente_id=c.id).scalar() or 0
+        # 2. Filtro de Saldo: Sumar solo lo que pertenece a esta sucursal
+        query_m = MovimientoCtaCte.query.filter_by(cliente_id=c.id)
+        if current_user.rol == 'admin':
+            query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
         
-        saldos.append({
-            'id': c.id,
-            'razon_social': c.razon_social,
-            'cuit': c.cuit,
-            'saldo': saldo_individual
-        })
+        saldo_individual = db.session.query(func.sum(MovimientoCtaCte.monto)).filter(
+            MovimientoCtaCte.id.in_([m.id for m in query_m.all()])
+        ).scalar() or 0
         
-        # Solo sumamos al total global si es deuda (saldo positivo)
-        if saldo_individual > 0:
-            deuda_total_global += saldo_individual
+        # 3. Solo mostrar si hay deuda en esta sucursal
+        if saldo_individual != 0:
+            saldos.append({
+                'id': c.id,
+                'razon_social': c.razon_social,
+                'cuit': c.cuit,
+                'saldo': saldo_individual
+            })
+            if saldo_individual > 0:
+                total_global_sucursal += saldo_individual
 
     return render_template('admin/cta_cte_lista.html', 
                            saldos=saldos, 
-                           total_global=deuda_total_global) # <--- ENVIADO AL HTML
-    
-    
+                           total_global=total_global_sucursal)
 
 #@admin_bp.route('/cta-cte/<int:cliente_id>')
 #@login_required
@@ -511,27 +579,76 @@ def lista_cta_cte():
     
 
 
+#@admin_bp.route('/cta-cte/<int:cliente_id>')
+#@login_required
+#@roles_required('admin', 'superadmin')
+#def detalle_cta_cte(cliente_id):
+#    cliente = Cliente.query.get_or_404(cliente_id)
+#    
+#    # --- CAMBIO AQUÍ: Forzamos la carga de la venta y sus detalles ---
+#    movimientos = MovimientoCtaCte.query.options(
+#        joinedload(MovimientoCtaCte.venta).joinedload(Venta.detalles)
+#    ).filter_by(cliente_id=cliente_id).order_by(MovimientoCtaCte.fecha.desc()).all()
+#    # -----------------------------------------------------------------
+#    
+#    saldo_actual = sum(m.monto for m in movimientos)
+#    cajas = Caja.query.all()
+#    hoy = get_argentina_time().date()
+#    
+#    return render_template('admin/cta_cte_detalle.html', 
+#                           cliente=cliente, movimientos=movimientos, 
+#                           saldo=saldo_actual, cajas=cajas, hoy=hoy)
 @admin_bp.route('/cta-cte/<int:cliente_id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def detalle_cta_cte(cliente_id):
     cliente = Cliente.query.get_or_404(cliente_id)
     
-    # --- CAMBIO AQUÍ: Forzamos la carga de la venta y sus detalles ---
-    movimientos = MovimientoCtaCte.query.options(
-        joinedload(MovimientoCtaCte.venta).joinedload(Venta.detalles)
-    ).filter_by(cliente_id=cliente_id).order_by(MovimientoCtaCte.fecha.desc()).all()
-    # -----------------------------------------------------------------
+    # --- CAPTURA DEL FILTRO DE SUCURSAL ---
+    f_sucursal = request.args.get('sucursal_id', type=int)
     
+    # 1. Filtro Estricto de Movimientos por Sucursal
+    query_m = MovimientoCtaCte.query.filter_by(cliente_id=cliente_id)
+    
+    if current_user.rol == 'admin':
+        # El Admin NO ve ventas ni cobros de otros locales
+        query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
+        f_sucursal = current_user.sucursal_id # Sincronizamos el ID para la lógica de cajas
+    elif f_sucursal:
+        # El Superadmin filtra por la sucursal elegida en el selector
+        query_m = query_m.filter_by(sucursal_id=f_sucursal)
+    
+    movimientos = query_m.order_by(MovimientoCtaCte.fecha.desc()).all()
+
+    # 2. Saldo calculado sobre la lista filtrada
     saldo_actual = sum(m.monto for m in movimientos)
-    cajas = Caja.query.all()
+    
+    # 3. Preparación de variables para el Template (Filtros y Cobranza)
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+
+    # Lógica de Cajas: 
+    # Si hay una sucursal filtrada (o es Admin), traemos solo las cajas de esa sucursal.
+    if f_sucursal:
+        cajas = Caja.query.filter_by(sucursal_id=f_sucursal).all()
+    else:
+        # Si el Superadmin está en vista "Global", usamos sucursal_filter (que trae las de su local o todas según el util)
+        cajas = sucursal_filter(Caja.query, Caja).all()
+
     hoy = get_argentina_time().date()
     
     return render_template('admin/cta_cte_detalle.html', 
-                           cliente=cliente, movimientos=movimientos, 
-                           saldo=saldo_actual, cajas=cajas, hoy=hoy)
-
+                           cliente=cliente, 
+                           movimientos=movimientos, 
+                           saldo=saldo_actual, 
+                           cajas=cajas, 
+                           sucursales=sucursales, # Enviamos para el selector de sucursal
+                           f_sucursal=f_sucursal, # Enviamos para mantener el estado del selector
+                           hoy=hoy)
+    
+    
 @admin_bp.route('/proveedores/pago-compuesto/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def pago_compuesto_proveedor(id):
     prov = Proveedor.query.get_or_404(id)
     data = request.get_json()
@@ -549,6 +666,7 @@ def pago_compuesto_proveedor(id):
         nuevo_mov_prov = MovimientoCtaCteProveedor(
             proveedor_id=id,
             monto=-total_abonado, 
+            sucursal_id=current_user.sucursal_id,
             descripcion=f"Pago Compuesto ({len(items_pago)} medios)",
             referencia=f"OP-{int(datetime.now().timestamp())}"
         )
@@ -606,6 +724,7 @@ def pago_compuesto_proveedor(id):
 
 @admin_bp.route('/cta-cte/pago/<int:cliente_id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def registrar_pago(cliente_id):
     # --- CAPTURA DE DATOS DEL FORMULARIO ---
     monto = float(request.form.get('monto'))
@@ -668,6 +787,7 @@ def registrar_pago(cliente_id):
 
 @admin_bp.route('/cta-cte/pago-compuesto/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def pago_compuesto_cliente(id):
     cliente = Cliente.query.get_or_404(id)
     data = request.get_json()
@@ -738,6 +858,7 @@ def pago_compuesto_cliente(id):
             cliente_id=id,
             monto=-total_cobrado, # Valor negativo resta la deuda general
             tipo='PAGO',
+            sucursal_id=current_user.sucursal_id,
             descripcion=desc_pago
         )
         db.session.add(mov_c)
@@ -753,6 +874,7 @@ def pago_compuesto_cliente(id):
 
 @admin_bp.route('/reportes/morosidad')
 @login_required
+@roles_required('admin', 'superadmin')
 def reporte_morosidad():
     # 1. Parámetros de filtro y fecha actual
     filtro = request.args.get('filtro', 'vencidas') # 'vencidas' o 'proximas'
@@ -761,6 +883,14 @@ def reporte_morosidad():
     # 2. Buscamos todas las ventas que NO estén totalmente pagadas
     # Filtramos por saldo pendiente (total - total_pagado > 0)
     ventas_pendientes = Venta.query.filter(Venta.total > Venta.total_pagado).all()
+    
+    # --- APLICACIÓN DEL BLINDAJE ---
+#    if current_user.rol == 'admin':
+#        # El Admin solo ve facturas de SU sucursal
+#        query_base = query_base.filter_by(sucursal_id=current_user.sucursal_id)
+    # Si es Superadmin, el query_base sigue igual (ve todo)
+    # -------------------------------
+    
     
     reporte = []
     total_deuda_filtro = 0
@@ -795,6 +925,7 @@ def reporte_morosidad():
 
 @admin_bp.route('/cta-cte/cobrar/<int:cliente_id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def cobrar_cta_cte_avanzado(cliente_id):
     monto = float(request.form.get('monto'))
     medio = request.form.get('medio_pago') # 'EFECTIVO', 'TRANSFERENCIA', 'CHEQUE'
@@ -847,6 +978,7 @@ from datetime import datetime
 
 @admin_bp.route('/cta-cte/facturar-remito/<int:venta_id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def facturar_remito_cta(venta_id):
     venta = Venta.query.get_or_404(venta_id)
     venta.estado_arca = 'FACTURADO'
@@ -857,6 +989,7 @@ def facturar_remito_cta(venta_id):
 
 @admin_bp.route('/cta-cte/editar-fecha/<int:venta_id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def editar_fecha_remito_cta(venta_id):
     venta = Venta.query.get_or_404(venta_id)
     nueva_fecha_str = request.form.get('nueva_fecha')
@@ -935,10 +1068,20 @@ def consultar_cuit_arca(cuit):
 
 @admin_bp.route('/tesoreria')
 @login_required
+@roles_required('admin', 'superadmin')
 def tesoreria_dashboard():
+     # Si es ADMIN, filtramos por su ID de sucursal
+    if current_user.rol == 'admin':
+        fisicas = Caja.query.filter_by(tipo='FISICA', sucursal_id=current_user.sucursal_id).all()
+        virtuales = Caja.query.filter_by(tipo='VIRTUAL', sucursal_id=current_user.sucursal_id).all()
+    else:
+        # Superadmin ve todas
+        fisicas = Caja.query.filter_by(tipo='FISICA').all()
+        virtuales = Caja.query.filter_by(tipo='VIRTUAL').all()
+    
     # 1. Traer las cajas
-    fisicas = Caja.query.filter_by(tipo='FISICA').all()
-    virtuales = Caja.query.filter_by(tipo='VIRTUAL').all()
+    #fisicas = Caja.query.filter_by(tipo='FISICA').all()
+    #virtuales = Caja.query.filter_by(tipo='VIRTUAL').all()
     
     # 2. VERIFICACIÓN Y CARGA AUTOMÁTICA DE RUBROS
     lista_categorias = CategoriaMovimiento.query.all()
@@ -978,24 +1121,79 @@ def tesoreria_dashboard():
 
 @admin_bp.route('/tesoreria/caja/<int:id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def detalle_caja(id):
     caja = Caja.query.get_or_404(id)
-    # Vemos los últimos 50 movimientos de esta caja
-    movimientos = MovimientoFinanciero.query.filter_by(caja_id=id).order_by(MovimientoFinanciero.fecha.desc()).limit(50).all()
-    return render_template('admin/caja_detalle.html', caja=caja, movimientos=movimientos)
+    
+    # 1. Capturamos los filtros de la URL
+    fecha_desde = request.args.get('desde')
+    fecha_hasta = request.args.get('hasta')
+    busqueda = request.args.get('q', '').strip()
+
+    # 2. Consulta base filtrada por la caja actual
+    query = MovimientoFinanciero.query.filter_by(caja_id=id)
+
+    # 3. Filtro por Fecha
+    if fecha_desde:
+        query = query.filter(MovimientoFinanciero.fecha >= datetime.strptime(fecha_desde, '%Y-%m-%d'))
+    if fecha_hasta:
+        # Agregamos 23:59:59 para que incluya todo el día final
+        query = query.filter(MovimientoFinanciero.fecha <= datetime.strptime(fecha_hasta + " 23:59:59", '%Y-%m-%d %H:%M:%S'))
+
+    # 4. Filtro por Descripción / Concepto (Campo 'motivo' en tu modelo)
+    if busqueda:
+        # Buscamos en el motivo o concepto del movimiento
+        query = query.filter(MovimientoFinanciero.motivo.ilike(f"%{busqueda}%"))
+
+    # 5. Ejecutar la consulta (quitamos el limit si hay filtros, o lo dejamos por defecto)
+    if not (fecha_desde or fecha_hasta or busqueda):
+        movimientos = query.order_by(MovimientoFinanciero.fecha.desc()).limit(100).all()
+    else:
+        movimientos = query.order_by(MovimientoFinanciero.fecha.desc()).all()
+
+    return render_template('admin/caja_detalle.html', 
+                           caja=caja, 
+                           movimientos=movimientos,
+                           fecha_desde=fecha_desde,
+                           fecha_hasta=fecha_hasta,
+                           busqueda=busqueda)
+    
     
 
-
 @admin_bp.route('/tesoreria/nueva', methods=['POST'])
+#@login_required
+#@superadmin_required
 @login_required
-@superadmin_required
+@roles_required('admin', 'superadmin')
 def nueva_caja():
+    # Solo admin o superadmin pueden crear cajas
+    if current_user.rol not in ['admin', 'superadmin']:
+        flash("No tiene permisos para crear cuentas.", "danger")
+        return redirect(url_for('inventory.index'))
+
+    # --- LÓGICA DE ASIGNACIÓN DE SUCURSAL ---
+    if current_user.rol == 'admin':
+        # El administrador de sucursal NO elige, se le asigna la SUYA
+        id_sucursal_destino = current_user.sucursal_id
+    else:
+        # El Superadmin elige de un selector en el modal
+        id_sucursal_destino = request.form.get('sucursal_id')
+
     nueva = Caja(
         nombre=request.form.get('nombre').upper(),
-        tipo=request.form.get('tipo'),
-        sucursal_id=current_user.sucursal_id,
+        tipo=request.form.get('tipo'), # 'FISICA' o 'VIRTUAL'
+        sucursal_id=id_sucursal_destino,
         saldo_actual=0.0
     )
+    
+   
+#def nueva_caja():
+    #nueva = Caja(
+    #    nombre=request.form.get('nombre').upper(),
+    #    tipo=request.form.get('tipo'),
+    #    sucursal_id=current_user.sucursal_id,
+    #    saldo_actual=0.0
+    #)
     db.session.add(nueva)
     db.session.commit()
     flash(f"Cuenta/Caja '{nueva.nombre}' habilitada.", "success")
@@ -1007,6 +1205,7 @@ def nueva_caja():
 
 @admin_bp.route('/cheques')
 @login_required
+@roles_required('admin', 'superadmin')
 def cartera_cheques():
     hoy = date.today()
     # Solo mostramos los que están físicamente en la empresa
@@ -1019,6 +1218,7 @@ def cartera_cheques():
 
 @admin_bp.route('/cheque/procesar/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def procesar_cheque_pro(id):
     ch = Cheque.query.get_or_404(id)
     caja_destino_id = request.form.get('caja_id')
@@ -1063,6 +1263,7 @@ def procesar_cheque_pro(id):
 
 @admin_bp.route('/cheque/cambiar-estado/<int:id>/<string:nuevo_estado>')
 @login_required
+@roles_required('admin', 'superadmin')
 def cambiar_estado_cheque(id, nuevo_estado):
     ch = Cheque.query.get_or_404(id)
     ch.estado = nuevo_estado # 'DEPOSITADO' o 'ENTREGADO'
@@ -1073,6 +1274,7 @@ def cambiar_estado_cheque(id, nuevo_estado):
 
 @admin_bp.route('/cheque/rechazar/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def rechazar_cheque(id):
     ch = Cheque.query.get_or_404(id)
     gastos_bancarios = float(request.form.get('gastos') or 0)
@@ -1119,6 +1321,7 @@ def rechazar_cheque(id):
 #MOVIMIENTO MANUALES DE CAJA O CTAS VIRTUALES 
 @admin_bp.route('/tesoreria/movimiento-manual', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def movimiento_manual():
     caja_id = request.form.get('caja_id')
     tipo = request.form.get('tipo') # 'INGRESO' o 'EGRESO'
@@ -1146,6 +1349,7 @@ def movimiento_manual():
 
 @admin_bp.route('/tesoreria/transferencia', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def transferencia_fondos():
     origen_id = request.form.get('origen_id')
     destino_id = request.form.get('destino_id')
@@ -1182,6 +1386,7 @@ def transferencia_fondos():
 
 @admin_bp.route('/tesoreria/cerrar-caja/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def cerrar_caja(id):
     caja = Caja.query.get_or_404(id)
     saldo_real = float(request.form.get('saldo_real'))
@@ -1226,6 +1431,7 @@ def cerrar_caja(id):
 
 @admin_bp.route('/tesoreria/historial-cierres')
 @login_required
+@roles_required('admin', 'superadmin')
 def historial_cierres():
     cierres = CierreCaja.query.order_by(CierreCaja.fecha_cierre.desc()).all()
     return render_template('admin/cierres_historial.html', cierres=cierres)
@@ -1234,6 +1440,7 @@ def historial_cierres():
 
 @admin_bp.route('/compras')
 @login_required
+@roles_required('admin', 'superadmin')
 def modulo_compras():
     # Necesitamos las sucursales para que el usuario elija dónde entra la mercadería
     proveedores = Proveedor.query.filter_by(activo=True).all()
@@ -1268,6 +1475,7 @@ def generar_proximo_sku_vacan():
 
 @admin_bp.route('/compras/procesar', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def procesar_compra():
     if 'archivo_excel' in request.files:
         # --- LÓGICA EXCEL CON DESGLOSE FISCAL, MULTISUCURSAL Y NC/ND ---
@@ -1342,7 +1550,7 @@ def procesar_compra():
             nueva_compra.total = total_final
 
             db.session.add(MovimientoCtaCteProveedor(
-                proveedor_id=prov_id, monto=total_final, compra=nueva_compra, 
+                proveedor_id=prov_id, monto=total_final, compra=nueva_compra, sucursal_id=suc_id,
                 descripcion=f"{tipo_comp} #{nro_fact} (Excel)"
             ))
             
@@ -1427,7 +1635,7 @@ def procesar_compra():
                 db.session.flush()
 
             db.session.add(MovimientoCtaCteProveedor(
-                proveedor_id=prov_id, monto=total_final, compra=nueva_compra, 
+                proveedor_id=prov_id, monto=total_final, compra=nueva_compra, sucursal_id=suc_id,
                 descripcion=f"{tipo_comp} #{nro_fact} (Manual)"
             ))
             
@@ -1443,6 +1651,7 @@ def procesar_compra():
 
 @admin_bp.route('/proveedores/devolucion-cheque/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def devolver_cheque_cartera(id):
     ch = Cheque.query.get_or_404(id)
     prov_id = ch.proveedor_id 
@@ -1478,6 +1687,7 @@ def devolver_cheque_cartera(id):
 
 @admin_bp.route('/cheques/reporte-historico')
 @login_required
+@roles_required('admin', 'superadmin')
 def reporte_historico_cheques():
     # 1. Captura de Filtros (Incluyendo Fechas)
     f_estado = request.args.get('estado')
@@ -1528,6 +1738,7 @@ def reporte_historico_cheques():
 
 @admin_bp.route('/proveedores/ajuste/<int:id>', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def registrar_ajuste_proveedor(id):
     prov = Proveedor.query.get_or_404(id)
     tipo = request.form.get('tipo') # 'NC' o 'ND'
@@ -1567,6 +1778,7 @@ def registrar_ajuste_proveedor(id):
         
 @admin_bp.route('/reportes/deudas-proveedores')
 @login_required
+@roles_required('admin', 'superadmin')
 def reporte_deudas_prov():
     filtro = request.args.get('filtro', 'vencidas') # 'vencidas' o 'proximas'
     hoy = get_argentina_time().date()
@@ -1607,6 +1819,7 @@ def reporte_deudas_prov():
  
 @admin_bp.route('/proveedores/imprimir-pago/<int:movimiento_id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def imprimir_pago_proveedor(movimiento_id):
     # Traemos el pago de la Cta Cte
     mov = MovimientoCtaCteProveedor.query.get_or_404(movimiento_id)
@@ -1631,6 +1844,7 @@ def generar_proximo_sku_vacan():
 
 @admin_bp.route('/inventario/carga-masiva', methods=['GET', 'POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def carga_masiva_stock():
     if request.method == 'POST':
         archivo = request.files.get('archivo_excel')
@@ -1661,6 +1875,7 @@ def carga_masiva_stock():
 
                 # --- 2. CAPTURA DE CAMPOS ---
                 nom = str(row.get('nombre', 'PRODUCTO NUEVO')).strip().upper()
+                ubi = str(row.get('ubicacion', '')).strip().upper() if not pd.isna(row.get('ubicacion')) else None
                 s_vacan = str(row.get('sku_vacan', '')).strip().upper() if not pd.isna(row.get('sku_vacan')) else None
                 rub = str(row.get('rubro', '')).strip().upper() if not pd.isna(row.get('rubro')) else "GENERAL"
                 sub = str(row.get('subrubro', '')).strip().upper() if not pd.isna(row.get('subrubro')) else "GENERAL"
@@ -1696,6 +1911,7 @@ def carga_masiva_stock():
                         subrubro=sub,
                         sucursal_id=suc_id,
                         proveedor_id=prov_id, # Asociamos al proveedor
+                        ubicacion=ubi,
                         stock=cant,
                         costo=cost,
                         precio=prec if prec > 0 else (cost * 1.35)
@@ -1721,7 +1937,7 @@ def carga_masiva_stock():
                             usuario_id=current_user.id
                         )
                         db.session.add(hist)
-                    
+                    if ubi: rep.ubicacion = ubi
                     # SUMAMOS la cantidad nueva a la existente
                     rep.stock += cant 
                     
@@ -1760,6 +1976,7 @@ def render_pdf(template_src, context_dict):
 
 @admin_bp.route('/exportar/remito/<int:id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def pdf_remito(id):
     venta = Venta.query.get_or_404(id)
     pdf = render_pdf('print/remito_pdf.html', {'venta': venta})
@@ -1770,6 +1987,7 @@ def pdf_remito(id):
 
 @admin_bp.route('/exportar/recibo/<int:mov_id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def pdf_recibo(mov_id):
     mov = MovimientoCtaCte.query.get_or_404(mov_id)
     pdf = render_pdf('print/recibo_pdf.html', {'m': mov})
@@ -1781,14 +1999,19 @@ def pdf_recibo(mov_id):
 
 @admin_bp.route('/traspasos')
 @login_required
+@roles_required('admin', 'superadmin')
 def modulo_traspasos():
     sucursales = Sucursal.query.filter_by(activo=True).all()
     # Enviamos los traspasos realizados para el historial
     historial = Traspaso.query.order_by(Traspaso.fecha.desc()).all()
     return render_template('admin/traspasos.html', sucursales=sucursales, historial=historial)
 
+
+
+
 @admin_bp.route('/traspasos/obtener-stock/<int:sucursal_id>')
 @login_required
+@roles_required('admin', 'superadmin')
 def obtener_stock_sucursal(sucursal_id):
     # Capturamos el término de búsqueda que viene del buscador
     query = request.args.get('q', '').strip().lower()
@@ -1809,6 +2032,7 @@ def obtener_stock_sucursal(sucursal_id):
 
 @admin_bp.route('/traspasos/procesar', methods=['POST'])
 @login_required
+@roles_required('admin', 'superadmin')
 def procesar_traspaso():
     data = request.get_json()
     origen_id = int(data.get('origen_id'))
@@ -1873,10 +2097,14 @@ def procesar_traspaso():
 
 @admin_bp.route('/reportes/rentabilidad-premium')
 @login_required
+@roles_required('admin', 'superadmin')
 def reporte_rentabilidad():
     # 1. GESTIÓN DE FECHAS (Periodo Actual y Anterior)
     desde_str = request.args.get('desde', date.today().replace(day=1).strftime('%Y-%m-%d'))
     hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
+    
+    # --- CAPTURA DEL FILTRO DE SUCURSAL ---
+    f_sucursal = request.args.get('sucursal_id', type=int)
     
     desde = datetime.strptime(desde_str, '%Y-%m-%d')
     hasta = datetime.strptime(hasta_str, '%Y-%m-%d')
@@ -1886,7 +2114,21 @@ def reporte_rentabilidad():
     ant_desde = desde - timedelta(days=dias_periodo)
     ant_hasta = desde - timedelta(days=1)
 
-    sucursales = Sucursal.query.filter_by(activo=True).all()
+    # --- LÓGICA DE FILTRO DE SEGURIDAD Y LISTADO DE SUCURSALES ---
+    # Obtenemos todas las sucursales activas para el selector del Superadmin
+    sucursales_lista = Sucursal.query.filter_by(activo=True).all()
+
+    if current_user.rol == 'admin':
+        # El Admin está bloqueado a su sucursal
+        f_sucursal = current_user.sucursal_id
+        sucursales_a_procesar = Sucursal.query.filter_by(id=current_user.sucursal_id).all()
+    elif f_sucursal:
+        # El Superadmin filtró una sucursal específica
+        sucursales_a_procesar = Sucursal.query.filter_by(id=f_sucursal).all()
+    else:
+        # Vista global para Superadmin
+        sucursales_a_procesar = sucursales_lista
+    
     reporte_sucursales = []
     
     # --- TOTALES GLOBALES (INICIALIZACIÓN) ---
@@ -1899,7 +2141,7 @@ def reporte_rentabilidad():
     g_iva_v = 0
 
     # --- PROCESAMIENTO POR SUCURSAL ---
-    for suc in sucursales:
+    for suc in sucursales_a_procesar:
         # Stock Valorizado
         s_costo = db.session.query(func.sum(Repuesto.stock * Repuesto.costo)).filter_by(sucursal_id=suc.id).scalar() or 0
         s_venta = db.session.query(func.sum(Repuesto.stock * Repuesto.precio)).filter_by(sucursal_id=suc.id).scalar() or 0
@@ -1947,24 +2189,47 @@ def reporte_rentabilidad():
         g_gastos += s_gastos
         g_iva_v += s_iva_v
 
-    # --- LÓGICA COMPARATIVA (PERIODO ANTERIOR) ---
-    ant_ventas = db.session.query(func.sum(Venta.total)).filter(Venta.fecha.between(ant_desde, ant_hasta)).scalar() or 0
-    ant_compras = db.session.query(func.sum(Compra.total)).filter(Compra.fecha.between(ant_desde, ant_hasta)).scalar() or 0
+    # --- LÓGICA COMPARATIVA (PERIODO ANTERIOR) FILTRADA ---
+    q_ant_v = db.session.query(func.sum(Venta.total)).filter(Venta.fecha.between(ant_desde, ant_hasta))
+    q_ant_c = db.session.query(func.sum(Compra.total)).filter(Compra.fecha.between(ant_desde, ant_hasta))
 
-    # --- SALDOS DE CUENTA CORRIENTE (LIQUIDEZ) ---
-    total_cta_cte_clientes = db.session.query(func.sum(MovimientoCtaCte.monto)).scalar() or 0
-    total_cta_cte_prov = db.session.query(func.sum(MovimientoCtaCteProveedor.monto)).scalar() or 0
+    if f_sucursal:
+        q_ant_v = q_ant_v.filter_by(sucursal_id=f_sucursal)
+        # Para compras unimos con Repuesto para filtrar por sucursal de destino
+        q_ant_c = q_ant_c.join(DetalleCompra).join(Repuesto).filter(Repuesto.sucursal_id == f_sucursal)
 
-    # Ranking de productos (Top 5)
-    ranking = db.session.query(Repuesto.nombre, func.sum(DetalleVenta.cantidad).label('total'))\
+    ant_ventas = q_ant_v.scalar() or 0
+    ant_compras = q_ant_c.scalar() or 0
+
+    # --- SALDOS DE CUENTA CORRIENTE (LIQUIDEZ) FILTRADOS ---
+    q_total_cli = db.session.query(func.sum(MovimientoCtaCte.monto))
+    q_total_prov = db.session.query(func.sum(MovimientoCtaCteProveedor.monto))
+
+    if f_sucursal:
+        q_total_cli = q_total_cli.filter_by(sucursal_id=f_sucursal)
+        q_total_prov = q_total_prov.filter_by(sucursal_id=f_sucursal)
+
+    total_cta_cte_clientes = q_total_cli.scalar() or 0
+    total_cta_cte_prov = q_total_prov.scalar() or 0
+
+    # Ranking de productos (Top 5) FILTRADO
+    q_ranking = db.session.query(Repuesto.nombre, func.sum(DetalleVenta.cantidad).label('total'))\
         .join(DetalleVenta).join(Venta).filter(Venta.fecha.between(desde_str, hasta_str))\
-        .group_by(Repuesto.id).order_by(text('total DESC')).limit(5).all()
+        .group_by(Repuesto.id).order_by(text('total DESC'))
 
+    if f_sucursal:
+        q_ranking = q_ranking.filter(Venta.sucursal_id == f_sucursal)
+
+    ranking = q_ranking.limit(5).all()
+
+    # Total Rechazados (Filtrado por cliente/venta si es necesario, aquí global por ahora)
     total_rechazados = db.session.query(func.sum(Cheque.monto)).filter_by(estado='RECHAZADO').scalar() or 0
 
     return render_template('admin/reporte_premium.html',
                            desde=desde_str, hasta=hasta_str,
                            sucursales_data=reporte_sucursales,
+                           sucursales_lista=sucursales_lista, # Para el selector HTML
+                           f_sucursal=f_sucursal, # ID de la sucursal actual
                            g_stock_costo=g_stock_costo,
                            g_stock_venta=g_stock_venta,
                            g_ventas=g_ventas,

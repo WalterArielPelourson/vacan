@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="row mb-4">
+<div class="row mb-4 align-items-center">
     <div class="col-md-6">
         <a href="{{ url_for('admin.lista_saldos_proveedores') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Volver a Listado</a>
         <h2 class="fw-bold text-dark mt-2">{{ proveedor.razon_social }}</h2>
@@ -17,6 +17,51 @@
     </div>
 </div>
 
+<!-- ==========================================
+     BARRA DE FILTROS DE SUCURSAL
+     ========================================== -->
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body bg-light border rounded">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small fw-bold text-muted text-uppercase">Filtrar por Sucursal</label>
+                <select name="sucursal_id" class="form-select border-dark shadow-sm" {% if current_user.rol == 'admin' %}disabled{% endif %}>
+                    <option value="">Todas las Sucursales (Global)</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if f_sucursal == s.id %}selected{% endif %}>
+                        {{ s.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if current_user.rol == 'admin' %}
+                    <input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">
+                    <small class="text-muted">Restringido a tu sucursal actual</small>
+                {% endif %}
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-dark w-100 fw-bold">
+                    <i class="bi bi-filter"></i> FILTRAR
+                </button>
+            </div>
+            <div class="col-md-2">
+                <a href="{{ url_for('admin.detalle_cta_cte_proveedor', id=proveedor.id) }}" class="btn btn-outline-secondary w-100 fw-bold">
+                    LIMPIAR
+                </a>
+            </div>
+            <div class="col-md-4 text-md-end">
+                <span class="badge {% if f_sucursal %}bg-pink{% else %}bg-secondary{% endif %} p-2 shadow-sm">
+                    <i class="bi bi-geo-alt-fill"></i> 
+                    {% if f_sucursal %}
+                        Viendo movimientos de Sucursal seleccionada
+                    {% else %}
+                        Viendo movimientos Consolidados
+                    {% endif %}
+                </span>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="card shadow border-0">
     <div class="card-header bg-dark text-white fw-bold">HISTORIAL DE FACTURAS Y PAGOS</div>
     <div class="card-body p-0">
@@ -25,6 +70,7 @@
                 <thead class="table-light">
                     <tr>
                         <th>Fecha</th>
+                        <th>Sucursal</th> <!-- Nueva columna para claridad -->
                         <th>Concepto / Detalle</th>
                         <th class="text-end">Debe (Facturas +)</th>
                         <th class="text-end">Haber (Pagos -)</th>
@@ -35,6 +81,9 @@
                     {% for m in movimientos %}
                     <tr class="{% if m.monto > 0 and m.compra and m.compra.esta_pagada %} table-success {% endif %}">
                         <td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                        <td>
+                            <span class="small text-muted fw-bold">{{ m.sucursal.nombre if m.sucursal else 'S/S' }}</span>
+                        </td>
                         <td>
                             {{ m.descripcion }}
                             {% if m.monto > 0 and m.compra %}
@@ -61,7 +110,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="5" class="text-center py-5">No hay movimientos registrados con este proveedor.</td></tr>
+                    <tr><td colspan="6" class="text-center py-5 text-muted">No hay movimientos registrados con los filtros aplicados.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -94,6 +143,7 @@
                                 </option>
                                 {% endfor %}
                             </select>
+                            <small class="text-muted">Las cajas mostradas pertenecen a la sucursal del filtro/sesión.</small>
                         </div>
 
                         <div class="mb-3">
@@ -127,12 +177,6 @@
                         <h6 class="fw-bold text-danger mb-2 text-uppercase">2. Aplicar pago a Facturas</h6>
                         <div class="border rounded p-2 bg-light shadow-sm" style="max-height: 250px; overflow-y: auto;">
                             {% for m in movimientos %}
-                                {# 
-                                Mostramos el ítem si:
-                                1. El monto es mayor a 0 (es una deuda, no un pago anterior).
-                                2. El movimiento tiene una compra asociada (m.compra existe).
-                                3. La compra no está totalmente pagada.
-                                #}
                                 {% if m.monto > 0 and m.compra and not m.compra.esta_pagada %}
                                 <div class="row align-items-center border-bottom py-2 g-2 bg-white mb-1 mx-0 rounded shadow-sm">
                                     <div class="col-7">
@@ -210,7 +254,6 @@ document.getElementById('sel_cheque').addEventListener('change', function() {
     document.getElementById('inp_monto').value = this.options[this.selectedIndex].getAttribute('data-monto');
 });
 
-// NUEVO: Función para habilitar monto parcial al tildar factura
 function toggleMontoImputar(checkbox) {
     const input = document.getElementById('monto_imp' + checkbox.value);
     input.disabled = !checkbox.checked;
@@ -261,7 +304,6 @@ function dibujarTablaPagos() {
 async function finalizarPagoProveedor() {
     if (listaPagos.length === 0) return alert("Cargue medios de pago.");
     
-    // Capturamos conciliaciones parciales
     const conciliaciones = [];
     document.querySelectorAll('.chk-compra:checked').forEach(cb => {
         conciliaciones.push({
@@ -291,6 +333,7 @@ async function finalizarPagoProveedor() {
     .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 15px; overflow: hidden; }
     .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
     .btn-pink:hover { background-color: #d4006a; color: white; }
+    .bg-pink { background-color: var(--vacan-pink); color: white; }
     .table-success { background-color: rgba(25, 135, 84, 0.1) !important; }
 </style>
 {% endblock %}

@@ -70,6 +70,11 @@
                                 <label class="form-label fw-bold small">SUB-RUBRO</label>
                                 <input type="text" name="subrubro" class="form-control" value="{{ repuesto.subrubro or '' }}">
                             </div>
+                            <div class="col-md-4 mb-3">
+                                <label class="form-label fw-bold">Ubicación Física (Opcional)</label>
+                                <input type="text" name="ubicacion" class="form-control" placeholder="Ej: Estante A-12" value="{{ repuesto.ubicacion if repuesto else '' }}">
+                                <div class="form-text">Fila, estante o pasillo del depósito.</div>
+                            </div>
                             <div class="col-md-2 mb-3">
                                 <label class="form-label fw-bold text-danger">COSTO COMPRA ($)</label>
                                 <input type="number" step="0.01" name="costo" id="costoInput" class="form-control border-danger fw-bold" value="{{ repuesto.costo }}" required>

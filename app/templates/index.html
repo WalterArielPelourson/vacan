@@ -1,197 +1,243 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="row mb-4 align-items-center">
-    <!--<div class="col-md-4">
-        <h2 class="fw-bold" style="color: var(--vacan-blue);"><i class="bi bi-box-seam"></i> Stock <span class="text-pink">Vacan</span></h2>
-    </div>-->
+<style>
+    /* Ajustes para maximizar el espacio en pantalla */
+    .container-fluid { padding-left: 5px; padding-right: 5px; }
+    
+    /* Tipografía compacta profesional */
+    table { font-size: 0.72rem !important; table-layout: fixed; width: 100%; }
+    .badge { font-size: 0.65rem !important; padding: 0.35em 0.5em !important; }
+    
+    /* Eliminar espacios desperdiciados */
+    .card-body { padding: 0 !important; }
+    .table td, .table th { 
+        padding: 0.3rem 0.2rem !important; 
+        border-bottom: 1px solid #e2e8f0; 
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 
-    <style>
-        /* Ajustes para maximizar el espacio en pantalla */
-        .container-fluid { padding-left: 10px; padding-right: 10px; }
-        
-        /* Tipografía compacta profesional */
-        table { font-size: 0.78rem !important; }
-        .badge { font-size: 0.65rem !important; padding: 0.35em 0.5em !important; }
-        
-        /* Eliminar espacios desperdiciados */
-        .card-body { padding: 0 !important; }
-        .table td, .table th { padding: 0.4rem 0.3rem !important; border-bottom: 1px solid #e2e8f0; }
+    /* Estilo de precios y textos */
+    .text-xs { font-size: 0.62rem; display: block; line-height: 1; }
+    .btn-xs { padding: 1px 4px; font-size: 0.75rem; }
+    
+    /* Permitir que la descripción use dos líneas si es necesario */
+    .desc-cell { white-space: normal !important; line-height: 1.1; }
+</style>
 
-        /* Estilo de precios */
-        .price-col { white-space: nowrap; width: 85px; }
-        .text-xs { font-size: 0.65rem; display: block; line-height: 1; }
-        
-        /* Botones de acción ultra-pequeños */
-        .btn-xs { padding: 2px 5px; font-size: 0.7rem; line-height: 1.2; }
-        
-        /* Fix para que el texto largo no rompa la pantalla */
-        .text-truncate-2 {
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            line-height: 1.1;
-        }
-    </style>
-
-
+<div class="row mb-3 align-items-center">
     <!-- BUSCADOR PRINCIPAL -->
     <div class="col-md-5">
         <form action="{{ url_for('inventory.buscar') }}" method="GET" class="d-flex shadow-sm">
-            <input class="form-control me-2 border-dark" type="search" name="q" 
+            <input class="form-control me-2 border-dark form-control-sm" type="search" name="q" 
                 placeholder="Nombre, marca o cualquier código..." value="{{ busqueda or '' }}">
-            <button class="btn btn-dark fw-bold px-4" type="submit">BUSCAR</button>
+            <button class="btn btn-dark btn-sm fw-bold px-4" type="submit">BUSCAR</button>
         </form>
     </div>
 
     {% if current_user.rol in ['admin', 'superadmin'] %}
     <div class="col-md-7 text-md-end">
-        <a href="{{ url_for('inventory.nuevo_repuesto') }}" class="btn btn-vacan shadow-sm fw-bold text-uppercase">
+        <a href="{{ url_for('inventory.nuevo_repuesto') }}" class="btn btn-vacan shadow-sm btn-sm fw-bold text-uppercase">
             <i class="bi bi-plus-circle"></i> Nuevo Repuesto
         </a>
     </div>
     {% endif %}
 </div>
 
-<!-- BARRA DE FILTROS AVANZADOS -->
-<div class="card mb-4 border-0 shadow-sm bg-dark text-white">
-    <div class="card-body py-2">
-        <form action="{{ url_for('inventory.index') }}" method="GET" class="row g-4 align-items-end">
-            <div class="col-md-3">
-                <label class="x-small fw-bold text-pink">RUBRO</label>
-                <select name="rubro" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
-                    <option value="">-- Todos los Rubros --</option>
+<!-- BARRA DE FILTROS BLACK PREMIUM AMPLIADA -->
+<div class="card mb-4 border-0 shadow-lg" style="background-color: #000; border-radius: 15px; padding: 25px 0;">
+    <div class="card-body">
+        <form action="{{ url_for('inventory.index') }}" method="GET" class="row g-3 justify-content-center align-items-end mx-0">
+            
+            <!-- RUBRO -->
+            <div class="col-md-2">
+                <label class="filter-label-dark"><i class="bi bi-tag-fill me-1"></i> RUBRO</label>
+                <select name="rubro" class="form-select filter-select-dark" onchange="this.form.submit()">
+                    <option value="">-- Todos --</option>
                     {% for rub in rubros_list %}
                     <option value="{{ rub }}" {% if request.args.get('rubro') == rub %}selected{% endif %}>{{ rub }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-3">
-                <label class="x-small fw-bold text-pink">SUB-RUBRO</label>
-                <select name="subrubro" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
-                    <option value="">-- Todos los Subrubros --</option>
+
+            <!-- SUB-RUBRO -->
+            <div class="col-md-2">
+                <label class="filter-label-dark"><i class="bi bi-layers-half me-1"></i> SUB-RUBRO</label>
+                <select name="subrubro" class="form-select filter-select-dark" onchange="this.form.submit()">
+                    <option value="">-- Todos --</option>
                     {% for sub in subrubros_list %}
                     <option value="{{ sub }}" {% if request.args.get('subrubro') == sub %}selected{% endif %}>{{ sub }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-3">
-                <label class="x-small fw-bold text-pink">SUCURSAL</label>
-                <select name="sucursal_id" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
-                    <option value="">-- Todas las Sucursales --</option>
+
+            <!-- VEHÍCULO (COMPATIBILIDAD) - NUEVO -->
+            <div class="col-md-2">
+                <label class="filter-label-dark"><i class="bi bi-car-front-fill me-1"></i> VEHÍCULO</label>
+                <select name="modelo_id" class="form-select filter-select-dark" onchange="this.form.submit()">
+                    <option value="">-- Buscar Vehículo --</option>
+                    {% for v in vehiculos_list %}
+                    <option value="{{ v.id }}" {% if request.args.get('modelo_id')|int == v.id %}selected{% endif %}>
+                        {{ v.marca }} {{ v.modelo }} ({{ v.anio_inicio or '' }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- SUCURSAL -->
+            <div class="col-md-2">
+                <label class="filter-label-dark"><i class="bi bi-shop me-1"></i> SUCURSAL</label>
+                <select name="sucursal_id" class="form-select filter-select-dark" onchange="this.form.submit()">
+                    <option value="">-- Sede --</option>
                     {% for suc in sucursales_list %}
                     <option value="{{ suc.id }}" {% if request.args.get('sucursal_id')|int == suc.id %}selected{% endif %}>{{ suc.nombre }}</option>
                     {% endfor %}
                 </select>
             </div>
-            <!-- NUEVO SELECTOR DE ESTADO DE STOCK -->
-            <div class="col-md-3">
-                <label class="text-pink fw-bold" style="font-size: 0.6rem;">DISPONIBILIDAD</label>
-                <select name="stock_status" class="form-select form-select-sm bg-light" onchange="this.form.submit()">
+
+            <!-- STOCK -->
+            <div class="col-md-2">
+                <label class="filter-label-dark"><i class="bi bi-check-circle-fill me-1"></i> STOCK</label>
+                <select name="stock_status" class="form-select filter-select-dark" onchange="this.form.submit()">
                     <option value="">-- Mostrar Todo --</option>
-                    <option value="disponible" {% if request.args.get('stock_status') == 'disponible' %}selected{% endif %}>Con Stock (Mercadería en estante)</option>
-                    <option value="agotado" {% if request.args.get('stock_status') == 'agotado' %}selected{% endif %}>Sin Stock (Faltantes / En Cero)</option>
+                    <option value="disponible" {% if request.args.get('stock_status') == 'disponible' %}selected{% endif %}>Con Stock</option>
+                    <option value="agotado" {% if request.args.get('stock_status') == 'agotado' %}selected{% endif %}>Agotado</option>
                 </select>
             </div>
-            <div class="col-md-3 text-end">
-                <a href="{{ url_for('inventory.index') }}" class="btn btn-sm btn-outline-light w-100 fw-bold">
-                    <i class="bi bi-filter-left"></i> LIMPIAR FILTROS
+
+            <!-- BOTÓN LIMPIAR -->
+            <div class="col-md-1">
+                <a href="{{ url_for('inventory.index') }}" class="btn btn-clean-dark w-100 shadow-sm" title="Limpiar Filtros">
+                    <i class="bi bi-trash3-fill"></i>
                 </a>
             </div>
-
-           
 
         </form>
     </div>
 </div>
 
-<!-- PANEL DE BÚSQUEDA EXTERNA -->
+<style>
+    /* Estilos Dark Premium Reforzados */
+    .filter-label-dark {
+        font-size: 0.65rem;
+        font-weight: 800;
+        color: var(--vacan-pink);
+        text-transform: uppercase;
+        margin-bottom: 6px;
+        display: block;
+        letter-spacing: 1.2px;
+    }
+
+    .filter-select-dark {
+        background-color: #111 !important; /* Más oscuro aún */
+        color: #ffffff !important;
+        border: 1px solid #333 !important;
+        font-size: 0.78rem !important;
+        border-radius: 10px !important;
+        padding: 0.55rem 0.6rem !important;
+        cursor: pointer;
+        transition: all 0.3s ease;
+    }
+
+    .filter-select-dark:hover {
+        border-color: var(--vacan-pink) !important;
+        background-color: #1a1a1a !important;
+    }
+
+    .btn-clean-dark {
+        background-color: #111;
+        color: #ff4d4d;
+        border: 1px solid #333;
+        border-radius: 10px;
+        padding: 0.55rem;
+        transition: all 0.3s ease;
+    }
+
+    .btn-clean-dark:hover {
+        background-color: #ff4d4d;
+        color: white;
+        border-color: #ff4d4d;
+    }
+
+    /* Ajuste de flechitas para selects oscuros */
+    .form-select {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ff007f' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
+    }
+</style>
+
 {% if busqueda %}
-<div class="card border-info mb-4 shadow-sm" style="background-color: #f0faff;">
-    <div class="card-body d-flex justify-content-between align-items-center py-2">
-        <div>
-            <i class="bi bi-globe2 text-info fs-5 me-2"></i> 
-            <span class="fw-bold text-dark">¿Consultar "{{ busqueda }}" en proveedores externos?</span>
-        </div>
-        <button class="btn btn-sm btn-info text-white fw-bold px-4 shadow-sm" onclick="buscarAfuera('{{ busqueda }}')">
-            <i class="bi bi-box-arrow-up-right"></i> CONSULTAR TODO AFUERA
-        </button>
+<div class="card border-info mb-3 shadow-sm" style="background-color: #f0faff;">
+    <div class="card-body d-flex justify-content-between align-items-center py-1 px-3">
+        <small class="fw-bold text-dark"><i class="bi bi-globe2 text-info me-2"></i> ¿Consultar "{{ busqueda }}" afuera?</small>
+        <button class="btn btn-xs btn-info text-white fw-bold px-3 shadow-sm" onclick="buscarAfuera('{{ busqueda }}')">CONSULTAR PROVEEDORES</button>
     </div>
 </div>
 {% endif %}
 
 <div class="card shadow-sm border-0">
-    <div class="card-header card-header-vacan d-flex justify-content-between align-items-center">
-        <h5 class="mb-0 text-uppercase small fw-bold">Listado de Inventario Detallado</h5>
+    <div class="card-header card-header-vacan py-1 px-3 d-flex justify-content-between align-items-center">
+        <h6 class="mb-0 text-uppercase small fw-bold">Inventario Vacan</h6>
         <small class="text-white-50">Total: {{ repuestos|length }} ítems</small>
     </div>
-    <div class="card-body p-0">
+    <div class="card-body">
         <div class="table-responsive">
             <table class="table table-hover mb-0 align-middle">
                 <thead class="table-light">
-                    <tr style="font-size: 0.75rem;" class="text-uppercase text-muted">
-                        <th style="width: 7%;">SKU Prov.</th>
+                    <tr class="text-uppercase text-muted">
+                        <th style="width: 7%;">SKU Prov</th>
                         <th style="width: 7%;">Maestro</th>
-                        <th style="width: 12%;">Proveedor</th>
-                        <th style="width: 20%;">Descripción / Rubro</th>
-                        <th style="width: 10%;">Sucursal</th>
-                        <th style="width: 6%;" class="text-center">Stock</th>
-                        <th style="width: 9%;" class="text-end">Costo s/IVA</th>
-                        <th style="width: 8%;" class="text-end text-danger">Costo c/IVA</th> <!-- NUEVA -->
-                        <th style="width: 9%;" class="text-end">Venta s/IVA</th>
-                        <th style="width: 10%;" class="text-end text-primary">Venta c/IVA</th>
-                        <th class="text-center" style="width: 10%;">Acciones</th> 
+                        <th style="width: 10%;">Proveedor</th>
+                        <th style="width: 18%;">Descripción / Rubro</th>
+                        <th style="width: 8%;">Sucursal</th>
+                        <th style="width: 8%;">Ubicación</th>
+                        <th style="width: 5%;" class="text-center">Stock</th>
+                        <th style="width: 7%;" class="text-end">Cost s/I</th>
+                        <th style="width: 7%;" class="text-end text-danger">Cost c/I</th>
+                        <th style="width: 7%;" class="text-end">Vent s/I</th>
+                        <th style="width: 8%;" class="text-end text-primary">Vent c/I</th>
+                        <th style="width: 8%;" class="text-center">Acción</th> 
                     </tr>
                 </thead>
-                <tbody style="font-size: 0.82rem;">
+                <tbody>
                     {% for r in repuestos %}
                     <tr>
                         <td><span class="badge bg-dark w-100">{{ r.sku }}</span></td>
                         <td><span class="badge bg-secondary w-100">{{ r.sku_vacan or '---' }}</span></td>
-                        
-                        <!-- COLUMNA PROVEEDOR -->
-                        <td>
-                            <strong class="text-dark">{{ r.proveedor.razon_social if r.proveedor else 'S/D' }}</strong>
-                        </td>
-
-                        <td>
+                        <td class="text-truncate"><strong>{{ r.proveedor.razon_social if r.proveedor else 'S/D' }}</strong></td>
+                        <td class="desc-cell">
                             <strong class="text-dark">{{ r.nombre }}</strong><br>
-                            <span class="text-pink fw-bold" style="font-size: 0.68rem;">
-                                {{ r.rubro or 'General' }} > {{ r.subrubro or 'General' }}
-                            </span>
-                            {% if r.codigo_oem %}<br><small class="text-muted" style="font-size: 0.65rem;">OEM: {{ r.codigo_oem }}</small>{% endif %}
+                            <span class="text-pink fw-bold text-xs">{{ r.rubro or 'Gen.' }} > {{ r.subrubro or 'Gen.' }}</span>
                         </td>
-
+                        <td><i class="bi bi-geo-alt text-danger"></i> {{ r.sucursal.nombre if r.sucursal else 'S/D' }}</td>
+                        
+                        <!-- UBICACIÓN -->
                         <td>
-                            <span class="small fw-bold">
-                                <i class="bi bi-geo-alt text-danger"></i> {{ r.sucursal.nombre if r.sucursal else 'S/D' }}
-                            </span>
+                            {% if r.ubicacion %}
+                                <span class="badge bg-light text-dark border w-100 text-start">
+                                    <i class="bi bi-geo-fill text-danger"></i> {{ r.ubicacion }}
+                                </span>
+                            {% else %}
+                                <span class="text-muted small">-</span>
+                            {% endif %}
                         </td>
 
                         <td class="text-center">
-                            <span class="badge {% if r.stock > 5 %}bg-success{% elif r.stock > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %} px-2 py-1">
+                            <span class="badge {% if r.stock > 5 %}bg-success{% elif r.stock > 0 %}bg-warning text-dark{% else %}bg-danger{% endif %}">
                                 {{ r.stock }}
                             </span>
                         </td>
                         
-                        <!-- COLUMNA COSTO -->
-                        <td class="text-end fw-bold text-danger">
-                            ${{ "{:,.2f}".format(r.costo or 0) }}
-                        </td>
-                         <!-- COLUMNA COSTO con IVA-->
-                        <td class="text-end fw-bold text-danger">${{ "{:,.2f}".format((r.costo or 0) * 1.21) }}</td>
+                        <td class="text-end text-danger">${{ "{:,.2f}".format(r.costo or 0) }}</td>
+                        <td class="text-end text-danger fw-bold">${{ "{:,.2f}".format((r.costo or 0) * 1.21) }}</td>
+                        <td class="text-end text-muted">${{ "{:,.2f}".format(r.precio or 0) }}</td>
+                        <td class="text-end text-primary fw-bold">${{ "{:,.2f}".format((r.precio or 0) * 1.21) }}</td>
 
-                        <!-- PRECIO SIN IVA -->
-                        <td class="text-end fw-bold text-muted">${{ "{:,.2f}".format(r.precio or 0) }}</td>
-
-                        <!-- PRECIO CON IVA -->
-                        <td class="text-end fw-bold text-primary">${{ "{:,.2f}".format((r.precio or 0) * 1.21) }}</td>
-                        
                         <td class="text-center">
-                            <div class="btn-group">
+                            <div class="btn-group shadow-sm">
                                 <a href="{{ url_for('inventory.catalogos_proveedores', id=r.id) }}" class="btn btn-xs btn-info text-white" title="Comparar"><i class="bi bi-search"></i></a>
-                                <a href="{{ url_for('inventory.historial_precios', id=r.id) }}" class="btn btn-xs btn-dark" title="Historial"><i class="bi bi-clock-history"></i></a>
+                                <a href="{{ url_for('inventory.historial_precios', id=r.id) }}" class="btn btn-xs btn-dark" title="Historial"><i class="bi bi-clock"></i></a>
                                 {% if current_user.rol in ['admin', 'superadmin'] %}
                                     <a href="{{ url_for('inventory.editar_repuesto', id=r.id) }}" class="btn btn-xs btn-primary" title="Editar"><i class="bi bi-pencil"></i></a>
                                 {% endif %}
@@ -199,9 +245,7 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr>
-                        <td colspan="10" class="text-center py-5">No se encontraron artículos con estos criterios.</td>
-                    </tr>
+                    <tr><td colspan="12" class="text-center py-5 text-muted small italic">No se encontraron artículos.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -228,9 +272,8 @@ function buscarAfuera(query) {
 <style>
     .btn-vacan { background-color: var(--vacan-pink); color: white; border: none; }
     .btn-vacan:hover { background-color: #d4006a; color: white; }
-    .badge { font-weight: 500; font-size: 0.65rem; }
-    .x-small { font-size: 0.65rem; letter-spacing: 0.5px; }
-    .btn-xs { padding: 0.2rem 0.4rem; font-size: 0.8rem; }
+    .x-small { font-size: 0.6rem; letter-spacing: 0.5px; }
     .table-hover tbody tr:hover { background-color: rgba(255, 0, 127, 0.02); }
+    .card-header-vacan { background: linear-gradient(45deg, #1a1a1a, #333); color: white; }
 </style>
 {% endblock %}

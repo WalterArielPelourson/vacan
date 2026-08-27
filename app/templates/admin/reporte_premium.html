@@ -12,6 +12,22 @@
         <form class="row g-2 bg-dark p-3 rounded shadow text-white">
             <div class="col-5"><label class="x-small fw-bold">DESDE</label><input type="date" name="desde" class="form-control form-control-sm" value="{{ desde }}"></div>
             <div class="col-5"><label class="x-small fw-bold">HASTA</label><input type="date" name="hasta" class="form-control form-control-sm" value="{{ hasta }}"></div>
+            
+            <div class="col-md-3">
+                <label class="form-label small fw-bold text-pink">Sucursal (Auditada)</label>
+                <select name="sucursal_id" class="form-select" {% if current_user.rol == 'admin' %}disabled{% endif %}>
+                    <option value="">Consolidado Vacan (Todas)</option>
+                    {% for s in sucursales_lista %}
+                    <option value="{{ s.id }}" {% if f_sucursal == s.id %}selected{% endif %}>
+                        {{ s.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if current_user.rol == 'admin' %}
+                    <input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">
+                {% endif %}
+            </div>
+            
             <div class="col-2 d-flex align-items-end"><button type="submit" class="btn btn-pink btn-sm w-100 fw-bold">OK</button></div>
         </form>
     </div>
@@ -99,8 +115,7 @@
         </div>
     </div>
     <div class="col-md-4">
-        <div class="card shadow border-0 h-100">
-            <div class="card-header bg-white fw-bold">POSICIÓN TÉCNICA IVA</div>
+        <div class="card-header bg-white fw-bold">POSICIÓN TÉCNICA IVA</div>
             <div class="card-body text-center">
                 <h6 class="text-muted small">A Pagar Estimado (Ventas - Compras)</h6>
                 {% set saldo_iva = g_iva_v %}

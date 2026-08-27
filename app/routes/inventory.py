@@ -7,6 +7,9 @@ from app.models import HistorialPrecio
 from flask import jsonify
 from app.models import Presupuesto, DetallePresupuesto # Asegúrate de agregar estos a tus imports
 from sqlalchemy import or_, and_ # Importante: Agrega este import arriba
+from app.utils.security import roles_required, sucursal_filter
+from app.utils.security import check_owner
+
 
 inventory_bp = Blueprint('inventory', __name__)
 
@@ -18,6 +21,7 @@ def index():
     f_subrubro = request.args.get('subrubro')
     f_sucursal = request.args.get('sucursal_id', type=int)
     f_stock = request.args.get('stock_status') # 'disponible' o 'agotado'
+    f_vehiculo = request.args.get('modelo_id', type=int)
 
     # 2. Construimos la consulta base
     query = Repuesto.query
@@ -37,6 +41,11 @@ def index():
         query = query.filter(Repuesto.stock <= 0)
     # -----------------------------
 
+    # --- FILTRO POR VEHÍCULO (RELACIÓN MUCHOS A MUCHOS) ---
+    if f_vehiculo:
+        query = query.join(Repuesto.autos_compatibles).filter(ModeloAuto.id == f_vehiculo)
+        
+        
     # Traemos los repuestos filtrados
     repuestos = query.order_by(Repuesto.id.desc()).all()
 
@@ -45,7 +54,8 @@ def index():
     subrubros_unicos = db.session.query(Repuesto.subrubro).distinct().all()
     # Traemos las sucursales para el filtro
     sucursales = Sucursal.query.filter_by(activo=True).all()
-
+    vehiculos = ModeloAuto.query.order_by(ModeloAuto.marca).all()
+    
     # --- APLICACIÓN DEL PUNTO 3: Sincronización de nombres con el HTML ---
     # Cambiamos los nombres de las variables para que el HTML los reconozca
     return render_template('index.html', 
@@ -53,6 +63,7 @@ def index():
                            rubros_list=[r[0] for r in rubros_unicos if r[0]],
                            subrubros_list=[s[0] for s in subrubros_unicos if s[0]],
                            sucursales_list=sucursales,
+                           vehiculos_list=vehiculos,
                            busqueda=None)
     
     
@@ -71,6 +82,7 @@ def nuevo_repuesto():
             sku_vacan=request.form.get('sku_vacan').upper(), # SKU MAESTRO (Sugerido)
             codigo_oem=request.form.get('codigo_oem').upper(),
             nombre=request.form.get('nombre').upper(),
+            ubicacion=request.form.get('ubicacion'),
             rubro=request.form.get('rubro').upper(),
             subrubro=request.form.get('subrubro').upper(),
             sucursal_id=request.form.get('sucursal_id'),    # ID de Sucursal
@@ -126,15 +138,20 @@ def editar_repuesto(id):
     if current_user.rol not in ['admin', 'superadmin']:
         flash('No tienes permiso para editar productos.', 'danger')
         return redirect(url_for('inventory.index'))
-
+    
+    
     repuesto_actual = Repuesto.query.get_or_404(id)
-
+    
+    check_owner(repuesto_actual) 
+    
     if request.method == 'POST':
         # Capturamos datos clave para la validación y fusión
         nuevo_sku = request.form.get('sku').upper().strip()
         nuevo_proveedor_id = request.form.get('proveedor_id')
         nueva_sucursal_id = request.form.get('sucursal_id')
         nuevo_stock_form = int(request.form.get('stock') or 0)
+        
+        repuesto_actual.ubicacion = request.form.get('ubicacion')
         
         nuevo_precio = float(request.form.get('precio') or 0)
         nuevo_costo = float(request.form.get('costo') or 0)
@@ -259,6 +276,7 @@ def buscar():
             Repuesto.sku_rosparts.ilike(search_term),
             ModeloAuto.marca.ilike(search_term),
             ModeloAuto.modelo.ilike(search_term),
+            Repuesto.ubicacion.ilike(search_term),
             Sucursal.nombre.ilike(search_term)      # Buscar por nombre de Sucursal (Punto 2)
         )
         filtros_por_palabra.append(condicion_palabra)
@@ -514,6 +532,7 @@ def procesar_venta_pro():
                     venta_id=nueva_venta.id,
                     monto=total_operacion,
                     tipo='DEUDA',
+                    sucursal_id=current_user.sucursal_id,
                     descripcion=f"Remito #{nueva_venta.id} - Pendiente Pago"
                 )
                 db.session.add(mov_ctacte)

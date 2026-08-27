@@ -13,6 +13,37 @@
     </div>
 </div>
 
+<!-- SECCIÓN DE FILTROS -->
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body bg-light">
+        <form method="GET" class="row g-3">
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Fecha Desde</label>
+                <input type="date" name="desde" class="form-control" value="{{ fecha_desde or '' }}">
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-bold">Fecha Hasta</label>
+                <input type="date" name="hasta" class="form-control" value="{{ fecha_hasta or '' }}">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label small fw-bold">Descripción / Concepto</label>
+                <div class="input-group">
+                    <span class="input-group-text bg-white"><i class="bi bi-search"></i></span>
+                    <input type="text" name="q" class="form-control" placeholder="Buscar por motivo..." value="{{ busqueda or '' }}">
+                </div>
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary w-100">
+                    Filtrar
+                </button>
+                <a href="{{ url_for('admin.detalle_caja', id=caja.id) }}" class="btn btn-outline-secondary" title="Limpiar filtros">
+                    <i class="bi bi-arrow-clockwise"></i>
+                </a>
+            </div>
+        </form>
+    </div>
+</div>
+
 <div class="card shadow border-0">
     <div class="card-header bg-dark text-white fw-bold">ÚLTIMOS MOVIMIENTOS</div>
     <div class="card-body p-0">
@@ -45,6 +76,12 @@
                         </td>
                         <td class="text-end text-danger fw-bold">
                             {{ "${:,.2f}".format(m.monto) if m.tipo == 'EGRESO' else '-' }}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center py-4 text-muted">
+                            No se encontraron movimientos con los filtros aplicados.
                         </td>
                     </tr>
                     {% endfor %}

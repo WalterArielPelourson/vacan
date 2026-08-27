@@ -100,6 +100,7 @@ class Repuesto(db.Model):
     costo = db.Column(db.Float, default=0.0)
     rubro = db.Column(db.String(100))
     subrubro = db.Column(db.String(100))
+    ubicacion = db.Column(db.String(100), nullable=True) 
     
     # Auxiliares
     sku_denso = db.Column(db.String(50))
@@ -238,6 +239,7 @@ class MovimientoCtaCteProveedor(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     proveedor_id = db.Column(db.Integer, db.ForeignKey('proveedor.id'), nullable=False)
     compra_id = db.Column(db.Integer, db.ForeignKey('compra.id'), nullable=True)
+    sucursal_id = db.Column(db.Integer, db.ForeignKey('sucursal.id'), nullable=True)
     fecha = db.Column(db.DateTime, default=get_argentina_time)
     monto = db.Column(db.Float, nullable=False)
     descripcion = db.Column(db.String(200))
@@ -247,11 +249,13 @@ class MovimientoCtaCteProveedor(db.Model):
     # ------------------------------------
     pago_prov_id = db.Column(db.Integer, db.ForeignKey('movimiento_cta_cte_proveedor.id'), nullable=True)
 
+    sucursal = db.relationship('Sucursal')
     proveedor = db.relationship('Proveedor', back_populates='movimientos_p')
     compra = db.relationship('Compra', back_populates='movimiento_cta')
     detalles_pago = db.relationship('MovimientoFinanciero', back_populates='pago_maestro')
     cheques_pago = db.relationship('Cheque', back_populates='pago_maestro')
 
+    
 # --- TESORERÍA ---
 class Caja(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -330,11 +334,13 @@ class MovimientoCtaCte(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'), nullable=False)
     venta_id = db.Column(db.Integer, db.ForeignKey('venta.id'), nullable=True)
+    sucursal_id = db.Column(db.Integer, db.ForeignKey('sucursal.id'), nullable=True)
     fecha = db.Column(db.DateTime, default=get_argentina_time)
     descripcion = db.Column(db.String(200))
     monto = db.Column(db.Float, nullable=False)
     tipo = db.Column(db.String(20))
     
+    sucursal = db.relationship('Sucursal') # Relación para el filtro
     venta = db.relationship('Venta', back_populates='movimientos_cta')
     cliente = db.relationship('Cliente', back_populates='movimientos_cta')
 

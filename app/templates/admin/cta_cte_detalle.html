@@ -18,6 +18,52 @@
     </div>
 </div>
 
+<!-- ==========================================
+     PUNTO 2: BARRA DE FILTROS DE SUCURSAL
+     ========================================== -->
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body bg-light border rounded text-dark">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label class="form-label small fw-bold text-muted text-uppercase">Filtrar por Sucursal</label>
+                <select name="sucursal_id" class="form-select border-primary shadow-sm" {% if current_user.rol == 'admin' %}disabled{% endif %}>
+                    <option value="">Todas las Sucursales (Deuda Global)</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if f_sucursal == s.id %}selected{% endif %}>
+                        {{ s.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if current_user.rol == 'admin' %}
+                    <input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">
+                    <small class="text-muted italic">Vista restringida a sucursal actual</small>
+                {% endif %}
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100 fw-bold">
+                    <i class="bi bi-filter"></i> FILTRAR
+                </button>
+            </div>
+            <div class="col-md-2">
+                <a href="{{ url_for('admin.detalle_cta_cte', cliente_id=cliente.id) }}" class="btn btn-outline-secondary w-100 fw-bold text-dark">
+                    LIMPIAR
+                </a>
+            </div>
+            <div class="col-md-4 text-md-end">
+                <span class="badge {% if f_sucursal %}bg-primary{% else %}bg-secondary{% endif %} p-2 shadow-sm">
+                    <i class="bi bi-geo-alt-fill"></i> 
+                    {% if f_sucursal %}
+                        Vista: Sucursal Seleccionada
+                    {% else %}
+                        Vista: Consolidado Global
+                    {% endif %}
+                </span>
+            </div>
+        </form>
+    </div>
+</div>
+
+
 <!-- TABLA DE MOVIMIENTOS -->
 <div class="card shadow border-0">
     <div class="card-header bg-dark text-white fw-bold">HISTORIAL DE MOVIMIENTOS</div>
@@ -27,6 +73,7 @@
                 <thead class="table-light">
                     <tr>
                         <th>Fecha</th>
+                        <th>Sucursal</th>
                         <th>Concepto / Detalle</th>
                         <th style="width: 25%;">Productos Vendidos</th> <!-- NUEVA COLUMNA -->
                         <th>Vencimiento / Plazo</th>
@@ -53,6 +100,24 @@
                                {% endif %}">
                         
                         <td>{{ m.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+
+                        <!-- PUNTO 3: DATO SUCURSAL -->
+                        <td>
+                            <span class="badge bg-light text-dark border small fw-normal">
+                                {{ m.sucursal.nombre if m.sucursal else 'S/S' }}
+                            </span>
+                        </td>
+
+                        <td>
+                            {{ m.descripcion }}
+                            {% if m.venta_id %}
+                                <br><small class="text-muted text-uppercase">Remito #{{ m.venta_id }}</small>
+                                {% if m.venta.total_pagado > 0 and not m.venta.esta_pagada %}
+                                    <br><small class="text-success fw-bold">Abonado: ${{ "{:,.2f}".format(m.venta.total_pagado) }}</small>
+                                {% endif %}
+                            {% endif %}
+                        </td>
+
                         <td>
                             {{ m.descripcion }}
                             {% if m.venta_id %}
@@ -244,6 +309,8 @@
                             <select id="sel_medio_cli" class="form-select border-dark" onchange="toggleFormCheque(this.value)">
                                 <option value="EFECTIVO">Efectivo</option>
                                 <option value="TRANSFERENCIA">Transferencia / Virtual</option>
+                                <option value="TARJETA_DEBITO">Tarjeta de Débito</option>
+                                <option value="TARJETA_CREDITO">Tarjeta de Crédito</option>
                                 <option value="CHEQUE">Cheque</option>
                             </select>
                         </div>
