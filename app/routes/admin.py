@@ -1,5 +1,6 @@
 import pandas as pd
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+import os
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, make_response, send_file, current_app
 from flask_login import login_required, current_user
 from datetime import datetime, date 
 # Busca esta línea al principio del archivo y agrégale Caja y MovimientoFinanciero
@@ -361,17 +362,17 @@ def lista_saldos_proveedores():
         # -------------------------------------------------------------
 
         # Solo agregamos al proveedor a la lista si tiene movimientos en esta sucursal
-        if saldo_individual != 0:
-            resumen.append({
-                'id': p.id, 
-                'razon_social': p.razon_social, 
-                'cuit': p.cuit, 
-                'saldo': saldo_individual
+        #if saldo_individual != 0:
+        resumen.append({
+            'id': p.id, 
+            'razon_social': p.razon_social, 
+            'cuit': p.cuit, 
+            'saldo': saldo_individual
             })
             
             # Sumamos al total general (solo si el saldo es deudor)
-            if saldo_individual > 0:
-                deuda_total_general += saldo_individual
+        if saldo_individual > 0:
+            deuda_total_general += saldo_individual
 
     # 2. Variables para el Modal de Pago (FILTRADAS POR SEGURIDAD)
     # Usamos sucursal_filter para que el Admin solo vea sus propias cajas (Mostrador, Grande, etc.)
@@ -545,15 +546,15 @@ def lista_cta_cte():
         ).scalar() or 0
         
         # 3. Solo mostrar si hay deuda en esta sucursal
-        if saldo_individual != 0:
-            saldos.append({
-                'id': c.id,
-                'razon_social': c.razon_social,
-                'cuit': c.cuit,
-                'saldo': saldo_individual
+        #if saldo_individual != 0:
+        saldos.append({
+            'id': c.id,
+            'razon_social': c.razon_social,
+            'cuit': c.cuit,
+            'saldo': saldo_individual
             })
-            if saldo_individual > 0:
-                total_global_sucursal += saldo_individual
+        if saldo_individual > 0:
+            total_global_sucursal += saldo_individual
 
     return render_template('admin/cta_cte_lista.html', 
                            saldos=saldos, 
@@ -1855,7 +1856,7 @@ def carga_masiva_stock():
         try:
             # Leemos el Excel con Pandas
             df = pd.read_excel(archivo)
-            # Normalizamos nombres de columnas a minúsculas y sin espacios
+            # Normalizamos nombres de columnas a minúsculas y sin espacios para evitar errores de tipeo
             df.columns = [c.lower().strip() for c in df.columns]
             
             items_procesados = 0
@@ -1873,9 +1874,15 @@ def carga_masiva_stock():
                         cod = cod[:-2]
                     cod = cod.upper()
 
-                # --- 2. CAPTURA DE CAMPOS ---
+                # --- 2. CAPTURA DE CAMPOS SEGÚN TU NUEVO ENCABEZADO ---
                 nom = str(row.get('nombre', 'PRODUCTO NUEVO')).strip().upper()
-                ubi = str(row.get('ubicacion', '')).strip().upper() if not pd.isna(row.get('ubicacion')) else None
+                
+                # OEM (Columna 'oem' en el Excel)
+                oem = str(row.get('oem', '')).strip().upper() if not pd.isna(row.get('oem')) else None
+                
+                # Ubicación (Columna 'ubicación almacen' en el Excel)
+                ubi = str(row.get('ubicación almacen', '')).strip().upper() if not pd.isna(row.get('ubicación almacen')) else None
+                
                 s_vacan = str(row.get('sku_vacan', '')).strip().upper() if not pd.isna(row.get('sku_vacan')) else None
                 rub = str(row.get('rubro', '')).strip().upper() if not pd.isna(row.get('rubro')) else "GENERAL"
                 sub = str(row.get('subrubro', '')).strip().upper() if not pd.isna(row.get('subrubro')) else "GENERAL"
@@ -1884,7 +1891,7 @@ def carga_masiva_stock():
                 suc_id = row.get('sucursal_id')
                 suc_id = int(float(suc_id)) if not pd.isna(suc_id) else 1
 
-                # Proveedor: ID del proveedor (Default: 1 o lo que indiques en el Excel)
+                # Proveedor: ID del proveedor
                 prov_id = row.get('proveedor_id')
                 prov_id = int(float(prov_id)) if not pd.isna(prov_id) else None
 
@@ -1906,11 +1913,12 @@ def carga_masiva_stock():
                     rep = Repuesto(
                         sku=cod,
                         sku_vacan=s_vacan or generar_proximo_sku_vacan(),
+                        codigo_oem=oem,
                         nombre=nom,
                         rubro=rub,
                         subrubro=sub,
                         sucursal_id=suc_id,
-                        proveedor_id=prov_id, # Asociamos al proveedor
+                        proveedor_id=prov_id,
                         ubicacion=ubi,
                         stock=cant,
                         costo=cost,
@@ -1937,15 +1945,15 @@ def carga_masiva_stock():
                             usuario_id=current_user.id
                         )
                         db.session.add(hist)
-                    if ubi: rep.ubicacion = ubi
-                    # SUMAMOS la cantidad nueva a la existente
-                    rep.stock += cant 
                     
-                    # Actualizamos el resto de la información
+                    # ACTUALIZAMOS DATOS DINÁMICOS
+                    rep.stock += cant # SUMAMOS la cantidad nueva
                     rep.costo = cost
                     if prec > 0: rep.precio = prec
                     rep.rubro = rub
                     rep.subrubro = sub
+                    rep.codigo_oem = oem # Actualizamos OEM por si cambió
+                    rep.ubicacion = ubi   # Actualizamos Ubicación por si cambió
                     if s_vacan: rep.sku_vacan = s_vacan
 
                 items_procesados += 1
@@ -2115,18 +2123,14 @@ def reporte_rentabilidad():
     ant_hasta = desde - timedelta(days=1)
 
     # --- LÓGICA DE FILTRO DE SEGURIDAD Y LISTADO DE SUCURSALES ---
-    # Obtenemos todas las sucursales activas para el selector del Superadmin
     sucursales_lista = Sucursal.query.filter_by(activo=True).all()
 
     if current_user.rol == 'admin':
-        # El Admin está bloqueado a su sucursal
         f_sucursal = current_user.sucursal_id
         sucursales_a_procesar = Sucursal.query.filter_by(id=current_user.sucursal_id).all()
     elif f_sucursal:
-        # El Superadmin filtró una sucursal específica
         sucursales_a_procesar = Sucursal.query.filter_by(id=f_sucursal).all()
     else:
-        # Vista global para Superadmin
         sucursales_a_procesar = sucursales_lista
     
     reporte_sucursales = []
@@ -2139,6 +2143,7 @@ def reporte_rentabilidad():
     g_cobranzas = 0
     g_gastos = 0
     g_iva_v = 0
+    g_iva_c = 0 # <--- VARIABLE INICIALIZADA PARA EVITAR EL ERROR
 
     # --- PROCESAMIENTO POR SUCURSAL ---
     for suc in sucursales_a_procesar:
@@ -2146,12 +2151,24 @@ def reporte_rentabilidad():
         s_costo = db.session.query(func.sum(Repuesto.stock * Repuesto.costo)).filter_by(sucursal_id=suc.id).scalar() or 0
         s_venta = db.session.query(func.sum(Repuesto.stock * Repuesto.precio)).filter_by(sucursal_id=suc.id).scalar() or 0
         
-        # Ventas del periodo
-        ventas_suc = Venta.query.filter_by(sucursal_id=suc.id).filter(Venta.fecha.between(desde_str + " 00:00:00", hasta_str + " 23:59:59")).all()
-        s_ventas = sum(v.total for v in ventas_suc)
-        s_iva_v = sum(v.total - (v.total / 1.21) for v in ventas_suc)
+        # --- VENTAS E IVA VENTAS REAL ---
+        ventas_suc_todas = Venta.query.filter_by(sucursal_id=suc.id).filter(
+            Venta.fecha.between(desde_str + " 00:00:00", hasta_str + " 23:59:59")
+        ).all()
+        
+        s_ventas = sum(v.total for v in ventas_suc_todas)
+        
+        # SOLO sumamos IVA de ventas marcadas como FACTURADO
+        s_iva_v_suc = sum(v.total - (v.total / 1.21) for v in ventas_suc_todas if v.estado_arca == 'FACTURADO')
 
-        # Compras (Mercadería ingresada a esta sucursal)
+        # --- COMPRAS E IVA COMPRAS REAL (CRÉDITO FISCAL) ---
+        # Sumamos el IVA basándonos en el subtotal y el porcentaje cargado en cada factura
+        s_iva_c_suc = db.session.query(func.sum(Compra.subtotal * (Compra.iva_porcentaje / 100)))\
+            .join(DetalleCompra).join(Repuesto).filter(
+                Repuesto.sucursal_id == suc.id,
+                Compra.fecha.between(desde_str, hasta_str)
+            ).scalar() or 0
+            
         s_compras = db.session.query(func.sum(Compra.total)).join(DetalleCompra).join(Repuesto).filter(
             Repuesto.sucursal_id == suc.id,
             Compra.fecha.between(desde_str, hasta_str)
@@ -2172,13 +2189,16 @@ def reporte_rentabilidad():
             MovimientoFinanciero.fecha.between(desde_str, hasta_str)
         ).scalar() or 0
 
+        # Utilidad Estimada (Ventas Netas - Compras Netas - Gastos)
+        s_utilidad = (s_ventas / 1.21) - (s_compras / 1.21) - (s_gastos / 1.21)
+
         reporte_sucursales.append({
             'nombre': suc.nombre,
             'stock_costo': s_costo,
             'ventas': s_ventas,
             'gastos': s_gastos,
             'cobranzas': s_cobranzas,
-            'utilidad': s_ventas - s_gastos
+            'utilidad': s_utilidad
         })
 
         g_stock_costo += s_costo
@@ -2187,7 +2207,8 @@ def reporte_rentabilidad():
         g_compras += s_compras
         g_cobranzas += s_cobranzas
         g_gastos += s_gastos
-        g_iva_v += s_iva_v
+        g_iva_v += s_iva_v_suc # Suma de IVA real de ventas
+        g_iva_c += s_iva_c_suc # Suma de IVA real de compras
 
     # --- LÓGICA COMPARATIVA (PERIODO ANTERIOR) FILTRADA ---
     q_ant_v = db.session.query(func.sum(Venta.total)).filter(Venta.fecha.between(ant_desde, ant_hasta))
@@ -2195,7 +2216,6 @@ def reporte_rentabilidad():
 
     if f_sucursal:
         q_ant_v = q_ant_v.filter_by(sucursal_id=f_sucursal)
-        # Para compras unimos con Repuesto para filtrar por sucursal de destino
         q_ant_c = q_ant_c.join(DetalleCompra).join(Repuesto).filter(Repuesto.sucursal_id == f_sucursal)
 
     ant_ventas = q_ant_v.scalar() or 0
@@ -2222,14 +2242,14 @@ def reporte_rentabilidad():
 
     ranking = q_ranking.limit(5).all()
 
-    # Total Rechazados (Filtrado por cliente/venta si es necesario, aquí global por ahora)
+    # Total Rechazados
     total_rechazados = db.session.query(func.sum(Cheque.monto)).filter_by(estado='RECHAZADO').scalar() or 0
 
     return render_template('admin/reporte_premium.html',
                            desde=desde_str, hasta=hasta_str,
                            sucursales_data=reporte_sucursales,
-                           sucursales_lista=sucursales_lista, # Para el selector HTML
-                           f_sucursal=f_sucursal, # ID de la sucursal actual
+                           sucursales_lista=sucursales_lista,
+                           f_sucursal=f_sucursal,
                            g_stock_costo=g_stock_costo,
                            g_stock_venta=g_stock_venta,
                            g_ventas=g_ventas,
@@ -2237,9 +2257,287 @@ def reporte_rentabilidad():
                            g_cobranzas=g_cobranzas,
                            g_gastos=g_gastos,
                            g_iva_v=g_iva_v,
+                           g_iva_c=g_iva_c, # <--- SE ENVÍA PARA EVITAR EL ERROR JINJA2
                            total_rechazados=total_rechazados,
                            ranking=ranking,
                            ant_ventas=ant_ventas,
                            ant_compras=ant_compras,
                            total_clientes=total_cta_cte_clientes,
                            total_prov=total_cta_cte_prov)
+    
+    
+    
+    
+@admin_bp.route('/auditoria')
+@login_required
+@roles_required('admin', 'superadmin')
+def reporte_auditoria():
+    # 1. CAPTURA DE FILTROS
+    desde_str = request.args.get('desde', date.today().strftime('%Y-%m-%d'))
+    hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
+    f_sucursal = request.args.get('sucursal_id', type=int)
+    f_usuario = request.args.get('usuario_id', type=int)
+    f_tipo = request.args.get('tipo_op') # VENTA, AJUSTE_CTA, COMPRA, CAJA, PRECIO, TRASPASO
+
+    desde = datetime.strptime(desde_str, '%Y-%m-%d')
+    hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+
+    if current_user.rol == 'admin':
+        f_sucursal = current_user.sucursal_id
+
+    log_auditoria = []
+
+    # --- A. AUDITORÍA DE VENTAS (Detalle ampliado con ajustes) ---
+    if not f_tipo or f_tipo == 'VENTA':
+        q_v = Venta.query.options(joinedload(Venta.usuario), joinedload(Venta.sucursal), joinedload(Venta.cliente)).filter(Venta.fecha.between(desde, hasta))
+        if f_sucursal: q_v = q_v.filter(Venta.sucursal_id == f_sucursal)
+        if f_usuario: q_v = q_v.filter(Venta.usuario_id == f_usuario)
+        for v in q_v.all():
+            # Construimos un detalle que explique la configuración fiscal de la venta
+            det_v = f"Cliente: {v.cliente.razon_social} | IVA: {v.iva_porcentaje}%"
+            if (v.recargo_global or 0) > 0: det_v += f" | Recargo: {v.recargo_global}%"
+            if (v.descuento_global or 0) > 0: det_v += f" | Desc: {v.descuento_global}%"
+            
+            log_auditoria.append({
+                'fecha': v.fecha, 'usuario': v.usuario.username if v.usuario else 'SISTEMA', 
+                'sucursal': v.sucursal.nombre if v.sucursal else 'S/D',
+                'tipo': 'VENTA', 'referencia': f"Remito #{v.id}", 
+                'detalle': det_v, 'monto': v.total, 'clase': 'success'
+            })
+
+    # --- B. NUEVO: AUDITORÍA DE AJUSTES MANUALES (Trabajos, Saldos Iniciales, Notas Manuales) ---
+    if not f_tipo or f_tipo == 'AJUSTE_CTA':
+        # Ajustes en Clientes (Movimientos que NO nacen de una Venta)
+        q_aj_cli = MovimientoCtaCte.query.options(joinedload(MovimientoCtaCte.cliente), joinedload(MovimientoCtaCte.sucursal)).filter(
+            MovimientoCtaCte.venta_id == None, 
+            MovimientoCtaCte.fecha.between(desde, hasta)
+        )
+        if f_sucursal: q_aj_cli = q_aj_cli.filter_by(sucursal_id=f_sucursal)
+        for m in q_aj_cli.all():
+            log_auditoria.append({
+                'fecha': m.fecha, 'usuario': 'ADMIN', # Estos movimientos manuales usualmente los hace el admin
+                'sucursal': m.sucursal.nombre if m.sucursal else 'S/D',
+                'tipo': 'AJUSTE CTA (CLI)', 'referencia': 'MANUAL', 
+                'detalle': f"{m.cliente.razon_social}: {m.descripcion}", 'monto': m.monto, 'clase': 'dark'
+            })
+
+        # Ajustes en Proveedores (Movimientos que NO nacen de una Compra)
+        q_aj_prov = MovimientoCtaCteProveedor.query.options(joinedload(MovimientoCtaCteProveedor.proveedor), joinedload(MovimientoCtaCteProveedor.sucursal)).filter(
+            MovimientoCtaCteProveedor.compra_id == None, 
+            MovimientoCtaCteProveedor.fecha.between(desde, hasta)
+        )
+        if f_sucursal: q_aj_prov = q_aj_prov.filter_by(sucursal_id=f_sucursal)
+        for mp in q_aj_prov.all():
+            log_auditoria.append({
+                'fecha': mp.fecha, 'usuario': 'ADMIN',
+                'sucursal': mp.sucursal.nombre if mp.sucursal else 'S/D',
+                'tipo': 'AJUSTE CTA (PROV)', 'referencia': 'MANUAL', 
+                'detalle': f"{mp.proveedor.razon_social}: {mp.descripcion}", 'monto': mp.monto, 'clase': 'dark'
+            })
+
+    # --- C. AUDITORÍA DE COMPRAS ---
+    if not f_tipo or f_tipo == 'COMPRA':
+        q_c = Compra.query.filter(Compra.fecha.between(desde, hasta))
+        if f_sucursal:
+            q_c = q_c.join(DetalleCompra).join(Repuesto).filter(Repuesto.sucursal_id == f_sucursal)
+        for c in q_c.distinct().all():
+            log_auditoria.append({
+                'fecha': c.fecha, 'usuario': 'SISTEMA', 'sucursal': 'DEPÓSITO',
+                'tipo': 'COMPRA', 'referencia': f"Fact. #{c.nro_factura}", 
+                'detalle': f"Prov: {c.proveedor.razon_social}", 'monto': c.total, 'clase': 'primary'
+            })
+
+    # --- D. AUDITORÍA DE TESORERÍA (CON FIX DE NAMESPACE) ---
+    if not f_tipo or f_tipo == 'CAJA':
+        q_m = MovimientoFinanciero.query.options(joinedload(MovimientoFinanciero.usuario), joinedload(MovimientoFinanciero.caja)).filter(MovimientoFinanciero.fecha.between(desde, hasta))
+        if f_sucursal: 
+            q_m = q_m.join(Caja).filter(Caja.sucursal_id == f_sucursal)
+        if f_usuario: 
+            q_m = q_m.filter(MovimientoFinanciero.usuario_id == f_usuario)
+            
+        for m in q_m.all():
+            nombre_u = m.usuario.username if (hasattr(m, 'usuario') and m.usuario) else 'SISTEMA'
+            log_auditoria.append({
+                'fecha': m.fecha, 'usuario': nombre_u, 
+                'sucursal': m.caja.nombre if m.caja else 'S/C', 
+                'tipo': m.tipo, 'referencia': m.metodo_detalle or 'MANUAL', 
+                'detalle': m.motivo, 'monto': m.monto, 'clase': 'warning' if m.tipo == 'EGRESO' else 'info'
+            })
+
+    # --- E. AUDITORÍA DE PRECIOS ---
+    if not f_tipo or f_tipo == 'PRECIO':
+        q_p = HistorialPrecio.query.options(joinedload(HistorialPrecio.usuario), joinedload(HistorialPrecio.repuesto)).filter(HistorialPrecio.fecha.between(desde, hasta))
+        if f_usuario: q_p = q_p.filter(HistorialPrecio.usuario_id == f_usuario)
+        for h in q_p.all():
+            log_auditoria.append({
+                'fecha': h.fecha, 'usuario': h.usuario.username if h.usuario else 'SISTEMA', 
+                'sucursal': h.repuesto.sucursal.nombre if h.repuesto and h.repuesto.sucursal else 'S/D',
+                'tipo': 'PRECIO', 'referencia': 'VALOR', 
+                'detalle': f"{h.repuesto.nombre if h.repuesto else 'Borr.'} (${h.precio_anterior} -> ${h.precio_nuevo})", 
+                'monto': 0, 'clase': 'secondary'
+            })
+
+    # --- F. AUDITORÍA DE TRASPASOS ---
+    if not f_tipo or f_tipo == 'TRASPASO':
+        q_t = Traspaso.query.options(joinedload(Traspaso.usuario)).filter(Traspaso.fecha.between(desde, hasta))
+        if f_usuario: q_t = q_t.filter(Traspaso.usuario_id == f_usuario)
+        for t in q_t.all():
+            log_auditoria.append({
+                'fecha': t.fecha, 'usuario': t.usuario.username if t.usuario else 'SISTEMA', 
+                'sucursal': t.origen.nombre if t.origen else 'S/D',
+                'tipo': 'TRASPASO', 'referencia': f"ENVÍO #{t.id}", 
+                'detalle': f"Hacia: {t.destino.nombre if t.destino else 'S/D'}", 'monto': 0, 'clase': 'dark'
+            })
+
+    # Ordenar todo el log consolidado por fecha
+    log_auditoria.sort(key=lambda x: x['fecha'], reverse=True)
+
+    usuarios = Usuario.query.filter_by(activo=True).all()
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+
+    return render_template('admin/reporte_auditoria.html', 
+                           logs=log_auditoria, usuarios=usuarios, sucursales=sucursales,
+                           desde=desde_str, hasta=hasta_str, f_sucursal=f_sucursal, 
+                           f_usuario=f_usuario, f_tipo=f_tipo)
+    
+    
+@admin_bp.route('/sistema/backup')
+@login_required
+@superadmin_required # Solo el dueño total puede descargar la base
+def descargar_backup():
+    try:
+        # 1. Obtenemos la ruta de la base de datos desde la configuración de Flask
+        # Esto limpia el prefijo 'sqlite:///' para obtener la ruta del archivo
+        db_uri = current_app.config['SQLALCHEMY_DATABASE_URI']
+        db_path = db_uri.replace('sqlite:///', '')
+
+        # Si la ruta es relativa, la convertimos en absoluta
+        if not os.path.isabs(db_path):
+            db_path = os.path.join(current_app.instance_path, db_path)
+            # Si no está en instance, probar en la raíz del proyecto
+            if not os.path.exists(db_path):
+                db_path = os.path.join(current_app.root_path, '..', db_uri.replace('sqlite:///', ''))
+
+        # 2. Verificamos si el archivo existe
+        if not os.path.exists(db_path):
+            flash(f"Error: No se encontró el archivo de base de datos en {db_path}", "danger")
+            return redirect(url_for('admin.dashboard'))
+
+        # 3. Generamos un nombre de archivo con la fecha actual
+        fecha_str = datetime.now().strftime("%Y-%m-%d_%H-%M")
+        nombre_descarga = f"BACKUP_TOTAL_VACAN_{fecha_str}.db"
+
+        # 4. Enviamos el archivo para descarga
+        return send_file(
+            db_path,
+            as_attachment=True,
+            download_name=nombre_descarga,
+            mimetype='application/x-sqlite3'
+        )
+
+    except Exception as e:
+        flash(f"Error al generar el backup: {str(e)}", "danger")
+        return redirect(url_for('admin.dashboard'))
+    
+    
+@admin_bp.route('/sistema/gestion-saldos-manual', methods=['GET', 'POST'])
+@login_required
+@roles_required('admin', 'superadmin')
+def gestion_saldos_manual():
+    if request.method == 'POST':
+        tipo_entidad = request.form.get('tipo_entidad') # CLIENTE / PROVEEDOR
+        entidad_id = request.form.get('entidad_id')
+        sucursal_id = request.form.get('sucursal_id')
+        monto = float(request.form.get('monto', 0))
+        motivo = request.form.get('motivo') # SALDO INICIAL / TRABAJO REALIZADO / AJUSTE
+        obs = request.form.get('observaciones').upper()
+
+        descripcion_final = f"{motivo}: {obs}"
+
+        try:
+            if tipo_entidad == 'CLIENTE':
+                # En Clientes: (+) es Deuda (nos debe), (-) es Crédito (saldo a favor del cliente)
+                nuevo_mov = MovimientoCtaCte(
+                    cliente_id=entidad_id,
+                    sucursal_id=sucursal_id,
+                    monto=monto,
+                    tipo='DEUDA' if monto > 0 else 'PAGO',
+                    descripcion=descripcion_final
+                )
+                db.session.add(nuevo_mov)
+            
+            else: # PROVEEDOR
+                # En Prov: (+) es Deuda nuestra, (-) es saldo a favor nuestro
+                nuevo_mov_p = MovimientoCtaCteProveedor(
+                    proveedor_id=entidad_id,
+                    sucursal_id=sucursal_id,
+                    monto=monto,
+                    tipo='COMPRA' if monto > 0 else 'PAGO',
+                    descripcion=descripcion_final
+                )
+                db.session.add(nuevo_mov_p)
+
+            db.session.commit()
+            flash(f"Movimiento de ${monto} registrado con éxito.", "success")
+        except Exception as e:
+            db.session.rollback()
+            flash(f"Error al procesar: {str(e)}", "danger")
+
+        return redirect(url_for('admin.gestion_saldos_manual'))
+
+    # Datos para la vista
+    clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
+    proveedores = Proveedor.query.filter_by(activo=True).order_by(Proveedor.razon_social).all()
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+    if current_user.rol == 'admin':
+        sucursales = [s for s in sucursales if s.id == current_user.sucursal_id]
+
+    return render_template('admin/gestion_saldos.html', 
+                           clientes=clientes, 
+                           proveedores=proveedores, 
+                           sucursales=sucursales)
+    
+    
+
+@admin_bp.route('/cheque/nuevo-manual', methods=['POST'])
+@login_required
+@roles_required('admin', 'superadmin')
+def cargar_cheque_manual():
+    try:
+        monto = float(request.form.get('monto'))
+        caja_id = request.form.get('caja_id') # Caja física donde se guarda el papel
+        
+        # 1. Crear el Cheque en Cartera
+        nuevo_ch = Cheque(
+            banco=request.form.get('banco').upper(),
+            numero=request.form.get('numero'),
+            emisor=request.form.get('emisor').upper(),
+            monto=monto,
+            fecha_vencimiento=datetime.strptime(request.form.get('vencimiento'), '%Y-%m-%d').date(),
+            tipo=request.form.get('tipo'), # 'FISICO' o 'ECHEQ'
+            cliente_id=request.form.get('cliente_id') or None, # Opcional
+            estado='EN_CARTERA'
+        )
+        db.session.add(nuevo_ch)
+
+        # 2. Registrar el ingreso del valor a la caja física elegida
+        caja = Caja.query.get(caja_id)
+        if caja:
+            caja.saldo_actual += monto
+            mov_f = MovimientoFinanciero(
+                caja_id=caja.id,
+                monto=monto,
+                tipo='INGRESO',
+                motivo=f"CARGA INICIAL: Cheque {nuevo_ch.banco} N°{nuevo_ch.numero}",
+                metodo_detalle='CHEQUE',
+                usuario_id=current_user.id
+            )
+            db.session.add(mov_f)
+
+        db.session.commit()
+        flash("Cheque cargado correctamente en cartera.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error al cargar cheque: {str(e)}", "danger")
+
+    return redirect(url_for('admin.cartera_cheques'))

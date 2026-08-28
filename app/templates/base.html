@@ -216,8 +216,49 @@
                 </a>
 
                 <a href="{{ url_for('admin.reporte_deudas_prov') }}" class="sidebar-link">
-                    <i class="bi bi-calendar-check"></i> Pagos a Proveedores
+                    <i class="bi bi-calendar-check"></i> Pagar a Proveedores
                 </a>
+
+                <!-- REPORTE DE AUDITORÍA CORREGIDO -->
+                <a href="{{ url_for('admin.reporte_auditoria') }}" 
+                class="sidebar-link {% if request.endpoint == 'admin.reporte_auditoria' %}active{% endif %}">
+                    <i class="bi bi-shield-lock-fill text-pink"></i> Auditoría 360°
+                </a>
+                
+                <!-- SECCIÓN DE MANTENIMIENTO Y AJUSTES -->
+                {% if current_user.rol in ['admin', 'superadmin'] %}
+                 <!-- LÍNEA SUPERIOR -->
+                    <hr class="mx-3 my-3" style="border-top: 1px solid rgba(255,255,255,0.15);">
+                    <div class="sidebar-heading small text-uppercase text-white-50 mt-4 px-3">Mantenimiento</div>
+                    
+                    <li class="nav-item px-2">
+                        <a class="nav-link py-2 {% if request.endpoint == 'admin.gestion_saldos_manual' %}active bg-secondary bg-opacity-25{% endif %}" 
+                        href="{{ url_for('admin.gestion_saldos_manual') }}">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-pencil-square text-pink fs-5 me-3"></i>
+                                <span class="text-white small fw-bold">AJUSTES DE SALDO</span>
+                            </div>
+                        </a>
+                    </li>
+                {% endif %}
+
+                {% if current_user.rol == 'superadmin' %}
+                    <!-- LÍNEA SUPERIOR -->
+                    <hr class="mx-3 my-3" style="border-top: 1px solid rgba(255,255,255,0.15);">
+
+                    <p class="px-3 small text-white-50 fw-bold text-uppercase mb-2">Backup Bases</p>
+                    <li class="nav-item px-2">
+                        <a class="nav-link py-2 bg-danger bg-opacity-25 rounded mb-2" href="{{ url_for('admin.descargar_backup') }}">
+                            <div class="d-flex align-items-center">
+                                <i class="bi bi-cloud-arrow-down-fill text-white fs-5 me-3"></i>
+                                <span class="text-white small fw-bold">DESCARGAR BACKUP DB</span>
+                            </div>
+                        </a>
+                    </li>
+
+                    <!-- LÍNEA INFERIOR -->
+                    <hr class="mx-3 my-3" style="border-top: 1px solid rgba(255,255,255,0.15);">
+                {% endif %}
 
                 {% if current_user.rol == 'superadmin' %}
                     <a href="{{ url_for('admin.dashboard') }}" class="sidebar-link text-warning">
@@ -226,6 +267,12 @@
                 {% endif %}
             {% endif %}
         </nav>
+
+        
+       
+        
+
+
 
         <div class="mt-auto pt-3">
             <a href="{{ url_for('auth.logout') }}" class="sidebar-link text-danger border-top border-secondary pt-3 rounded-0">

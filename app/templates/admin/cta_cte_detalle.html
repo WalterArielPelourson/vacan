@@ -63,7 +63,6 @@
     </div>
 </div>
 
-
 <!-- TABLA DE MOVIMIENTOS -->
 <div class="card shadow border-0">
     <div class="card-header bg-dark text-white fw-bold">HISTORIAL DE MOVIMIENTOS</div>
@@ -118,7 +117,7 @@
                             {% endif %}
                         </td>
 
-                        <td>
+                        <!--<td>
                             {{ m.descripcion }}
                             {% if m.venta_id %}
                                 <br><small class="text-muted text-uppercase">Remito #{{ m.venta_id }}</small>
@@ -126,7 +125,7 @@
                                     <br><small class="text-success fw-bold">Abonado: ${{ "{:,.2f}".format(m.venta.total_pagado) }}</small>
                                 {% endif %}
                             {% endif %}
-                        </td>
+                        </td>-->
 
                         <!-- PUNTO NUEVO: DETALLE DE PRODUCTOS -->
                         <td>

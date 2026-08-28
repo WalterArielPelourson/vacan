@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from app import db 
-from app.models import Repuesto, ModeloAuto, Venta, DetalleVenta, Cliente, Proveedor, MovimientoCtaCte, HistorialPrecio, ModeloAuto, Sucursal
+from app.models import Repuesto, ModeloAuto, Venta, DetalleVenta, Cliente, Proveedor, MovimientoCtaCte, HistorialPrecio, ModeloAuto, Sucursal, Cheque, get_argentina_time
 from flask_login import login_required, current_user
 from sqlalchemy import or_, and_ # Importamos 'or_' para búsquedas múltiples
 from app.models import HistorialPrecio
@@ -9,7 +9,7 @@ from app.models import Presupuesto, DetallePresupuesto # Asegúrate de agregar e
 from sqlalchemy import or_, and_ # Importante: Agrega este import arriba
 from app.utils.security import roles_required, sucursal_filter
 from app.utils.security import check_owner
-
+from datetime import datetime, timedelta
 
 inventory_bp = Blueprint('inventory', __name__)
 
@@ -371,11 +371,14 @@ def eliminar_modelo(id):
 @login_required
 def pos():
     productos = Repuesto.query.filter(Repuesto.stock > 0).all()
-    # Traemos solo los clientes activos
     clientes = Cliente.query.filter_by(activo=True).all()
-    return render_template('pos.html', productos=productos, clientes=clientes)
-
-
+    
+    # --- NUEVO: Traemos las cajas de la sucursal actual + las virtuales ---
+    cajas = Caja.query.filter(
+        (Caja.sucursal_id == current_user.sucursal_id) | (Caja.tipo == 'VIRTUAL')
+    ).all()
+    
+    return render_template('pos.html', productos=productos, clientes=clientes, cajas=cajas)
 
 
 @inventory_bp.route('/vender', methods=['POST'])
@@ -746,3 +749,141 @@ def marcar_facturado(id):
     db.session.commit()
     flash(f"Remito #{id} marcado como facturado", "info")
     return redirect(url_for('inventory.gestion_ventas'))
+
+
+@inventory_bp.route('/pos/procesar-avanzado', methods=['POST'])
+@login_required
+def procesar_venta_avanzada():
+    data = request.get_json()
+    if not data:
+        return jsonify({"status": "error", "message": "No se recibieron datos"}), 400
+
+    cliente_id = data.get('cliente_id')
+    items = data.get('items') 
+    pagos = data.get('pagos') 
+    tipo_comp = data.get('tipo_comprobante', 'REMITO')
+    
+    # --- NUEVOS CAMPOS RECIBIDOS ---
+    iva_p = float(data.get('iva_porcentaje', 21.0))
+    plazo = int(data.get('plazo_pago', 0))
+    recargo_p = float(data.get('recargo_porcentaje', 0))
+    descuento_p = float(data.get('descuento_porcentaje', 0))
+
+    # 1. Cálculo del Total con Ajustes e IVA
+    # Sumamos los subtotales de los ítems (Precio unitario pactado * cantidad)
+    subtotal_items = sum(float(item['precio']) * int(item['cantidad']) for item in items)
+    
+    # Aplicamos primero el Recargo sobre el neto de los productos
+    neto_con_ajustes = subtotal_items * (1 + (recargo_p / 100))
+    # Aplicamos el Descuento sobre el resultado anterior
+    neto_con_ajustes = neto_con_ajustes * (1 - (descuento_p / 100))
+    
+    # --- AQUÍ SUMAMOS EL IVA AL TOTAL FINAL ---
+    total_con_iva = neto_con_ajustes * (1 + (iva_p / 100))
+    total_venta = round(total_con_iva, 2)
+    
+    try:
+        # 2. Crear el objeto Venta con el Total Real (IVA incluido)
+        nueva_v = Venta(
+            total=total_venta,
+            cliente_id=cliente_id,
+            usuario_id=current_user.id,
+            sucursal_id=current_user.sucursal_id,
+            tipo_comprobante=tipo_comp,
+            estado_arca='FACTURADO' if tipo_comp == 'FACTURA' else 'PENDIENTE',
+            iva_porcentaje=iva_p, 
+            plazo_pago=plazo      
+        )
+        db.session.add(nueva_v)
+        db.session.flush() 
+
+        # 3. Procesar los Ítems del Carrito
+        for item in items:
+            item_id = str(item['id'])
+            es_man = item_id.startswith('MAN_')
+            
+            id_rep = None
+            if not es_man:
+                rep = Repuesto.query.get(int(item['id']))
+                if rep:
+                    if rep.stock < int(item['cantidad']):
+                         raise Exception(f"Stock insuficiente para {rep.nombre}")
+                    rep.stock -= int(item['cantidad'])
+                    id_rep = rep.id
+
+            db.session.add(DetalleVenta(
+                venta_id=nueva_v.id, 
+                repuesto_id=id_rep,
+                nombre_item=item['nombre'].upper(),
+                cantidad=int(item['cantidad']), 
+                precio_unitario=float(item['precio']) 
+            ))
+
+        # 4. Procesar la Bolsa de Pagos
+        total_abonado_real = 0
+        for p in pagos:
+            if p is None: continue
+            
+            monto_p = float(p.get('monto', 0))
+            medio = p.get('medio')
+            caja_id_manual = p.get('caja_id') # <--- EL ID QUE ELEGISTE EN EL POS
+
+            if medio == 'CTA_CTE':
+                # Lógica de Cuenta Corriente (No toca cajas)
+                desc_cta = f"Venta {tipo_comp} #{nueva_v.id}"
+                if plazo > 0:
+                    fecha_venc = (get_argentina_time() + timedelta(days=plazo)).strftime('%d/%m/%Y')
+                    desc_cta += f" - VENCE: {fecha_venc}"
+                
+                db.session.add(MovimientoCtaCte(
+                    cliente_id=cliente_id, venta_id=nueva_v.id, monto=monto_p,
+                    tipo='DEUDA', sucursal_id=current_user.sucursal_id, descripcion=desc_cta
+                ))
+            else:
+                # DINERO REAL: Impacta en la caja seleccionada manualmente
+                total_abonado_real += monto_p
+                
+                if caja_id_manual:
+                    caja_destino = Caja.query.get(caja_id_manual) # <--- BUSCAMOS LA CAJA EXACTA
+                    
+                    if caja_destino:
+                        # 1. Sumamos al saldo de esa caja específica (Física o Virtual)
+                        caja_destino.saldo_actual += monto_p
+                        
+                        # 2. Registramos el movimiento en esa caja específica
+                        db.session.add(MovimientoFinanciero(
+                            caja_id=caja_destino.id, 
+                            monto=monto_p, 
+                            tipo='INGRESO',
+                            motivo=f"Venta #{nueva_v.id} ({medio})", 
+                            metodo_detalle=medio,
+                            usuario_id=current_user.id, 
+                            venta_id=nueva_v.id
+                        ))
+                else:
+                    # Si por algún error no llegó el ID, lanzamos error para no perder rastro del dinero
+                    raise Exception(f"No se seleccionó una caja de destino para el pago con {medio}")
+
+                # Lógica de Cheque (Si corresponde)
+                if medio == 'CHEQUE':
+                    d = p.get('cheque_data')
+                    if d:
+                        db.session.add(Cheque(
+                            banco=d.get('banco', 'S/D').upper(), 
+                            numero=d.get('numero', '0'), 
+                            emisor=d.get('emisor', 'S/D').upper(),
+                            monto=monto_p,
+                            fecha_vencimiento=datetime.strptime(d.get('vencimiento'), '%Y-%m-%d').date() if d.get('vencimiento') else get_argentina_time().date(),
+                            tipo='FISICO', cliente_id=cliente_id, venta_id=nueva_v.id, estado='EN_CARTERA'
+                        ))
+        # 5. Finalizar Venta
+        # La venta se marca como pagada SOLO SI el dinero real cubre el total de la operación.
+        nueva_v.total_pagado = total_abonado_real
+        nueva_v.esta_pagada = (total_abonado_real >= (total_venta - 0.05)) 
+        
+        db.session.commit()
+        return jsonify({"status": "ok", "venta_id": nueva_v.id})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500

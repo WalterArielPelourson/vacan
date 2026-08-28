@@ -161,6 +161,11 @@ class Venta(db.Model):
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'))
     sucursal_id = db.Column(db.Integer, db.ForeignKey('sucursal.id'))
     
+    iva_porcentaje = db.Column(db.Float, default=21.0) # Para elegir 21, 10.5 o 0
+    plazo_pago = db.Column(db.Integer, default=0)    # Días para el vencimiento
+    descuento_global = db.Column(db.Float, default=0.0) # Monto o % de descuento
+    recargo_global = db.Column(db.Float, default=0.0)  
+    
     cliente = db.relationship('Cliente', back_populates='ventas')
     usuario = db.relationship('Usuario', back_populates='ventas')
     
@@ -288,6 +293,7 @@ class MovimientoFinanciero(db.Model):
     es_transferencia = db.Column(db.Boolean, default=False)
     referencia = db.Column(db.String(50))
     
+    usuario = db.relationship('Usuario', backref='movimientos_financieros')
     caja = db.relationship('Caja', back_populates='movimientos')
     pago_maestro = db.relationship('MovimientoCtaCteProveedor', back_populates='detalles_pago')
     categoria = db.relationship('CategoriaMovimiento')
