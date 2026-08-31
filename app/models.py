@@ -258,8 +258,8 @@ class MovimientoCtaCteProveedor(db.Model):
     proveedor = db.relationship('Proveedor', back_populates='movimientos_p')
     compra = db.relationship('Compra', back_populates='movimiento_cta')
     detalles_pago = db.relationship('MovimientoFinanciero', back_populates='pago_maestro')
-    cheques_pago = db.relationship('Cheque', back_populates='pago_maestro')
-
+    cheques_pago = db.relationship('Cheque', back_populates='pago_maestro', overlaps="cheques_list_info,pago_prov_obj")
+    
     
 # --- TESORERÍA ---
 class Caja(db.Model):
@@ -334,7 +334,7 @@ class Cheque(db.Model):
     proveedor = db.relationship('Proveedor', backref='cheques_entregados_prov')
     
     pago_prov_obj = db.relationship('MovimientoCtaCteProveedor', backref='cheques_list_info')
-    pago_maestro = db.relationship('MovimientoCtaCteProveedor', back_populates='cheques_pago')
+    pago_maestro = db.relationship('MovimientoCtaCteProveedor', back_populates='cheques_pago', overlaps="cheques_list_info,pago_prov_obj")
 
 class MovimientoCtaCte(db.Model):
     id = db.Column(db.Integer, primary_key=True)

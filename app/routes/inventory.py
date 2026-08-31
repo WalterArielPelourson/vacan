@@ -769,26 +769,25 @@ def procesar_venta_avanzada():
     recargo_p = float(data.get('recargo_porcentaje', 0))
     descuento_p = float(data.get('descuento_porcentaje', 0))
 
+    # Identificamos la sucursal del vendedor actual
+    sucursal_vendedor = current_user.sucursal_id
+
     # 1. Cálculo del Total con Ajustes e IVA
-    # Sumamos los subtotales de los ítems (Precio unitario pactado * cantidad)
     subtotal_items = sum(float(item['precio']) * int(item['cantidad']) for item in items)
     
-    # Aplicamos primero el Recargo sobre el neto de los productos
     neto_con_ajustes = subtotal_items * (1 + (recargo_p / 100))
-    # Aplicamos el Descuento sobre el resultado anterior
     neto_con_ajustes = neto_con_ajustes * (1 - (descuento_p / 100))
     
-    # --- AQUÍ SUMAMOS EL IVA AL TOTAL FINAL ---
     total_con_iva = neto_con_ajustes * (1 + (iva_p / 100))
     total_venta = round(total_con_iva, 2)
     
     try:
-        # 2. Crear el objeto Venta con el Total Real (IVA incluido)
+        # 2. Crear el objeto Venta vinculado a la sucursal del vendedor
         nueva_v = Venta(
             total=total_venta,
             cliente_id=cliente_id,
             usuario_id=current_user.id,
-            sucursal_id=current_user.sucursal_id,
+            sucursal_id=sucursal_vendedor, # Se asigna la sucursal del vendedor
             tipo_comprobante=tipo_comp,
             estado_arca='FACTURADO' if tipo_comp == 'FACTURA' else 'PENDIENTE',
             iva_porcentaje=iva_p, 
@@ -797,23 +796,37 @@ def procesar_venta_avanzada():
         db.session.add(nueva_v)
         db.session.flush() 
 
-        # 3. Procesar los Ítems del Carrito
+        # 3. Procesar los Ítems del Carrito (Lógica de SKU Local)
         for item in items:
             item_id = str(item['id'])
             es_man = item_id.startswith('MAN_')
             
-            id_rep = None
+            id_rep_final = None
             if not es_man:
-                rep = Repuesto.query.get(int(item['id']))
-                if rep:
-                    if rep.stock < int(item['cantidad']):
-                         raise Exception(f"Stock insuficiente para {rep.nombre}")
-                    rep.stock -= int(item['cantidad'])
-                    id_rep = rep.id
+                # El ítem viene con un ID de la base de datos (podría ser de otra sucursal)
+                rep_seleccionado = Repuesto.query.get(int(item['id']))
+                
+                if rep_seleccionado:
+                    # BUSCAMOS EL MISMO SKU PERO EN LA SUCURSAL DEL VENDEDOR
+                    rep_local = Repuesto.query.filter_by(
+                        sku=rep_seleccionado.sku, 
+                        sucursal_id=sucursal_vendedor
+                    ).first()
+
+                    if not rep_local:
+                        raise Exception(f"El producto con SKU {rep_seleccionado.sku} no existe cargado en esta sucursal.")
+
+                    # Verificamos stock en el registro LOCAL
+                    if rep_local.stock < int(item['cantidad']):
+                         raise Exception(f"Stock insuficiente en esta sucursal para {rep_local.nombre} (Disponibilidad: {rep_local.stock})")
+                    
+                    # Descontamos del registro de la sucursal del vendedor
+                    rep_local.stock -= int(item['cantidad'])
+                    id_rep_final = rep_local.id
 
             db.session.add(DetalleVenta(
                 venta_id=nueva_v.id, 
-                repuesto_id=id_rep,
+                repuesto_id=id_rep_final,
                 nombre_item=item['nombre'].upper(),
                 cantidad=int(item['cantidad']), 
                 precio_unitario=float(item['precio']) 
@@ -826,31 +839,30 @@ def procesar_venta_avanzada():
             
             monto_p = float(p.get('monto', 0))
             medio = p.get('medio')
-            caja_id_manual = p.get('caja_id') # <--- EL ID QUE ELEGISTE EN EL POS
+            caja_id_manual = p.get('caja_id')
 
             if medio == 'CTA_CTE':
-                # Lógica de Cuenta Corriente (No toca cajas)
                 desc_cta = f"Venta {tipo_comp} #{nueva_v.id}"
                 if plazo > 0:
                     fecha_venc = (get_argentina_time() + timedelta(days=plazo)).strftime('%d/%m/%Y')
                     desc_cta += f" - VENCE: {fecha_venc}"
                 
                 db.session.add(MovimientoCtaCte(
-                    cliente_id=cliente_id, venta_id=nueva_v.id, monto=monto_p,
-                    tipo='DEUDA', sucursal_id=current_user.sucursal_id, descripcion=desc_cta
+                    cliente_id=cliente_id, 
+                    venta_id=nueva_v.id, 
+                    monto=monto_p,
+                    tipo='DEUDA', 
+                    sucursal_id=sucursal_vendedor, # Deuda vinculada a la sucursal local
+                    descripcion=desc_cta
                 ))
             else:
-                # DINERO REAL: Impacta en la caja seleccionada manualmente
                 total_abonado_real += monto_p
                 
                 if caja_id_manual:
-                    caja_destino = Caja.query.get(caja_id_manual) # <--- BUSCAMOS LA CAJA EXACTA
+                    caja_destino = Caja.query.get(caja_id_manual)
                     
                     if caja_destino:
-                        # 1. Sumamos al saldo de esa caja específica (Física o Virtual)
                         caja_destino.saldo_actual += monto_p
-                        
-                        # 2. Registramos el movimiento en esa caja específica
                         db.session.add(MovimientoFinanciero(
                             caja_id=caja_destino.id, 
                             monto=monto_p, 
@@ -861,10 +873,8 @@ def procesar_venta_avanzada():
                             venta_id=nueva_v.id
                         ))
                 else:
-                    # Si por algún error no llegó el ID, lanzamos error para no perder rastro del dinero
                     raise Exception(f"No se seleccionó una caja de destino para el pago con {medio}")
 
-                # Lógica de Cheque (Si corresponde)
                 if medio == 'CHEQUE':
                     d = p.get('cheque_data')
                     if d:
@@ -874,10 +884,13 @@ def procesar_venta_avanzada():
                             emisor=d.get('emisor', 'S/D').upper(),
                             monto=monto_p,
                             fecha_vencimiento=datetime.strptime(d.get('vencimiento'), '%Y-%m-%d').date() if d.get('vencimiento') else get_argentina_time().date(),
-                            tipo='FISICO', cliente_id=cliente_id, venta_id=nueva_v.id, estado='EN_CARTERA'
+                            tipo='FISICO', 
+                            cliente_id=cliente_id, 
+                            venta_id=nueva_v.id, 
+                            estado='EN_CARTERA'
                         ))
+
         # 5. Finalizar Venta
-        # La venta se marca como pagada SOLO SI el dinero real cubre el total de la operación.
         nueva_v.total_pagado = total_abonado_real
         nueva_v.esta_pagada = (total_abonado_real >= (total_venta - 0.05)) 
         

@@ -47,14 +47,14 @@
 <!-- NIVEL 1: LIQUIDEZ Y DEUDAS -->
 <div class="row mb-4">
     <div class="col-md-3 mb-2">
-        <div class="card border-0 shadow-sm p-3 bg-white border-start border-primary border-5 h-100">
+        <div class="card border-0 shadow-sm p-3 bg-white border-start border-primary border-5 h-100 text-dark">
             <h6 class="text-muted small fw-bold text-uppercase">A Cobrar (Clientes)</h6>
             <h3 class="fw-bold text-dark mb-0">${{ "{:,.2f}".format(total_clientes) }}</h3>
             <small class="text-primary fw-bold">Deuda en la calle</small>
         </div>
     </div>
     <div class="col-md-3 mb-2">
-        <div class="card border-0 shadow-sm p-3 bg-white border-start border-danger border-5 h-100">
+        <div class="card border-0 shadow-sm p-3 bg-white border-start border-danger border-5 h-100 text-dark">
             <h6 class="text-muted small fw-bold text-uppercase">A Pagar (Fábricas)</h6>
             <h3 class="fw-bold text-dark mb-0">${{ "{:,.2f}".format(total_prov|abs) }}</h3>
             <small class="text-danger fw-bold">Compromisos pendientes</small>
@@ -68,7 +68,7 @@
         </div>
     </div>
     <div class="col-md-3 mb-2">
-        <div class="card border-0 shadow-sm p-3 bg-white border-start border-success border-5 h-100">
+        <div class="card border-0 shadow-sm p-3 bg-white border-start border-success border-5 h-100 text-dark">
             <h6 class="text-muted small fw-bold text-uppercase">Potencial de Venta</h6>
             <h3 class="fw-bold text-success mb-0">${{ "{:,.2f}".format(g_stock_venta) }}</h3>
             <small>Expectativa de ingreso</small>
@@ -78,9 +78,9 @@
 
 <!-- NIVEL 2: COMPARATIVA DE RENDIMIENTO -->
 <div class="card shadow border-0 mb-4 bg-light">
-    <div class="card-header bg-dark text-white fw-bold text-center small text-uppercase py-2">Evolución de Rendimiento (Comparado con periodo anterior)</div>
+    <div class="card-header bg-dark text-white fw-bold text-center small text-uppercase py-2">Evolución de Rendimiento (Periodo Actual)</div>
     <div class="card-body">
-        <div class="row text-center">
+        <div class="row text-center text-dark">
             <div class="col-md-3 border-end">
                 <p class="mb-1 small text-muted text-uppercase">Ventas Totales</p>
                 <h4 class="fw-bold mb-0 text-dark">${{ "{:,.2f}".format(g_ventas) }}</h4>
@@ -92,22 +92,19 @@
             <div class="col-md-3 border-end">
                 <p class="mb-1 small text-muted text-uppercase">Compras Realizadas</p>
                 <h4 class="fw-bold mb-0 text-primary">${{ "{:,.2f}".format(g_compras) }}</h4>
-                {% set var_c = ((g_compras - ant_compras) / ant_compras * 100) if ant_compras > 0 else 100 %}
-                <small class="fw-bold text-muted">
-                    {{ 'Subió' if var_c >= 0 else 'Bajó' }} {{ "{:,.1f}%".format(var_c|abs) }}
-                </small>
+                <small class="fw-bold text-muted small italic">Suma de facturas ingresadas</small>
             </div>
             <div class="col-md-3 border-end">
                 <p class="mb-1 small text-muted text-uppercase">Cobranzas (Cash)</p>
                 <h4 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(g_cobranzas) }}</h4>
-                <small class="text-muted small italic">Dinero real ingresado</small>
+                <small class="text-muted small italic">Dinero real que entró a caja</small>
             </div>
             <div class="col-md-3">
                 <p class="mb-1 small text-muted text-uppercase">Utilidad Real (Neto)</p>
-                {# Utilidad Real calculada sobre el neto sin IVA #}
+                {# Utilidad Real calculada sobre el neto sin IVA: Ventas/1.21 - Compras/1.21 - Gastos/1.21 #}
                 {% set util_neta = (g_ventas / 1.21) - (g_compras / 1.21) - (g_gastos / 1.21) %}
                 <h4 class="fw-bold mb-0 text-pink">${{ "{:,.2f}".format(util_neta) }}</h4>
-                <small class="text-muted small italic">Neto Ventas - Neto Costos</small>
+                <small class="text-muted small italic">Beneficio real estimado</small>
             </div>
         </div>
     </div>
@@ -117,8 +114,8 @@
 <div class="row mb-4">
     <div class="col-md-8">
         <div class="card shadow border-0 h-100">
-            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
-                <span class="text-dark">VENTAS VS GASTOS POR SUCURSAL</span>
+            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center text-dark">
+                <span>VENTAS VS GASTOS POR SUCURSAL</span>
                 <i class="bi bi-bar-chart text-pink"></i>
             </div>
             <div class="card-body">
@@ -128,41 +125,40 @@
     </div>
     <div class="col-md-4">
         <div class="card shadow border-0 h-100">
-            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center">
-                <span class="text-dark text-uppercase">Posición Técnica IVA</span>
+            <div class="card-header bg-white fw-bold d-flex justify-content-between align-items-center text-dark">
+                <span class="text-uppercase">Posición Técnica IVA</span>
                 <i class="bi bi-calculator text-pink"></i>
             </div>
             <div class="card-body text-center text-dark">
                 <h6 class="text-muted small">A Pagar Estimado (Ventas - Compras)</h6>
                 
-                {# CORRECCIÓN: Usamos g_iva_c que ahora viene del servidor #}
                 {% set saldo_iva = g_iva_v - g_iva_c %}
                 
                 <h2 class="fw-bold {{ 'text-danger' if saldo_iva > 0 else 'text-success' }} mb-0">
                     ${{ "{:,.2f}".format(saldo_iva|abs) }}
                 </h2>
                 <small class="d-block mb-3 fw-bold">
-                    {{ 'SALDO A PAGAR' if saldo_iva > 0 else 'SALDO A FAVOR (CRÉDITO)' }}
+                    {{ 'SALDO A PAGAR (DÉBITO)' if saldo_iva > 0 else 'SALDO A FAVOR (CRÉDITO)' }}
                 </small>
                 <hr>
                 <div class="small text-start">
                     <p class="mb-1 d-flex justify-content-between">
-                        <span>Débito Fiscal (Ventas Facturadas):</span> 
+                        <span>IVA Débito (Ventas Facturadas):</span> 
                         <strong>${{ "{:,.2f}".format(g_iva_v) }}</strong>
                     </p>
                     <p class="mb-0 d-flex justify-content-between">
-                        <span>Crédito Fiscal (Compras Reales):</span> 
+                        <span>IVA Crédito (Compras con IVA):</span> 
                         <strong class="text-success">${{ "{:,.2f}".format(g_iva_c) }}</strong>
                     </p>
                 </div>
 
                 {% if saldo_iva > 0 %}
                 <div class="alert alert-warning py-1 px-2 mt-3 mb-0" style="font-size: 0.7rem;">
-                    <i class="bi bi-info-circle"></i> Atención: Este periodo genera obligación de pago.
+                    <i class="bi bi-info-circle"></i> Atención: Este periodo genera obligación tributaria.
                 </div>
                 {% else %}
                 <div class="alert alert-success py-1 px-2 mt-3 mb-0" style="font-size: 0.7rem;">
-                    <i class="bi bi-check-circle"></i> Posee crédito fiscal acumulado.
+                    <i class="bi bi-check-circle"></i> Posee crédito fiscal acumulado a favor.
                 </div>
                 {% endif %}
             </div>
@@ -171,10 +167,10 @@
 </div>
 
 <!-- NIVEL 4: TABLA DETALLADA -->
-<div class="card shadow border-0 mb-4">
+<div class="card shadow border-0 mb-4 text-dark">
     <div class="card-header bg-dark text-white fw-bold small text-uppercase py-2">Desglose Operativo por Punto de Venta</div>
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
+        <table class="table table-hover align-middle mb-0 text-dark">
             <thead class="table-light small text-uppercase">
                 <tr>
                     <th>Sucursal</th>
@@ -185,7 +181,7 @@
                     <th class="text-end">Utilidad Estimada</th>
                 </tr>
             </thead>
-            <tbody class="text-dark">
+            <tbody>
                 {% for s in sucursales_data %}
                 <tr>
                     <td><i class="bi bi-geo-alt-fill text-danger"></i> <strong>{{ s.nombre }}</strong></td>
@@ -205,15 +201,15 @@
 <div class="row">
     <div class="col-md-6 mb-3">
         <div class="card shadow border-0 h-100">
-            <div class="card-header bg-white fw-bold text-pink text-uppercase small">Top 5 Radiadores más vendidos</div>
+            <div class="card-header bg-white fw-bold text-pink text-uppercase small text-dark">Top 5 Radiadores más vendidos</div>
             <div class="card-body">
                 {% for r in ranking %}
-                <div class="d-flex justify-content-between align-items-center mb-2 border-bottom pb-2">
-                    <span class="small text-dark">{{ r[0] }}</span>
+                <div class="d-flex justify-content-between align-items-center mb-2 border-bottom pb-2 text-dark">
+                    <span class="small">{{ r[0] }}</span>
                     <span class="badge bg-pink">{{ r[1] }} unidades</span>
                 </div>
                 {% else %}
-                <p class="text-center text-muted small py-4 italic">No hay ventas registradas.</p>
+                <p class="text-center text-muted small py-4 italic">No se registran ventas de productos en este rango.</p>
                 {% endfor %}
             </div>
         </div>
@@ -223,11 +219,11 @@
             <div class="card-header fw-bold border-white text-uppercase small">Alertas de Riesgo Financiero</div>
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
-                    <span class="fw-bold">Valores Rechazados:</span>
+                    <span class="fw-bold">Cheques Rechazados:</span>
                     <h4 class="fw-bold mb-0">${{ "{:,.2f}".format(total_rechazados) }}</h4>
                 </div>
                 <div class="p-2 rounded bg-white bg-opacity-25 small italic">
-                    <i class="bi bi-info-circle"></i> Los cheques rechazados impactan la liquidez. Gestiona el recupero de estos valores en la cartera de cheques.
+                    <i class="bi bi-info-circle"></i> Gestiona el recupero de estos valores en la cartera de cheques para no afectar el flujo de caja.
                 </div>
             </div>
         </div>

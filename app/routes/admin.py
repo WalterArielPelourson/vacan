@@ -1478,63 +1478,73 @@ def generar_proximo_sku_vacan():
 @login_required
 @roles_required('admin', 'superadmin')
 def procesar_compra():
+    # 1. IDENTIFICAR SUCURSAL Y PROVEEDOR DE DESTINO (Mandan sobre todo lo demás)
     if 'archivo_excel' in request.files:
-        # --- LÓGICA EXCEL CON DESGLOSE FISCAL, MULTISUCURSAL Y NC/ND ---
-        archivo = request.files['archivo_excel']
+        suc_id_destino = int(request.form.get('sucursal_id'))
         prov_id = request.form.get('proveedor_id')
         nro_fact = request.form.get('nro_factura')
         plazo = int(request.form.get('plazo_pago', 30))
-        suc_id = int(request.form.get('sucursal_id')) 
         margen = float(request.form.get('margen_sugerido', 30))
-        
         tipo_comp = request.form.get('tipo_comprobante', 'FACTURA')
-        signo_stock = -1 if tipo_comp == 'NC' else 1
-        signo_finan = -1 if tipo_comp == 'NC' else 1
-        
         iva_p = float(request.form.get('iva_porcentaje', 21))
         otros_imp = float(request.form.get('impuestos_monto', 0))
-        
-        try:
+    else:
+        data = request.get_json()
+        suc_id_destino = int(data.get('sucursal_id'))
+        prov_id = data.get('proveedor_id')
+        nro_fact = data.get('nro_factura')
+        plazo = int(data.get('plazo_pago', 30))
+        margen = float(data.get('margen_sugerido', 30))
+        tipo_comp = data.get('tipo_comprobante', 'FACTURA')
+        iva_p = float(data.get('iva_porcentaje', 21))
+        otros_imp = float(data.get('impuestos_monto', 0))
+
+    signo_stock = -1 if tipo_comp == 'NC' else 1
+    signo_finan = -1 if tipo_comp == 'NC' else 1
+
+    try:
+        # 2. INICIALIZAR COMPRA
+        nueva_compra = Compra(
+            nro_factura=nro_fact, proveedor_id=prov_id, tipo_comprobante=tipo_comp,
+            total=0, plazo_pago=plazo, iva_porcentaje=iva_p, 
+            impuestos_monto=otros_imp, margen_sugerido=margen
+        )
+        db.session.add(nueva_compra)
+        db.session.flush()
+
+        subtotal_items = 0
+
+        if 'archivo_excel' in request.files:
+            # --- LÓGICA EXCEL ---
+            archivo = request.files['archivo_excel']
             df = pd.read_excel(archivo)
             df.columns = [c.lower().strip() for c in df.columns]
-            
-            nueva_compra = Compra(
-                nro_factura=nro_fact, 
-                proveedor_id=prov_id, 
-                tipo_comprobante=tipo_comp,
-                total=0,
-                plazo_pago=plazo,
-                iva_porcentaje=iva_p,
-                impuestos_monto=otros_imp,
-                margen_sugerido=margen
-            )
-            db.session.add(nueva_compra)
-            db.session.flush()
 
-            subtotal_items = 0
             for _, row in df.iterrows():
                 raw_cod = str(row.get('codigo', '')).strip()
-                nom = str(row.get('nombre', 'Producto Importado')).strip().upper()
-                cant = int(row.get('cantidad', 0))
-                cost = float(row.get('costo', 0))
-
                 if not raw_cod or raw_cod.lower() == 'nan':
                     cod = generar_proximo_sku_vacan()
                 else:
                     cod = raw_cod.upper()
                     if cod.endswith('.0'): cod = cod[:-2]
 
-                rep = Repuesto.query.filter_by(sku=cod, sucursal_id=suc_id, proveedor_id=prov_id).first()
+                cant = int(row.get('cantidad', 0))
+                cost = float(row.get('costo', 0))
+
+                # BUSCAMOS EL SKU ESTRÍCTAMENTE EN LA SUCURSAL DESTINO
+                rep = Repuesto.query.filter_by(sku=cod, sucursal_id=suc_id_destino).first()
 
                 if not rep:
+                    # Si no existe en esa sucursal, lo creamos nuevo allí
                     rep = Repuesto(
-                        sku=cod, nombre=nom, stock=0, costo=cost,
-                        sucursal_id=suc_id, proveedor_id=prov_id,
-                        precio=cost * (1 + (margen / 100)) 
+                        sku=cod, nombre=str(row.get('nombre', 'NUEVO')).strip().upper(),
+                        stock=0, costo=cost, sucursal_id=suc_id_destino, proveedor_id=prov_id,
+                        precio=cost * (1 + (margen / 100))
                     )
                     db.session.add(rep)
                     db.session.flush()
 
+                # Operamos siempre sobre el registro de la sucursal destino
                 rep.stock += (cant * signo_stock)
                 rep.costo = cost
                 rep.precio = cost * (1 + (margen / 100))
@@ -1544,111 +1554,92 @@ def procesar_compra():
                     cantidad=cant, costo_unitario=cost
                 ))
                 subtotal_items += (cant * cost)
-                db.session.flush()
 
-            total_final = (subtotal_items * (1 + (iva_p / 100)) + otros_imp) * signo_finan
-            nueva_compra.subtotal = subtotal_items
-            nueva_compra.total = total_final
-
-            db.session.add(MovimientoCtaCteProveedor(
-                proveedor_id=prov_id, monto=total_final, compra=nueva_compra, sucursal_id=suc_id,
-                descripcion=f"{tipo_comp} #{nro_fact} (Excel)"
-            ))
-            
-            db.session.commit()
-            flash(f"{tipo_comp} procesada con éxito. Total: ${total_final:,.2f}", "success")
-            
-        except Exception as e:
-            db.session.rollback()
-            flash(f"Error: {str(e)}", "danger")
-        return redirect(url_for('admin.modulo_compras'))
-
-    else:
-        # --- LÓGICA MANUAL (JSON) CON SOPORTE PARA AJUSTES DE SALDO (Punto 3) ---
-        data = request.get_json()
-        items = data.get('items')
-        prov_id = data.get('proveedor_id')
-        nro_fact = data.get('nro_factura')
-        plazo = int(data.get('plazo_pago', 30))
-        suc_id = int(data.get('sucursal_id'))
-        margen = float(data.get('margen_sugerido', 30))
-        
-        tipo_comp = data.get('tipo_comprobante', 'FACTURA')
-        signo_stock = -1 if tipo_comp == 'NC' else 1
-        signo_finan = -1 if tipo_comp == 'NC' else 1
-        
-        subtotal_manual = float(data.get('subtotal', 0))
-        iva_p = float(data.get('iva_porcentaje', 21))
-        otros_imp = float(data.get('impuestos_monto', 0))
-        total_final = (subtotal_manual * (1 + (iva_p / 100)) + otros_imp) * signo_finan
-        
-        try:
-            nueva_compra = Compra(
-                nro_factura=nro_fact, proveedor_id=prov_id, tipo_comprobante=tipo_comp,
-                subtotal=subtotal_manual, iva_porcentaje=iva_p, impuestos_monto=otros_imp,
-                total=total_final, plazo_pago=plazo, margen_sugerido=margen
-            )
-            db.session.add(nueva_compra)
-            db.session.flush()
+        else:
+            # --- LÓGICA MANUAL (JSON) ---
+            items = data.get('items')
+            subtotal_items = float(data.get('subtotal', 0))
 
             for item in items:
                 item_id = str(item['id'])
                 costo_item = float(item['costo'])
                 cant_item = int(item['cantidad'])
-                
                 id_repuesto_final = None
-                
-                # --- PUNTO 3: DETECCIÓN DE ÍTEM DE AJUSTE (S/STOCK) ---
+
                 if item_id.startswith('ADJ_'):
-                    # Es un ajuste (flete, interés, etc.): No buscamos repuesto ni tocamos stock
-                    pass
-                
+                    pass # Ajuste sin stock
                 elif item_id.startswith('NEW_'):
-                    # Es un alta nueva: Creamos el repuesto
+                    # Alta nueva en sucursal destino
                     sku_m = item_id.replace('NEW_', '').upper() or generar_proximo_sku_vacan()
                     rep = Repuesto(
                         sku=sku_m, nombre=item['nombre'].upper(), stock=0, 
-                        costo=costo_item, sucursal_id=suc_id, proveedor_id=prov_id,
+                        costo=costo_item, sucursal_id=suc_id_destino, proveedor_id=prov_id,
                         precio=costo_item * (1 + (margen / 100))
                     )
                     db.session.add(rep)
                     db.session.flush()
-                    
                     rep.stock += (cant_item * signo_stock)
                     id_repuesto_final = rep.id
                 else:
-                    # Es un repuesto de stock existente
-                    rep = Repuesto.query.get(item['id'])
-                    if rep:
-                        rep.stock += (cant_item * signo_stock)
-                        rep.costo = costo_item
-                        rep.precio = costo_item * (1 + (margen / 100))
-                        id_repuesto_final = rep.id
+                    # ES UN REPUESTO EXISTENTE (Puede venir de otra sucursal del buscador)
+                    rep_seleccionado = Repuesto.query.get(item['id'])
+                    if rep_seleccionado:
+                        # Buscamos si el MISMO SKU existe en la sucursal donde estamos comprando
+                        rep_en_destino = Repuesto.query.filter_by(
+                            sku=rep_seleccionado.sku, sucursal_id=suc_id_destino
+                        ).first()
 
-                # Guardamos el detalle (Sea ajuste o repuesto)
+                        if not rep_en_destino:
+                            # CLONAMOS el repuesto a la sucursal de destino
+                            rep_en_destino = Repuesto(
+                                sku=rep_seleccionado.sku, sku_vacan=rep_seleccionado.sku_vacan,
+                                nombre=rep_seleccionado.nombre, rubro=rep_seleccionado.rubro,
+                                subrubro=rep_seleccionado.subrubro, costo=costo_item,
+                                precio=costo_item * (1 + (margen / 100)),
+                                sucursal_id=suc_id_destino, proveedor_id=prov_id, stock=0
+                            )
+                            db.session.add(rep_en_destino)
+                            db.session.flush()
+                        
+                        # Sumamos stock en el registro de la sucursal correcta
+                        rep_en_destino.stock += (cant_item * signo_stock)
+                        rep_en_destino.costo = costo_item
+                        rep_en_destino.precio = costo_item * (1 + (margen / 100))
+                        id_repuesto_final = rep_en_destino.id
+
                 db.session.add(DetalleCompra(
-                    compra=nueva_compra, 
-                    repuesto_id=id_repuesto_final, 
-                    nombre_item=item['nombre'].upper(),
-                    cantidad=cant_item, 
-                    costo_unitario=costo_item
+                    compra=nueva_compra, repuesto_id=id_repuesto_final, 
+                    nombre_item=item['nombre'].upper(), cantidad=cant_item, costo_unitario=costo_item
                 ))
-                db.session.flush()
 
-            db.session.add(MovimientoCtaCteProveedor(
-                proveedor_id=prov_id, monto=total_final, compra=nueva_compra, sucursal_id=suc_id,
-                descripcion=f"{tipo_comp} #{nro_fact} (Manual)"
-            ))
-            
-            db.session.commit()
+        # 3. CÁLCULOS FINALES Y CTA CTE
+        total_final = (subtotal_items * (1 + (iva_p / 100)) + otros_imp) * signo_finan
+        nueva_compra.subtotal = subtotal_items
+        nueva_compra.total = total_final
+
+        db.session.add(MovimientoCtaCteProveedor(
+            proveedor_id=prov_id, monto=total_final, compra=nueva_compra, 
+            sucursal_id=suc_id_destino,
+            descripcion=f"{tipo_comp} #{nro_fact} ({'Excel' if 'archivo_excel' in request.files else 'Manual'})"
+        ))
+        
+        db.session.commit()
+        
+        if 'archivo_excel' in request.files:
+            flash(f"Operación exitosa en Sucursal Destino. Total: ${total_final:,.2f}", "success")
+            return redirect(url_for('admin.modulo_compras'))
+        else:
             return jsonify({"status": "ok", "message": f"Operación exitosa por ${total_final:,.2f}"})
 
-        except Exception as e:
-            db.session.rollback()
+    except Exception as e:
+        db.session.rollback()
+        if 'archivo_excel' in request.files:
+            flash(f"Error: {str(e)}", "danger")
+            return redirect(url_for('admin.modulo_compras'))
+        else:
             return jsonify({"status": "error", "message": str(e)}), 500
         
-
-
+        
 
 @admin_bp.route('/proveedores/devolucion-cheque/<int:id>', methods=['POST'])
 @login_required
@@ -2107,22 +2098,19 @@ def procesar_traspaso():
 @login_required
 @roles_required('admin', 'superadmin')
 def reporte_rentabilidad():
-    # 1. GESTIÓN DE FECHAS (Periodo Actual y Anterior)
+    # 1. GESTIÓN DE FECHAS (Aseguramos el rango completo del día)
     desde_str = request.args.get('desde', date.today().replace(day=1).strftime('%Y-%m-%d'))
     hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
-    
-    # --- CAPTURA DEL FILTRO DE SUCURSAL ---
     f_sucursal = request.args.get('sucursal_id', type=int)
     
     desde = datetime.strptime(desde_str, '%Y-%m-%d')
-    hasta = datetime.strptime(hasta_str, '%Y-%m-%d')
+    hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
     
-    # Calculamos la duración del periodo para comparar con el periodo anterior exacto
     dias_periodo = (hasta - desde).days + 1
     ant_desde = desde - timedelta(days=dias_periodo)
     ant_hasta = desde - timedelta(days=1)
 
-    # --- LÓGICA DE FILTRO DE SEGURIDAD Y LISTADO DE SUCURSALES ---
+    # 2. LÓGICA DE SUCURSALES (Admin vs Superadmin)
     sucursales_lista = Sucursal.query.filter_by(activo=True).all()
 
     if current_user.rol == 'admin':
@@ -2143,88 +2131,81 @@ def reporte_rentabilidad():
     g_cobranzas = 0
     g_gastos = 0
     g_iva_v = 0
-    g_iva_c = 0 # <--- VARIABLE INICIALIZADA PARA EVITAR EL ERROR
+    g_iva_c = 0 
 
     # --- PROCESAMIENTO POR SUCURSAL ---
     for suc in sucursales_a_procesar:
-        # Stock Valorizado
-        s_costo = db.session.query(func.sum(Repuesto.stock * Repuesto.costo)).filter_by(sucursal_id=suc.id).scalar() or 0
-        s_venta = db.session.query(func.sum(Repuesto.stock * Repuesto.precio)).filter_by(sucursal_id=suc.id).scalar() or 0
+        # A. STOCK VALORIZADO
+        s_costo = db.session.query(func.sum(Repuesto.stock * Repuesto.costo)).filter(Repuesto.sucursal_id == suc.id).scalar() or 0
+        s_venta = db.session.query(func.sum(Repuesto.stock * Repuesto.precio)).filter(Repuesto.sucursal_id == suc.id).scalar() or 0
         
-        # --- VENTAS E IVA VENTAS REAL ---
-        ventas_suc_todas = Venta.query.filter_by(sucursal_id=suc.id).filter(
-            Venta.fecha.between(desde_str + " 00:00:00", hasta_str + " 23:59:59")
-        ).all()
-        
+        # B. VENTAS (Directo de la tabla Venta para evitar fallos de relación)
+        ventas_suc_todas = Venta.query.filter(Venta.sucursal_id == suc.id, Venta.fecha.between(desde, hasta)).all()
         s_ventas = sum(v.total for v in ventas_suc_todas)
-        
-        # SOLO sumamos IVA de ventas marcadas como FACTURADO
+        # IVA de Ventas solo de las Facturadas
         s_iva_v_suc = sum(v.total - (v.total / 1.21) for v in ventas_suc_todas if v.estado_arca == 'FACTURADO')
 
-        # --- COMPRAS E IVA COMPRAS REAL (CRÉDITO FISCAL) ---
-        # Sumamos el IVA basándonos en el subtotal y el porcentaje cargado en cada factura
+        # C. COMPRAS (Buscamos en Movimientos de Proveedor - ELIMINA EL ERROR DE 0)
+        # Sumamos todos los movimientos positivos (facturas/deudas) asignados a esta sucursal
+        s_compras_suc = db.session.query(func.sum(MovimientoCtaCteProveedor.monto)).filter(
+            MovimientoCtaCteProveedor.sucursal_id == suc.id,
+            MovimientoCtaCteProveedor.monto > 0,
+            MovimientoCtaCteProveedor.fecha.between(desde, hasta)
+        ).scalar() or 0
+
+        # IVA Compras Real (Crédito Fiscal)
         s_iva_c_suc = db.session.query(func.sum(Compra.subtotal * (Compra.iva_porcentaje / 100)))\
-            .join(DetalleCompra).join(Repuesto).filter(
-                Repuesto.sucursal_id == suc.id,
-                Compra.fecha.between(desde_str, hasta_str)
-            ).scalar() or 0
-            
-        s_compras = db.session.query(func.sum(Compra.total)).join(DetalleCompra).join(Repuesto).filter(
-            Repuesto.sucursal_id == suc.id,
-            Compra.fecha.between(desde_str, hasta_str)
-        ).scalar() or 0
+            .join(MovimientoCtaCteProveedor, Compra.id == MovimientoCtaCteProveedor.compra_id)\
+            .filter(MovimientoCtaCteProveedor.sucursal_id == suc.id, MovimientoCtaCteProveedor.fecha.between(desde, hasta)).scalar() or 0
+
+        # D. GASTOS Y COBRANZAS (Usando IDs de cajas para evitar JOINs que rompen la suma)
+        cajas_suc_ids = [c.id for c in suc.cajas]
         
-        # Gastos Operativos de la sucursal
-        s_gastos = db.session.query(func.sum(MovimientoFinanciero.monto)).join(Caja).filter(
-            Caja.sucursal_id == suc.id,
+        # Gastos: Cualquier EGRESO en las cajas de esta sucursal
+        s_gastos_suc = db.session.query(func.sum(MovimientoFinanciero.monto)).filter(
+            MovimientoFinanciero.caja_id.in_(cajas_suc_ids) if cajas_suc_ids else False,
             MovimientoFinanciero.tipo == 'EGRESO',
-            MovimientoFinanciero.fecha.between(desde_str, hasta_str)
+            MovimientoFinanciero.fecha.between(desde, hasta)
         ).scalar() or 0
 
-        # Cobranzas (Ingresos de Cta Cte)
-        s_cobranzas = db.session.query(func.sum(MovimientoFinanciero.monto)).join(Caja).filter(
-            Caja.sucursal_id == suc.id,
+        # Cobranzas: Cualquier INGRESO que NO sea una venta del POS (Pagos de Cta Cte y Ajustes)
+        s_cobranzas_suc = db.session.query(func.sum(MovimientoFinanciero.monto)).filter(
+            MovimientoFinanciero.caja_id.in_(cajas_suc_ids) if cajas_suc_ids else False,
             MovimientoFinanciero.tipo == 'INGRESO',
-            MovimientoFinanciero.motivo.contains('Cobranza'),
-            MovimientoFinanciero.fecha.between(desde_str, hasta_str)
+            MovimientoFinanciero.venta_id == None,
+            MovimientoFinanciero.fecha.between(desde, hasta)
         ).scalar() or 0
 
-        # Utilidad Estimada (Ventas Netas - Compras Netas - Gastos)
-        s_utilidad = (s_ventas / 1.21) - (s_compras / 1.21) - (s_gastos / 1.21)
+        # Utilidad Estimada (Ventas Netas - Compras Netas - Gastos Netos)
+        s_utilidad = (s_ventas / 1.21) - (s_compras_suc / 1.21) - (s_gastos_suc / 1.21)
 
         reporte_sucursales.append({
             'nombre': suc.nombre,
             'stock_costo': s_costo,
             'ventas': s_ventas,
-            'gastos': s_gastos,
-            'cobranzas': s_cobranzas,
+            'gastos': s_gastos_suc,
+            'cobranzas': s_cobranzas_suc,
             'utilidad': s_utilidad
         })
 
+        # ACUMULAR TOTALES GLOBALES
         g_stock_costo += s_costo
         g_stock_venta += s_venta
         g_ventas += s_ventas
-        g_compras += s_compras
-        g_cobranzas += s_cobranzas
-        g_gastos += s_gastos
-        g_iva_v += s_iva_v_suc # Suma de IVA real de ventas
-        g_iva_c += s_iva_c_suc # Suma de IVA real de compras
+        g_compras += s_compras_suc
+        g_cobranzas += s_cobranzas_suc
+        g_gastos += s_gastos_suc
+        g_iva_v += s_iva_v_suc
+        g_iva_c += s_iva_c_suc
 
-    # --- LÓGICA COMPARATIVA (PERIODO ANTERIOR) FILTRADA ---
+    # --- LÓGICA COMPARATIVA (PERIODO ANTERIOR) ---
     q_ant_v = db.session.query(func.sum(Venta.total)).filter(Venta.fecha.between(ant_desde, ant_hasta))
-    q_ant_c = db.session.query(func.sum(Compra.total)).filter(Compra.fecha.between(ant_desde, ant_hasta))
-
-    if f_sucursal:
-        q_ant_v = q_ant_v.filter_by(sucursal_id=f_sucursal)
-        q_ant_c = q_ant_c.join(DetalleCompra).join(Repuesto).filter(Repuesto.sucursal_id == f_sucursal)
-
+    if f_sucursal: q_ant_v = q_ant_v.filter_by(sucursal_id=f_sucursal)
     ant_ventas = q_ant_v.scalar() or 0
-    ant_compras = q_ant_c.scalar() or 0
-
-    # --- SALDOS DE CUENTA CORRIENTE (LIQUIDEZ) FILTRADOS ---
+    
+    # Saldos de Cuenta Corriente (Liquidez Actual)
     q_total_cli = db.session.query(func.sum(MovimientoCtaCte.monto))
     q_total_prov = db.session.query(func.sum(MovimientoCtaCteProveedor.monto))
-
     if f_sucursal:
         q_total_cli = q_total_cli.filter_by(sucursal_id=f_sucursal)
         q_total_prov = q_total_prov.filter_by(sucursal_id=f_sucursal)
@@ -2232,17 +2213,14 @@ def reporte_rentabilidad():
     total_cta_cte_clientes = q_total_cli.scalar() or 0
     total_cta_cte_prov = q_total_prov.scalar() or 0
 
-    # Ranking de productos (Top 5) FILTRADO
+    # Ranking de productos (Top 5)
     q_ranking = db.session.query(Repuesto.nombre, func.sum(DetalleVenta.cantidad).label('total'))\
-        .join(DetalleVenta).join(Venta).filter(Venta.fecha.between(desde_str, hasta_str))\
+        .join(DetalleVenta).join(Venta).filter(Venta.fecha.between(desde, hasta))\
         .group_by(Repuesto.id).order_by(text('total DESC'))
-
-    if f_sucursal:
-        q_ranking = q_ranking.filter(Venta.sucursal_id == f_sucursal)
-
+    if f_sucursal: q_ranking = q_ranking.filter(Venta.sucursal_id == f_sucursal)
     ranking = q_ranking.limit(5).all()
 
-    # Total Rechazados
+    # Cheques rechazados totales
     total_rechazados = db.session.query(func.sum(Cheque.monto)).filter_by(estado='RECHAZADO').scalar() or 0
 
     return render_template('admin/reporte_premium.html',
@@ -2257,16 +2235,15 @@ def reporte_rentabilidad():
                            g_cobranzas=g_cobranzas,
                            g_gastos=g_gastos,
                            g_iva_v=g_iva_v,
-                           g_iva_c=g_iva_c, # <--- SE ENVÍA PARA EVITAR EL ERROR JINJA2
+                           g_iva_c=g_iva_c,
                            total_rechazados=total_rechazados,
                            ranking=ranking,
                            ant_ventas=ant_ventas,
-                           ant_compras=ant_compras,
+                           ant_compras=0, # Compras periodo anterior (opcional)
                            total_clientes=total_cta_cte_clientes,
                            total_prov=total_cta_cte_prov)
     
-    
-    
+      
     
 @admin_bp.route('/auditoria')
 @login_required
