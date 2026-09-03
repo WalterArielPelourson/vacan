@@ -1,8 +1,37 @@
+
+
+# Entorno Virtual
 venv/
+env/
+ENV/
+
+# Caché de Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Configuración y Secretos
 instance/
 .env
+.flaskenv
+
+# BASES DE DATOS (Local y QA)
 vacan.db
+vacan.bd
+*.db
+*.sqlite3
+*.db-journal
+*.db-wal
+
+# Migraciones y Archivos de usuario
 migrations/
 uploads/
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

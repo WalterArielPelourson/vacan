@@ -1074,7 +1074,11 @@ def tesoreria_dashboard():
      # Si es ADMIN, filtramos por su ID de sucursal
     if current_user.rol == 'admin':
         fisicas = Caja.query.filter_by(tipo='FISICA', sucursal_id=current_user.sucursal_id).all()
-        virtuales = Caja.query.filter_by(tipo='VIRTUAL', sucursal_id=current_user.sucursal_id).all()
+        #virtuales = Caja.query.filter_by(tipo='VIRTUAL', sucursal_id=current_user.sucursal_id).all()
+        virtuales = Caja.query.filter(
+            Caja.tipo == 'VIRTUAL',
+            (Caja.sucursal_id == current_user.sucursal_id) | (Caja.sucursal_id == None)
+        ).all()
     else:
         # Superadmin ve todas
         fisicas = Caja.query.filter_by(tipo='FISICA').all()
@@ -1106,7 +1110,9 @@ def tesoreria_dashboard():
         # Volvemos a consultar para que ahora sí tenga datos
         lista_categorias = CategoriaMovimiento.query.order_by(CategoriaMovimiento.nombre).all()
         print("Rubros de Vacan cargados automáticamente.")
-
+    
+    # --- AGREGAR ESTA LÍNEA ---
+    sucursales_todas = Sucursal.query.filter_by(activo=True).all()
     # 3. Totales para los cuadros
     total_efectivo = sum(c.saldo_actual for c in fisicas)
     total_virtual = sum(v.saldo_actual for v in virtuales)
@@ -1116,7 +1122,8 @@ def tesoreria_dashboard():
                            virtuales=virtuales,
                            categorias=lista_categorias, 
                            total_efectivo=total_efectivo,
-                           total_virtual=total_virtual)
+                           total_virtual=total_virtual,
+                           sucursales_todas=sucursales_todas)
     
        
 
@@ -1162,8 +1169,6 @@ def detalle_caja(id):
     
 
 @admin_bp.route('/tesoreria/nueva', methods=['POST'])
-#@login_required
-#@superadmin_required
 @login_required
 @roles_required('admin', 'superadmin')
 def nueva_caja():
@@ -1172,20 +1177,85 @@ def nueva_caja():
         flash("No tiene permisos para crear cuentas.", "danger")
         return redirect(url_for('inventory.index'))
 
-    # --- LÓGICA DE ASIGNACIÓN DE SUCURSAL ---
+    # --- LÓGICA DE ASIGNACIÓN DE SUCURSAL (CON SOPORTE GLOBAL) ---
     if current_user.rol == 'admin':
-        # El administrador de sucursal NO elige, se le asigna la SUYA
+        # El administrador de sucursal siempre asigna a la SUYA
         id_sucursal_destino = current_user.sucursal_id
     else:
-        # El Superadmin elige de un selector en el modal
-        id_sucursal_destino = request.form.get('sucursal_id')
+        # El Superadmin puede elegir una sucursal específica o dejarlo vacío (Global)
+        sid = request.form.get('sucursal_id')
+        # Si sid es una cadena vacía "", guardamos None para que sea Global
+        id_sucursal_destino = int(sid) if sid and sid != "" else None
 
     nueva = Caja(
         nombre=request.form.get('nombre').upper(),
         tipo=request.form.get('tipo'), # 'FISICA' o 'VIRTUAL'
-        sucursal_id=id_sucursal_destino,
-        saldo_actual=0.0
+        sucursal_id=id_sucursal_destino, # Guardará el ID o None (Global)
+        saldo_actual=0.0,
+        #activo=True # Aseguramos que inicie activa
     )
+    
+    db.session.add(nueva)
+    db.session.commit()
+    
+    msg = f"Cuenta '{nueva.nombre}' habilitada correctamente."
+    if id_sucursal_destino is None:
+        msg = f"Cuenta Global '{nueva.nombre}' habilitada para todas las sedes."
+        
+    flash(msg, "success")
+    return redirect(url_for('admin.tesoreria_dashboard'))
+
+
+
+# --- RUTA PARA ACTIVAR / DESACTIVAR CAJA RÁPIDAMENTE ---
+@admin_bp.route('/tesoreria/estado/<int:id>')
+@login_required
+@roles_required('admin', 'superadmin')
+def toggle_caja(id):
+    caja = Caja.query.get_or_404(id)
+    
+    # Si la caja está activa y tiene saldo, avisamos antes de desactivar
+    if caja.activo and caja.saldo_actual != 0:
+        flash(f"No se puede desactivar '{caja.nombre}' porque tiene un saldo de ${caja.saldo_actual:,.2f}.", "warning")
+        return redirect(url_for('admin.tesoreria_dashboard'))
+
+    # Cambiamos el estado (si es True a False, si es False a True)
+    caja.activo = not caja.activo
+    db.session.commit()
+    
+    estado = "activada" if caja.activo else "desactivada"
+    flash(f"La cuenta '{caja.nombre}' ha sido {estado}.", "info")
+    return redirect(url_for('admin.tesoreria_dashboard'))
+
+# --- RUTA PARA EDITAR LOS DATOS DE LA CAJA (MODAL) ---
+#@admin_bp.route('/tesoreria/editar/<int:id>', methods=['POST'])
+#@login_required
+#@roles_required('admin', 'superadmin')
+#def editar_caja(id):
+#    caja = Caja.query.get_or_404(id)
+#    
+#    # Actualizamos nombre y tipo
+#    caja.nombre = request.form.get('nombre').upper()
+#    caja.tipo = request.form.get('tipo')
+#    
+#    # Lógica para el Switch/Checkbox de Activo
+#    # Si el checkbox está marcado, Flask recibe el dato; si no, no envía nada.
+#    caja.activo = True if request.form.get('activo') else False
+#
+#    # Solo el Superadmin puede cambiar la sucursal de una caja
+#    if current_user.rol == 'superadmin':
+#        nueva_suc_id = request.form.get('sucursal_id')
+#        if nueva_suc_id:
+#            caja.sucursal_id = int(nueva_suc_id)
+#    
+#    try:
+#        db.session.commit()
+#        flash(f"Datos de '{caja.nombre}' actualizados.", "success")
+#    except Exception as e:
+#        db.session.rollback()
+#        flash(f"Error al guardar cambios: {str(e)}", "danger")
+#
+#    return redirect(url_for('admin.tesoreria_dashboard'))
     
    
 #def nueva_caja():
@@ -2518,3 +2588,91 @@ def cargar_cheque_manual():
         flash(f"Error al cargar cheque: {str(e)}", "danger")
 
     return redirect(url_for('admin.cartera_cheques'))
+
+
+
+@admin_bp.route('/api/cliente/rapido', methods=['POST'])
+@login_required
+def cliente_nuevo_pos():
+    data = request.get_json()
+    razon_social = data.get('razon_social', '').upper()
+    cuit = data.get('cuit', '')
+
+    if not razon_social or not cuit:
+        return jsonify({"status": "error", "message": "Nombre y CUIT son obligatorios"}), 400
+
+    existente = Cliente.query.filter_by(cuit=cuit).first()
+    if existente:
+        return jsonify({"status": "error", "message": f"El CUIT ya existe: {existente.razon_social}"}), 400
+
+    try:
+        nuevo = Cliente(razon_social=razon_social, cuit=cuit, activo=True)
+        db.session.add(nuevo)
+        db.session.commit()
+        return jsonify({
+            "status": "ok", 
+            "id": nuevo.id, 
+            "razon_social": nuevo.razon_social, 
+            "cuit": nuevo.cuit
+        })
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+    
+    
+@admin_bp.route('/tesoreria/editar/<int:id>', methods=['POST'])
+@login_required
+@roles_required('admin', 'superadmin')
+def editar_caja(id):
+    caja = Caja.query.get_or_404(id)
+    
+    # 1. Actualizamos datos básicos
+    caja.nombre = request.form.get('nombre').upper()
+    caja.tipo = request.form.get('tipo') # FISICA o VIRTUAL
+    
+    # 2. Manejo de Estado (Activo/Inactivo)
+    # Si el checkbox no viene en el form, request.form.get('activo') es None (Falso)
+    #caja.activo = True if request.form.get('activo') else False
+
+    # 3. Cambio de Sucursal (Solo permitido para Superadmin)
+    if current_user.rol == 'superadmin':
+        nueva_sucursal = request.form.get('sucursal_id')
+        if nueva_sucursal:
+            #caja.sucursal_id = int(nueva_sucursal)
+            sid = request.form.get('sucursal_id')
+            # Si el usuario elige la opción vacía, sid será "" -> se guarda como None
+            caja.sucursal_id = int(sid) if sid and sid != "" else None
+    try:
+        db.session.commit()
+        flash(f"La cuenta '{caja.nombre}' fue actualizada correctamente.", "success")
+    except Exception as e:
+        db.session.rollback()
+        flash(f"Error al actualizar: {str(e)}", "danger")
+
+    return redirect(url_for('admin.tesoreria_dashboard'))
+
+
+
+@admin_bp.route('/api/buscar-clientes-pos')
+@login_required
+def buscar_clientes_pos():
+    query = request.args.get('q', '').strip().lower()
+    
+    if len(query) < 2:
+        return jsonify([])
+
+    search_term = f"%{query}%"
+    
+    # Buscamos por Razón Social (Nombre/Apellido) o por CUIT/DNI
+    # Limitamos a 10 para que sea instantáneo
+    clientes = Cliente.query.filter(
+        (Cliente.razon_social.ilike(search_term)) | 
+        (Cliente.cuit.ilike(search_term))
+    ).filter(Cliente.activo == True).limit(10).all()
+
+    return jsonify([{
+        'id': c.id,
+        'razon_social': c.razon_social,
+        'cuit': c.cuit
+    } for c in clientes])

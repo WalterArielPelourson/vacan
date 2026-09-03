@@ -900,3 +900,35 @@ def procesar_venta_avanzada():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+    
+    
+    
+@inventory_bp.route('/api/buscar-stock-pos')
+@login_required
+def buscar_stock_pos():
+    query = request.args.get('q', '').strip().lower()
+    
+    # Si la búsqueda es muy corta, no buscamos nada por rendimiento
+    if len(query) < 2:
+        return jsonify([])
+
+    search_term = f"%{query}%"
+    
+    # BUSCADOR INTELIGENTE:
+    # 1. Filtramos por la sucursal del usuario actual
+    # 2. Buscamos por nombre o por SKU
+    # 3. Solo traemos productos que tengan stock > 0
+    # 4. Limitamos a 20 resultados para que la respuesta sea instantánea
+    productos = Repuesto.query.filter(
+        Repuesto.sucursal_id == current_user.sucursal_id,
+        (Repuesto.nombre.ilike(search_term)) | (Repuesto.sku.ilike(search_term))
+    ).filter(Repuesto.stock > 0).limit(20).all()
+
+    return jsonify([{
+        'id': p.id,
+        'nombre': p.nombre,
+        'sku': p.sku,
+        'stock': p.stock,
+        'precio': p.precio
+    } for p in productos])
