@@ -370,6 +370,7 @@ def eliminar_modelo(id):
 @inventory_bp.route('/pos')
 @login_required
 def pos():
+    recuperar_id = request.args.get('recuperar_id') # Capturamos el ID si viene del reporte
     productos = Repuesto.query.filter(Repuesto.stock > 0).all()
     clientes = Cliente.query.filter_by(activo=True).all()
     
@@ -378,7 +379,7 @@ def pos():
         (Caja.sucursal_id == current_user.sucursal_id) | (Caja.tipo == 'VIRTUAL')
     ).all()
     
-    return render_template('pos.html', productos=productos, clientes=clientes, cajas=cajas)
+    return render_template('pos.html', productos=productos, clientes=clientes, cajas=cajas, recuperar_id=recuperar_id)
 
 
 @inventory_bp.route('/vender', methods=['POST'])
@@ -758,6 +759,8 @@ def procesar_venta_avanzada():
     if not data:
         return jsonify({"status": "error", "message": "No se recibieron datos"}), 400
 
+    presupuesto_id = data.get('presupuesto_id')
+    
     cliente_id = data.get('cliente_id')
     items = data.get('items') 
     pagos = data.get('pagos') 
@@ -894,14 +897,24 @@ def procesar_venta_avanzada():
         nueva_v.total_pagado = total_abonado_real
         nueva_v.esta_pagada = (total_abonado_real >= (total_venta - 0.05)) 
         
+        #AGREGADO AL FINAL
+        if presupuesto_id:
+            preso_original = Presupuesto.query.get(presupuesto_id)
+            if preso_original:
+                preso_original.estado = 'CONVERTIDO' # Ya no aparecerá en el reporte de pendientes
+                
+        
+        
         db.session.commit()
         return jsonify({"status": "ok", "venta_id": nueva_v.id})
 
+        
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
-    
-    
+
+        
+       
     
     
 @inventory_bp.route('/api/buscar-stock-pos')
@@ -932,3 +945,29 @@ def buscar_stock_pos():
         'stock': p.stock,
         'precio': p.precio
     } for p in productos])
+    
+    
+    
+@inventory_bp.route('/api/presupuesto/<int:id>')
+@login_required
+def obtener_datos_presupuesto(id):
+    p = Presupuesto.query.get_or_404(id)
+    # Verificamos que sea de la misma sucursal (seguridad)
+    if p.sucursal_id != current_user.sucursal_id and current_user.rol != 'superadmin':
+        return jsonify({"status": "error", "message": "No autorizado"}), 403
+
+    detalles = []
+    for d in p.detalles:
+        detalles.append({
+            "id": d.repuesto_id if d.repuesto_id else f"MAN_{d.id}",
+            "nombre": d.nombre_item,
+            "cantidad": d.cantidad,
+            "precio": d.precio_pactado
+        })
+
+    return jsonify({
+        "id": p.id,
+        "cliente_id": p.cliente_id,
+        "items": detalles,
+        "total": p.total
+    })

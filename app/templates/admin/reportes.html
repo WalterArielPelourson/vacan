@@ -2,25 +2,60 @@
 
 {% block content %}
 <div class="row mb-4">
-    <div class="col-md-7">
-        <h2 class="fw-bold"><span class="text-pink">Vacan</span> - Reporte de Ventas</h2>
+    <div class="col-md-12">
+        <h2 class="fw-bold"><span class="text-pink">Vacan</span> - Reporte de Ventas Avanzado</h2>
         <p class="text-muted">Visualizando: <strong>{{ sucursal_actual.nombre if sucursal_actual else 'Todas las Sucursales' }}</strong></p>
     </div>
-    
-    <!-- SELECTOR DE SUCURSAL -->
-    <div class="col-md-5">
-        <form action="{{ url_for('admin.reportes') }}" method="GET" class="card p-3 shadow-sm">
-            <label class="form-label small fw-bold text-uppercase">Filtrar por Sucursal:</label>
-            <div class="d-flex gap-2">
-                <select name="sucursal_id" class="form-select">
-                    <option value="">Todas las sucursales</option>
+</div>
+
+<!-- PANEL DE FILTROS AVANZADOS -->
+<div class="card shadow-sm mb-4 border-0">
+    <div class="card-body bg-light border-start border-pink border-4 rounded-end">
+        <form action="{{ url_for('admin.reportes') }}" method="GET" class="row g-3 align-items-end">
+            <!-- Fecha Desde -->
+            <div class="col-md-2">
+                <label class="form-label small fw-bold text-uppercase">Desde:</label>
+                <input type="date" name="desde" class="form-control form-control-sm" value="{{ filtros.desde if filtros else '' }}">
+            </div>
+            <!-- Fecha Hasta -->
+            <div class="col-md-2">
+                <label class="form-label small fw-bold text-uppercase">Hasta:</label>
+                <input type="date" name="hasta" class="form-control form-control-sm" value="{{ filtros.hasta if filtros else '' }}">
+            </div>
+            <!-- Sucursal -->
+            <div class="col-md-2">
+                <label class="form-label small fw-bold text-uppercase">Sucursal:</label>
+                <select name="sucursal_id" class="form-select form-select-sm">
+                    <option value="">Todas</option>
                     {% for s in sucursales %}
                     <option value="{{ s.id }}" {% if sucursal_actual and sucursal_actual.id == s.id %}selected{% endif %}>
                         {{ s.nombre }}
                     </option>
                     {% endfor %}
                 </select>
-                <button type="submit" class="btn btn-vacan">Ver</button>
+            </div>
+
+            <!-- Cliente (REEMPLAZA AL PROVEEDOR) -->
+            <div class="col-md-3">
+                <label class="form-label small fw-bold text-uppercase">Filtrar por Cliente:</label>
+                <select name="cliente_id" class="form-select form-select-sm select2">
+                    <option value="">Todos los clientes</option>
+                    {% for c in clientes %}
+                    <option value="{{ c.id }}" {% if filtros and filtros.cliente_id == c.id %}selected{% endif %}>
+                        {{ c.razon_social }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Botones -->
+            <div class="col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-vacan btn-sm flex-grow-1">
+                    <i class="bi bi-filter"></i> Filtrar
+                </button>
+                <a href="{{ url_for('admin.reportes') }}" class="btn btn-outline-secondary btn-sm">
+                    <i class="bi bi-x-circle"></i>
+                </a>
             </div>
         </form>
     </div>
@@ -29,17 +64,17 @@
 <!-- TARJETAS DE RESUMEN -->
 <div class="row mb-4 text-center">
     <div class="col-md-6">
-        <div class="card bg-dark text-white shadow">
+        <div class="card bg-dark text-white shadow border-0">
             <div class="card-body">
-                <h6 class="text-pink text-uppercase">Total Recaudado</h6>
+                <h6 class="text-pink text-uppercase small">Total Bruto Facturado</h6>
                 <h2 class="fw-bold">${{ "{:,.2f}".format(total) }}</h2>
             </div>
         </div>
     </div>
     <div class="col-md-6">
-        <div class="card shadow border-pink">
+        <div class="card shadow border-pink border-4 border-top-0 border-end-0 border-bottom-0">
             <div class="card-body">
-                <h6 class="text-dark text-uppercase">Cantidad de Operaciones</h6>
+                <h6 class="text-dark text-uppercase small">Cantidad de Operaciones</h6>
                 <h2 class="fw-bold">{{ cantidad }} ventas</h2>
             </div>
         </div>
@@ -48,38 +83,150 @@
 
 <!-- TABLA DE VENTAS DETALLADA -->
 <div class="card shadow">
-    <div class="card-header card-header-vacan">
-        <h5 class="mb-0">Detalle de Transacciones (Hora Argentina)</h5>
+    <div class="card-header card-header-vacan d-flex justify-content-between align-items-center">
+        <h5 class="mb-0 text-white">Detalle de Transacciones</h5>
+        <span class="badge bg-light text-dark">Hora Argentina</span>
     </div>
     <div class="card-body p-0">
-        <table class="table table-hover mb-0">
-            <thead class="table-light">
-                <tr>
-                    <th>Fecha y Hora</th>
-                    <th>Sucursal</th>
-                    <th>Vendedor</th>
-                    <th>Total</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for v in ventas %}
-                <tr>
-                    <td>{{ v.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
-                    <td><span class="badge bg-outline-dark border text-dark">{{ v.sucursal.nombre }}</span></td>
-                    <td>{{ v.usuario.username }}</td>
-                    <td class="fw-bold text-success">${{ "{:,.2f}".format(v.total) }}</td>
-                    <td>
-                        <button class="btn btn-sm btn-outline-secondary">Ver Recibo</button>
-                    </td>
-                </tr>
-                {% else %}
-                <tr>
-                    <td colspan="5" class="text-center py-4">No hay ventas registradas para este filtro.</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 180px;">ID / Cliente / Fecha</th>
+                        <th>Sucursal / Vend.</th>
+                        <th>Detalle de Productos</th>
+                        <th style="min-width: 280px;">Ingresos a Tesorería (Caja / Cuenta)</th>
+                        <th class="text-end">Total Venta</th>
+                        <th class="text-center">Estado</th>
+                        <th class="text-center">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for v in ventas %}
+                    <tr>
+                        <!-- ID, CLIENTE Y FECHA -->
+                        <td>
+                            <span class="fw-bold text-pink">#{{ v.id }}</span><br>
+                            <div class="text-uppercase fw-bold small my-1">
+                                <i class="bi bi-person-fill"></i> {{ v.cliente.razon_social if v.cliente else 'CONSUMIDOR FINAL' }}
+                            </div>
+                            <small class="text-muted">{{ v.fecha.strftime('%d/%m/%Y %H:%M') }} hs</small>
+                        </td>
+
+                        <!-- SUCURSAL Y VENDEDOR -->
+                        <td>
+                            <span class="badge bg-outline-dark border text-dark mb-1">{{ v.sucursal.nombre }}</span><br>
+                            <small class="text-muted"><i class="bi bi-person"></i> {{ v.usuario.username }}</small>
+                        </td>
+
+                        <!-- DETALLE DE PRODUCTOS -->
+                        <td>
+                            <ul class="list-unstyled mb-0" style="font-size: 0.85rem;">
+                                {% for d in v.detalles %}
+                                <li class="mb-1 border-bottom pb-1">
+                                    <span class="fw-bold text-pink">{{ d.repuesto.sku if d.repuesto else 'MANUAL' }}</span> - 
+                                    {{ d.nombre_item }} 
+                                    <span class="badge bg-light text-dark">x{{ d.cantidad }}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </td>
+
+                        <!-- DESGLOSE DE COBROS REALES EN TESORERÍA -->
+                        <td>
+                            <div class="p-2 bg-light rounded border border-secondary-subtle">
+                                {# 1. LISTAR INGRESOS REALES A CAJAS/CUENTAS #}
+                                {% if v.movimientos_fina %}
+                                    {% for m in v.movimientos_fina %}
+                                    <div class="d-flex justify-content-between mb-1 pb-1 border-bottom border-white">
+                                        <span class="small text-uppercase fw-bold text-dark">
+                                            <i class="bi bi-wallet2 text-primary"></i> {{ m.caja.nombre }}:
+                                        </span>
+                                        <span class="fw-bold text-success" style="font-size: 0.9rem;">
+                                            ${{ "{:,.2f}".format(m.monto) }}
+                                            <small class="text-muted" style="font-size: 0.7rem;">({{ m.metodo_detalle }})</small>
+                                        </span>
+                                    </div>
+                                    {% endfor %}
+                                {% else %}
+                                    {# Mostrar pagos informados si no hay movimientos (Compatibilidad) #}
+                                    {% for p in v.pagos %}
+                                    <div class="d-flex justify-content-between mb-1">
+                                        <span class="text-muted small text-uppercase">{{ p.metodo }}:</span>
+                                        <span class="fw-bold text-success" style="font-size: 0.9rem;">${{ "{:,.2f}".format(p.monto) }}</span>
+                                    </div>
+                                    {% endfor %}
+                                {% endif %}
+                                
+                                {# 2. CALCULAR SALDO RESTANTE (DEUDA EN CTA CTE) #}
+                                {% set abonado = v.total_pagado %}
+                                {% if v.total > (abonado + 0.01) %}
+                                <div class="d-flex justify-content-between border-top border-secondary-subtle pt-1 mt-1 text-danger">
+                                    <span class="fw-bold small text-uppercase"><i class="bi bi-clock-history"></i> SALDO A CTA. CTE:</span>
+                                    <span class="fw-bold" style="font-size: 0.9rem;">${{ "{:,.2f}".format(v.total - abonado) }}</span>
+                                </div>
+                                {% endif %}
+
+                                {# 3. REFERENCIA DEL MÉTODO PRINCIPAL #}
+                                <div class="mt-1 pt-1 border-top border-light d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
+                                    <span>Clasificación original:</span>
+                                    <span>{{ v.metodo_pago }}</span>
+                                </div>
+                            </div>
+                        </td>
+
+                        <!-- TOTAL -->
+                        <td class="text-end fw-bold text-dark" style="font-size: 1.1rem;">
+                            ${{ "{:,.2f}".format(v.total) }}
+                        </td>
+
+                        <!-- ESTADO DE PAGO -->
+                        <td class="text-center">
+                            {% if v.esta_pagada %}
+                                <span class="badge bg-success rounded-pill px-3">Pagado</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark rounded-pill px-3">
+                                    Pendiente
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <!-- ACCIONES -->
+                        <td class="text-center">
+                            <div class="btn-group shadow-sm">
+                                <a href="{{ url_for('inventory.imprimir_comprobante', id=v.id, tipo='remito') }}" 
+                                   target="_blank" class="btn btn-sm btn-light border" title="Imprimir Remito">
+                                    <i class="bi bi-printer text-dark"></i>
+                                </a>
+                                <a href="{{ url_for('admin.pdf_remito', id=v.id) }}" 
+                                   class="btn btn-sm btn-danger" title="Descargar PDF">
+                                    <i class="bi bi-file-earmark-pdf"></i>
+                                </a>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center py-5">
+                            <i class="bi bi-search display-4 text-muted"></i>
+                            <p class="mt-2 text-muted">No se encontraron ventas con los filtros aplicados.</p>
+                            <a href="{{ url_for('admin.reportes') }}" class="btn btn-sm btn-link text-pink">Limpiar filtros</a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
 </div>
+
+<style>
+    .text-pink { color: #e83e8c !important; }
+    .btn-vacan { background-color: #e83e8c; color: white; border: none; }
+    .btn-vacan:hover { background-color: #d81b60; color: white; }
+    .card-header-vacan { background-color: #212529; border-bottom: 3px solid #e83e8c; }
+    .bg-outline-dark { background-color: transparent; }
+    .border-pink { border-color: #e83e8c !important; }
+    .table-hover tbody tr:hover { background-color: rgba(232, 62, 140, 0.03); }
+</style>
 {% endblock %}

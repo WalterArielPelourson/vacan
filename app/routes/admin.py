@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 from datetime import datetime, date 
 # Busca esta línea al principio del archivo y agrégale Caja y MovimientoFinanciero
-from app.models import db, Empresa, Sucursal, Usuario, Venta, Cliente, Proveedor, MovimientoCtaCte, Caja, MovimientoFinanciero, Cheque,  CategoriaMovimiento, CierreCaja, Compra, DetalleCompra, MovimientoCtaCteProveedor, Repuesto, HistorialPrecio, get_argentina_time, Traspaso, DetalleTraspaso, DetalleVenta
+from app.models import db, Empresa, Sucursal, Usuario, Venta, Cliente, Proveedor, MovimientoCtaCte, Caja, MovimientoFinanciero, Cheque,  CategoriaMovimiento, CierreCaja, Compra, DetalleCompra, MovimientoCtaCteProveedor, Repuesto, HistorialPrecio, get_argentina_time, Traspaso, DetalleTraspaso, DetalleVenta, PagoVenta
 from werkzeug.security import generate_password_hash
 from sqlalchemy import func, or_, and_, extract, text
 import requests
@@ -155,37 +155,77 @@ def toggle_usuario(id):
 
 @admin_bp.route('/reportes')
 @login_required
-#@superadmin_required
 @roles_required('admin', 'superadmin')
 def reportes():
+    # 1. CAPTURA DE PARÁMETROS DESDE LA URL
     sucursal_id = request.args.get('sucursal_id', type=int)
-    sucursales = Sucursal.query.all()
-    
-    query_ventas = Venta.query
+    desde = request.args.get('desde')
+    hasta = request.args.get('hasta')
+    metodo_pago = request.args.get('metodo_pago')
+    proveedor_id = request.args.get('proveedor_id', type=int)
+    cliente_id = request.args.get('cliente_id', type=int) # <--- NUEVO: Filtro por Cliente
 
-    # Si se selecciona una sucursal, filtramos los reportes
-    if sucursal_id:
-        query_ventas = query_ventas.filter_by(sucursal_id=sucursal_id)
-        sucursal_actual = Sucursal.query.get(sucursal_id)
-    else:
-        sucursal_actual = None
-
-    # Ordenamos por fecha descendente (más reciente primero)
-    ventas = query_ventas.order_by(Venta.id.desc()).all()
-    
-    # Cálculos globales para el Dashboard de reportes
-    total_recaudado = sum(v.total for v in ventas)
-    cantidad_ventas = len(ventas)
-
-    return render_template(
-        'admin/reportes.html', 
-        ventas=ventas, 
-        total=total_recaudado, 
-        cantidad=cantidad_ventas,
-        sucursales=sucursales,
-        sucursal_actual=sucursal_actual
+    # 2. CONSULTA BASE CON OPTIMIZACIÓN (Eager Loading)
+    query_ventas = Venta.query.options(
+        joinedload(Venta.detalles).joinedload(DetalleVenta.repuesto),
+        joinedload(Venta.pagos),
+        joinedload(Venta.cliente),
+        joinedload(Venta.sucursal),
+        # Traemos los movimientos de tesorería y cta cte
+        joinedload(Venta.movimientos_cta),
+        joinedload(Venta.movimientos_fina) # Asegúrate de que esta relación exista en tu Models.py
     )
+
+    # 3. FILTROS DINÁMICOS
+    if sucursal_id:
+        query_ventas = query_ventas.filter(Venta.sucursal_id == sucursal_id)
     
+    if cliente_id: # <--- NUEVO: Filtro por Cliente
+        query_ventas = query_ventas.filter(Venta.cliente_id == cliente_id)
+
+    if desde:
+        query_ventas = query_ventas.filter(Venta.fecha >= datetime.strptime(desde, '%Y-%m-%d'))
+    
+    if hasta:
+        query_ventas = query_ventas.filter(Venta.fecha <= datetime.strptime(hasta + " 23:59:59", '%Y-%m-%d %H:%M:%S'))
+
+    # FILTRO DE PAGO (Lógica corregida de PagoVenta)
+    if metodo_pago:
+        if metodo_pago == 'CTA_CTE':
+            # Ventas con saldo pendiente
+            query_ventas = query_ventas.filter(Venta.total > Venta.total_pagado)
+        else:
+            # Ventas con al menos un pago de este tipo
+            query_ventas = query_ventas.join(PagoVenta).filter(PagoVenta.metodo == metodo_pago)
+
+    # Filtro por Proveedor de los productos vendidos
+    if proveedor_id:
+        query_ventas = query_ventas.join(DetalleVenta).join(Repuesto).filter(Repuesto.proveedor_id == proveedor_id)
+
+    # 4. EJECUCIÓN Y CÁLCULOS
+    ventas = query_ventas.order_by(Venta.id.desc()).all()
+    total_recaudado = sum(v.total for v in ventas)
+    
+    # 5. DATOS PARA LOS SELECTORES DEL FORMULARIO
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+    proveedores = Proveedor.query.filter_by(activo=True).all()
+    clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all() # <--- NUEVO
+
+    return render_template('admin/reportes.html', 
+                           ventas=ventas, 
+                           total=total_recaudado, 
+                           cantidad=len(ventas),
+                           sucursales=sucursales, 
+                           proveedores=proveedores, 
+                           clientes=clientes, # <--- Enviamos lista de clientes
+                           sucursal_actual=Sucursal.query.get(sucursal_id) if sucursal_id else None,
+                           filtros={
+                               'desde': desde, 
+                               'hasta': hasta, 
+                               'metodo': metodo_pago, 
+                               'prov_id': proveedor_id,
+                               'cliente_id': cliente_id # <--- Guardamos estado del filtro
+                           })
     
     
 from app.models import Cliente, Proveedor
@@ -553,7 +593,7 @@ def lista_cta_cte():
             'cuit': c.cuit,
             'saldo': saldo_individual
             })
-        if saldo_individual > 0:
+        if saldo_individual >= 0:
             total_global_sucursal += saldo_individual
 
     return render_template('admin/cta_cte_lista.html', 
@@ -1071,61 +1111,64 @@ def consultar_cuit_arca(cuit):
 @login_required
 @roles_required('admin', 'superadmin')
 def tesoreria_dashboard():
-     # Si es ADMIN, filtramos por su ID de sucursal
+    # 1. FECHAS
+    desde_str = request.args.get('desde')
+    hasta_str = request.args.get('hasta')
+    
+    if desde_str and hasta_str:
+        desde = datetime.strptime(desde_str, '%Y-%m-%d')
+        hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+    else:
+        hoy = get_argentina_time().date()
+        desde = datetime.combine(hoy, datetime.min.time())
+        hasta = datetime.combine(hoy, datetime.max.time())
+
+    # 2. FILTRO DE CAJAS (Mantenido igual)
     if current_user.rol == 'admin':
         fisicas = Caja.query.filter_by(tipo='FISICA', sucursal_id=current_user.sucursal_id).all()
-        #virtuales = Caja.query.filter_by(tipo='VIRTUAL', sucursal_id=current_user.sucursal_id).all()
-        virtuales = Caja.query.filter(
-            Caja.tipo == 'VIRTUAL',
-            (Caja.sucursal_id == current_user.sucursal_id) | (Caja.sucursal_id == None)
-        ).all()
+        virtuales = Caja.query.filter(Caja.tipo == 'VIRTUAL', (Caja.sucursal_id == current_user.sucursal_id) | (Caja.sucursal_id == None)).all()
     else:
-        # Superadmin ve todas
         fisicas = Caja.query.filter_by(tipo='FISICA').all()
         virtuales = Caja.query.filter_by(tipo='VIRTUAL').all()
     
-    # 1. Traer las cajas
-    #fisicas = Caja.query.filter_by(tipo='FISICA').all()
-    #virtuales = Caja.query.filter_by(tipo='VIRTUAL').all()
+    todas_cajas = fisicas + virtuales
     
-    # 2. VERIFICACIÓN Y CARGA AUTOMÁTICA DE RUBROS
-    lista_categorias = CategoriaMovimiento.query.all()
-    
-    if not lista_categorias:
-        # Si la lista está vacía, creamos los rubros básicos automáticamente
-        rubros_iniciales = [
-            ('Logística: Fletes', 'EGRESO'),
-            ('Logística: Comisionistas', 'EGRESO'),
-            ('Servicios: Luz/Agua/Gas', 'EGRESO'),
-            ('Personal: Sueldos', 'EGRESO'),
-            ('Local: Alquiler', 'EGRESO'),
-            ('Impuestos: AFIP/IIBB', 'EGRESO'),
-            ('Ventas Extra', 'INGRESO'),
-            ('Aporte de Capital', 'INGRESO')
-        ]
-        for nombre, tipo in rubros_iniciales:
-            nueva_cat = CategoriaMovimiento(nombre=nombre, tipo=tipo)
-            db.session.add(nueva_cat)
-        db.session.commit()
-        # Volvemos a consultar para que ahora sí tenga datos
-        lista_categorias = CategoriaMovimiento.query.order_by(CategoriaMovimiento.nombre).all()
-        print("Rubros de Vacan cargados automáticamente.")
-    
-    # --- AGREGAR ESTA LÍNEA ---
+    # --- 3. CÁLCULO DETALLADO POR CADA CAJA PARA EL PERIODO ---
+    flujo_cajas = {} # { caja_id: {'ingresos': 0, 'egresos': 0, 'neto': 0} }
+
+    for caja in todas_cajas:
+        movs = MovimientoFinanciero.query.filter(
+            MovimientoFinanciero.caja_id == caja.id,
+            MovimientoFinanciero.fecha.between(desde, hasta)
+        ).all()
+        
+        ing = sum(m.monto for m in movs if m.tipo == 'INGRESO')
+        egr = sum(m.monto for m in movs if m.tipo == 'EGRESO')
+        
+        flujo_cajas[caja.id] = {
+            'ingresos': ing,
+            'egresos': egr,
+            'neto': ing - egr
+        }
+
+    # Totales globales del periodo
+    ingresos_p = sum(item['ingresos'] for item in flujo_cajas.values())
+    egresos_p = sum(item['egresos'] for item in flujo_cajas.values())
+
+    # 4. OTROS DATOS (Categorías, Sucursales, Snapshots)
+    lista_categorias = CategoriaMovimiento.query.order_by(CategoriaMovimiento.nombre).all()
     sucursales_todas = Sucursal.query.filter_by(activo=True).all()
-    # 3. Totales para los cuadros
     total_efectivo = sum(c.saldo_actual for c in fisicas)
     total_virtual = sum(v.saldo_actual for v in virtuales)
     
     return render_template('admin/tesoreria.html', 
-                           fisicas=fisicas, 
-                           virtuales=virtuales,
+                           fisicas=fisicas, virtuales=virtuales,
+                           flujo_cajas=flujo_cajas, # <--- DATA CRUCIAL
                            categorias=lista_categorias, 
-                           total_efectivo=total_efectivo,
-                           total_virtual=total_virtual,
-                           sucursales_todas=sucursales_todas)
-    
-       
+                           total_efectivo=total_efectivo, total_virtual=total_virtual,
+                           ingresos_p=ingresos_p, egresos_p=egresos_p,
+                           sucursales_todas=sucursales_todas,
+                           filtros={'desde': desde_str, 'hasta': hasta_str})
 
 @admin_bp.route('/tesoreria/caja/<int:id>')
 @login_required
@@ -2676,3 +2719,131 @@ def buscar_clientes_pos():
         'razon_social': c.razon_social,
         'cuit': c.cuit
     } for c in clientes])
+    
+    
+
+@admin_bp.route('/reporte-operaciones-detallado')
+@login_required
+@roles_required('admin', 'superadmin')
+def reporte_operaciones_detallado():
+    # 1. CAPTURA DE FILTROS
+    desde = request.args.get('desde')
+    hasta = request.args.get('hasta')
+    sucursal_id = request.args.get('sucursal_id', type=int)
+    caja_id = request.args.get('caja_id', type=int)
+    cliente_id = request.args.get('cliente_id', type=int)
+
+    # 2. GESTIÓN DE FECHAS
+    if desde and hasta:
+        f_inicio = datetime.strptime(desde, '%Y-%m-%d')
+        f_fin = datetime.strptime(hasta + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+    else:
+        # Por defecto, últimos 30 días
+        f_fin = get_argentina_time()
+        f_inicio = f_fin - timedelta(days=30)
+
+    # --- 3. CONSULTA DE VENTAS (DETALLE CLIENTES) ---
+    query_v = Venta.query.options(
+        joinedload(Venta.cliente),
+        joinedload(Venta.detalles).joinedload(DetalleVenta.repuesto),
+        # Traemos la relación con tesorería para el detalle de la fila
+        joinedload(Venta.movimientos_fina).joinedload(MovimientoFinanciero.caja)
+    ).filter(Venta.fecha.between(f_inicio, f_fin))
+
+    if sucursal_id:
+        query_v = query_v.filter(Venta.sucursal_id == sucursal_id)
+    if cliente_id:
+        query_v = query_v.filter(Venta.cliente_id == cliente_id)
+    
+    ventas = query_v.order_by(Venta.fecha.desc()).all()
+
+    # --- 4. CONSULTA DE COMPRAS (DETALLE PROVEEDORES) ---
+    query_c = Compra.query.options(
+        joinedload(Compra.proveedor),
+        joinedload(Compra.detalles).joinedload(DetalleCompra.repuesto),
+        # Navegamos: Compra -> MovCtaCteProv -> MovimientosFinancieros -> Caja
+        joinedload(Compra.movimiento_cta).joinedload(MovimientoCtaCteProveedor.detalles_pago).joinedload(MovimientoFinanciero.caja)
+    ).filter(Compra.fecha.between(f_inicio, f_fin))
+    
+    if sucursal_id:
+        # Filtramos compras por la sucursal donde ingresó el stock
+        query_c = query_c.join(MovimientoCtaCteProveedor).filter(MovimientoCtaCteProveedor.sucursal_id == sucursal_id)
+    
+    compras = query_c.order_by(Compra.fecha.desc()).all()
+
+    # --- 5. CONSULTA DE MOVIMIENTOS DE TESORERÍA (COBRANZAS Y PAGOS REALES) ---
+    query_movs = MovimientoFinanciero.query.join(Caja).options(
+        joinedload(MovimientoFinanciero.caja)
+    ).filter(MovimientoFinanciero.fecha.between(f_inicio, f_fin))
+
+    if sucursal_id:
+        # Incluye cajas de la sucursal y cajas Virtuales/Globales
+        query_movs = query_movs.filter(or_(Caja.sucursal_id == sucursal_id, Caja.tipo == 'VIRTUAL'))
+    
+    if caja_id:
+        query_movs = query_movs.filter(MovimientoFinanciero.caja_id == caja_id)
+
+    movimientos_todos = query_movs.order_by(MovimientoFinanciero.fecha.desc()).all()
+
+    # --- 6. PROCESAMIENTO DE TOTALES PARA EL RESUMEN ---
+    cobros_detalle = {}
+    pagos_detalle = {}
+    total_cobrado = 0
+    total_pagado = 0
+
+    for m in movimientos_todos:
+        nombre_caja = m.caja.nombre
+        tipo_caja = m.caja.tipo or 'FISICA'
+        
+        if m.tipo == 'INGRESO':
+            if nombre_caja not in cobros_detalle:
+                cobros_detalle[nombre_caja] = {'monto': 0, 'tipo': tipo_caja}
+            cobros_detalle[nombre_caja]['monto'] += m.monto
+            total_cobrado += m.monto
+        else:
+            if nombre_caja not in pagos_detalle:
+                pagos_detalle[nombre_caja] = {'monto': 0, 'tipo': tipo_caja}
+            pagos_detalle[nombre_caja]['monto'] += m.monto
+            total_pagado += m.monto
+
+    resumen = {
+        'ventas_total': sum(v.total for v in ventas),
+        'compras_total': sum(c.total for c in compras),
+        'total_cobrado': total_cobrado,
+        'total_pagado': total_pagado,
+        'cobros_detalle': cobros_detalle,
+        'pagos_detalle': pagos_detalle,
+        'balance_caja': total_cobrado - total_pagado
+    }
+
+    # 7. DATOS PARA FILTROS
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+    clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
+    
+    if current_user.rol == 'admin':
+        cajas_dropdown = Caja.query.filter(or_(Caja.sucursal_id == current_user.sucursal_id, Caja.tipo == 'VIRTUAL')).all()
+    else:
+        cajas_dropdown = Caja.query.all()
+
+    # 8. RETORNO A LA VISTA
+    # Agregamos 'cobranzas' y 'pagos' desglosados para la pestaña de Tesorería si es necesario
+    cobranzas_lista = [m for m in movimientos_todos if m.tipo == 'INGRESO']
+    pagos_lista = [m for m in movimientos_todos if m.tipo == 'EGRESO']
+
+    return render_template('admin/reporte_operaciones_detallado.html',
+                           ventas=ventas, 
+                           compras=compras, 
+                           cobranzas=cobranzas_lista, # Para la pestaña de dinero entrante
+                           pagos=pagos_lista,         # Para la pestaña de dinero saliente
+                           movimientos=movimientos_todos,
+                           resumen=resumen, 
+                           sucursales=sucursales, 
+                           clientes=clientes, 
+                           cajas=cajas_dropdown,
+                           filtros={
+                               'desde': desde, 
+                               'hasta': hasta, 
+                               'sucursal_id': sucursal_id, 
+                               'caja_id': caja_id,
+                               'cliente_id': cliente_id
+                           })

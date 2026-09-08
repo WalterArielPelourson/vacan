@@ -1,0 +1,328 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="mb-4">
+    <h2 class="fw-bold"><span class="text-pink">Vacan</span> - Auditoría Integral de Operaciones</h2>
+    <p class="text-muted small">Consolidado de Ventas, Compras y Flujo de Fondos (Físico y Virtual)</p>
+</div>
+
+<!-- PANEL DE FILTROS AVANZADOS -->
+<div class="card shadow-sm mb-4 border-0">
+    <div class="card-body bg-light border-start border-pink border-4 rounded-end">
+        <form action="{{ url_for('admin.reporte_operaciones_detallado') }}" method="GET" class="row g-3 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">DESDE:</label>
+                <input type="date" name="desde" class="form-control form-control-sm" value="{{ filtros.desde }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">HASTA:</label>
+                <input type="date" name="hasta" class="form-control form-control-sm" value="{{ filtros.hasta }}">
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">SUCURSAL:</label>
+                <select name="sucursal_id" class="form-select form-select-sm">
+                    <option value="">Todas las Sedes</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if filtros.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">CLIENTE:</label>
+                <select name="cliente_id" class="form-select form-select-sm">
+                    <option value="">Todos los Clientes</option>
+                    {% for c in clientes %}
+                    <option value="{{ c.id }}" {% if filtros.cliente_id == c.id %}selected{% endif %}>{{ c.razon_social }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-bold">CUENTA ESPECÍFICA:</label>
+                <select name="caja_id" class="form-select form-select-sm">
+                    <option value="">Todas (Físicas y Bancos)</option>
+                    {% for c in cajas %}
+                    <option value="{{ c.id }}" {% if filtros.caja_id == c.id %}selected{% endif %}>{{ c.nombre }} [{{ c.tipo }}]</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-2 d-flex gap-1">
+                <button type="submit" class="btn btn-vacan btn-sm flex-grow-1">Procesar</button>
+                <a href="{{ url_for('admin.reporte_operaciones_detallado') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-clockwise"></i></a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- CUADROS DE RESUMEN (DINERO REAL) -->
+<div class="row mb-4">
+    <!-- INGRESOS -->
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body border-start border-success border-4 rounded-end">
+                <h6 class="text-muted small text-uppercase fw-bold mb-3">Cobranzas Totales (Ingresos)</h6>
+                {% for cuenta, data in resumen.cobros_detalle.items() %}
+                <div class="d-flex justify-content-between align-items-center mb-1 border-bottom border-light pb-1">
+                    <span class="small">
+                        <i class="bi {% if data.tipo == 'VIRTUAL' %}bi-bank text-info{% else %}bi-wallet2 text-secondary{% endif %}"></i> 
+                        {{ cuenta }}
+                    </span>
+                    <span class="fw-bold text-success small">${{ "{:,.2f}".format(data.monto) }}</span>
+                </div>
+                {% endfor %}
+                <div class="d-flex justify-content-between border-top pt-2 mt-2">
+                    <span class="fw-bold">TOTAL ENTRADO:</span>
+                    <span class="fw-bold text-success" style="font-size: 1.1rem;">${{ "{:,.2f}".format(resumen.total_cobrado) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- EGRESOS -->
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 h-100">
+            <div class="card-body border-start border-danger border-4 rounded-end">
+                <h6 class="text-muted small text-uppercase fw-bold mb-3">Pagos Totales (Egresos)</h6>
+                {% for cuenta, data in resumen.pagos_detalle.items() %}
+                <div class="d-flex justify-content-between align-items-center mb-1 border-bottom border-light pb-1">
+                    <span class="small">
+                        <i class="bi {% if data.tipo == 'VIRTUAL' %}bi-bank text-info{% else %}bi-wallet2 text-secondary{% endif %}"></i> 
+                        {{ cuenta }}
+                    </span>
+                    <span class="fw-bold text-danger small">${{ "{:,.2f}".format(data.monto) }}</span>
+                </div>
+                {% endfor %}
+                <div class="d-flex justify-content-between border-top pt-2 mt-2">
+                    <span class="fw-bold">TOTAL SALIDO:</span>
+                    <span class="fw-bold text-danger" style="font-size: 1.1rem;">${{ "{:,.2f}".format(resumen.total_pagado) }}</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- BALANCE -->
+    <div class="col-md-4">
+        <div class="card bg-dark text-white shadow-sm h-100">
+            <div class="card-body border-start border-pink border-4 rounded-end">
+                <h6 class="text-pink small text-uppercase fw-bold">Liquidez del Periodo</h6>
+                <h2 class="fw-bold mt-2">${{ "{:,.2f}".format(resumen.balance_caja) }}</h2>
+                <div class="mt-3">
+                    <span class="badge {% if resumen.balance_caja < 0 %}bg-danger{% else %}bg-success{% endif %} p-2">
+                        {% if resumen.balance_caja < 0 %}DÉFICIT OPERATIVO{% else %}SUPERÁVIT OPERATIVO{% endif %}
+                    </span>
+                </div>
+                <small class="d-block mt-3 text-muted italic">* Incluye cobranzas de Cta. Cte. y ventas contado.</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- TABS DE DETALLE -->
+<ul class="nav nav-tabs mb-3" id="reporteTab" role="tablist">
+    <li class="nav-item">
+        <button class="nav-link active fw-bold text-dark" data-bs-toggle="tab" data-bs-target="#ventas">VENTAS (Facturación)</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link fw-bold text-dark" data-bs-toggle="tab" data-bs-target="#compras">COMPRAS (Proveedores)</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link fw-bold text-primary" data-bs-toggle="tab" data-bs-target="#cobranzas_tab">DETALLE COBRANZAS</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link fw-bold text-danger" data-bs-toggle="tab" data-bs-target="#pagos_tab">DETALLE PAGOS</button>
+    </li>
+</ul>
+
+<div class="tab-content" id="reporteTabContent">
+    
+    <!-- PESTAÑA 1: VENTAS REALIZADAS -->
+    <div class="tab-pane fade show active" id="ventas">
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-dark">
+                        <tr>
+                            <th>Fecha/ID</th>
+                            <th>Cliente</th>
+                            <th>Detalle de Productos</th>
+                            <th class="text-end">Total Facturado</th>
+                            <th class="text-center">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for v in ventas %}
+                        <tr>
+                            <td><strong>#{{ v.id }}</strong><br><small>{{ v.fecha.strftime('%d/%m/%Y %H:%M') }}</small></td>
+                            <td><span class="fw-bold text-uppercase">{{ v.cliente.razon_social }}</span><br><small>{{ v.sucursal.nombre }}</small></td>
+                            <td>
+                                {% for d in v.detalles %}
+                                <div class="small"><span class="text-pink fw-bold">{{ d.repuesto.sku if d.repuesto else 'MAN' }}</span> {{ d.nombre_item }} (x{{ d.cantidad }})</div>
+                                {% endfor %}
+                            </td>
+                            <td class="text-end fw-bold">${{ "{:,.2f}".format(v.total) }}</td>
+                            <td class="text-center">
+                                {% if v.esta_pagada %}
+                                    <span class="badge bg-success">PAGADO</span>
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">PENDIENTE ${{ "{:,.2f}".format(v.total - v.total_pagado) }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PESTAÑA 2: COMPRAS A PROVEEDORES -->
+    <div class="tab-pane fade" id="compras">
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-dark">
+                        <tr>
+                            <th style="width: 180px;">Factura / Proveedor</th>
+                            <th>Items Comprados</th>
+                            <th style="min-width: 250px;">Pagos Realizados (Caja / Banco)</th>
+                            <th class="text-end">Total Facturado</th>
+                            <th class="text-center">Estado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in compras %}
+                        <tr>
+                            <td>
+                                <span class="fw-bold text-pink">#{{ c.nro_factura }}</span><br>
+                                <div class="text-uppercase fw-bold small my-1 text-dark">
+                                    <i class="bi bi-truck text-muted"></i> {{ c.proveedor.razon_social }}
+                                </div>
+                                <small class="text-muted">{{ c.fecha.strftime('%d/%m/%Y') }}</small>
+                            </td>
+                            <td>
+                                {% for d in c.detalles %}
+                                <div class="mb-1 border-bottom border-light pb-1 small">
+                                    <span class="text-pink fw-bold">{{ d.repuesto.sku if d.repuesto else 'S/C' }}</span> 
+                                    {{ d.nombre_item }} (x{{ d.cantidad }})
+                                </div>
+                                {% endfor %}
+                            </td>
+                            <td>
+                                <div class="p-2 bg-light rounded border border-secondary-subtle">
+                                    {% if c.movimiento_cta and c.movimiento_cta.detalles_pago %}
+                                        {% for m in c.movimiento_cta.detalles_pago %}
+                                        <div class="d-flex justify-content-between mb-1 pb-1 border-bottom border-white">
+                                            <span class="small fw-bold">
+                                                <i class="bi {% if m.caja.tipo == 'VIRTUAL' %}bi-bank text-info{% else %}bi-wallet2 text-secondary{% endif %}"></i> 
+                                                {{ m.caja.nombre }}:
+                                            </span>
+                                            <span class="fw-bold text-danger">-${{ "{:,.2f}".format(m.monto) }}</span>
+                                        </div>
+                                        {% endfor %}
+                                    {% else %}
+                                        <div class="text-muted small italic text-center">Sin pagos de tesorería.</div>
+                                    {% endif %}
+                                    
+                                    {% if c.total > (c.total_pagado + 0.01) %}
+                                    <div class="text-warning border-top mt-1 pt-1 d-flex justify-content-between fw-bold">
+                                        <span class="small">SALDO DEUDA:</span>
+                                        <span>${{ "{:,.2f}".format(c.total - c.total_pagado) }}</span>
+                                    </div>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td class="text-end fw-bold text-dark">${{ "{:,.2f}".format(c.total) }}</td>
+                            <td class="text-center">
+                                {% if c.esta_pagada %}
+                                    <span class="badge bg-success">PAGADA</span>
+                                {% else %}
+                                    <span class="badge bg-danger">PENDIENTE</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PESTAÑA 3: COBRANZAS REALES (DINERO ENTRANTE) -->
+    <div class="tab-pane fade" id="cobranzas_tab">
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-success text-dark">
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Cuenta de Destino</th>
+                            <th>Cliente / Concepto</th>
+                            <th>Método</th>
+                            <th class="text-end">Importe Recibido</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for c in cobranzas %}
+                        <tr>
+                            <td>{{ c.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                            <td>
+                                <i class="bi {% if c.caja.tipo == 'VIRTUAL' %}bi-bank text-info{% else %}bi-wallet2 text-secondary{% endif %}"></i>
+                                <strong>{{ c.caja.nombre }}</strong>
+                            </td>
+                            <td><span class="text-uppercase fw-bold">{{ c.motivo }}</span></td>
+                            <td><span class="badge bg-light text-dark border">{{ c.metodo_detalle }}</span></td>
+                            <td class="text-end text-success fw-bold" style="font-size: 1rem;">${{ "{:,.2f}".format(c.monto) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PESTAÑA 4: PAGOS REALIZADOS (DINERO SALIENTE) -->
+    <div class="tab-pane fade" id="pagos_tab">
+        <div class="card shadow-sm border-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" style="font-size: 0.85rem;">
+                    <thead class="table-danger text-dark">
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Cuenta de Origen</th>
+                            <th>Proveedor / Motivo</th>
+                            <th>Método</th>
+                            <th class="text-end">Importe Pagado</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in pagos %}
+                        <tr>
+                            <td>{{ p.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
+                            <td>
+                                <i class="bi {% if p.caja.tipo == 'VIRTUAL' %}bi-bank text-info{% else %}bi-wallet2 text-secondary{% endif %}"></i>
+                                <strong>{{ p.caja.nombre }}</strong>
+                            </td>
+                            <td class="text-uppercase fw-bold">{{ p.motivo }}</td>
+                            <td><span class="badge bg-light text-dark border">{{ p.metodo_detalle }}</span></td>
+                            <td class="text-end text-danger fw-bold" style="font-size: 1rem;">-${{ "{:,.2f}".format(p.monto) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<style>
+    .text-pink { color: #e83e8c !important; }
+    .btn-vacan { background-color: #e83e8c; color: white; border: none; }
+    .btn-vacan:hover { background-color: #d81b60; color: white; }
+    .nav-tabs .nav-link.active { 
+        border-top: 3px solid #e83e8c !important; 
+        color: #e83e8c !important;
+    }
+    .card-header-vacan { background-color: #212529; border-bottom: 3px solid #e83e8c; }
+    .italic { font-style: italic; }
+</style>
+{% endblock %}

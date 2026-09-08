@@ -6,7 +6,58 @@
         <h2 class="fw-bold"><i class="bi bi-bank text-pink"></i> Tesorería y <span class="text-pink">Cajas</span></h2>
         <p class="text-muted">Gestión financiera y arqueos de Vacan Radiadores.</p>
     </div>
-    <div class="col-md-7 text-md-end">
+    <!-- FILTRO DE FECHA -->
+    <div class="col-md-7">
+        <form action="{{ url_for('admin.tesoreria_dashboard') }}" method="GET" class="card p-2 shadow-sm border-0">
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="small fw-bold">Desde:</label>
+                    <input type="date" name="desde" class="form-control form-control-sm" value="{{ filtros.desde }}">
+                </div>
+                <div class="col-md-4">
+                    <label class="small fw-bold">Hasta:</label>
+                    <input type="date" name="hasta" class="form-control form-control-sm" value="{{ filtros.hasta }}">
+                </div>
+                <div class="col-md-4 d-flex gap-1">
+                    <button type="submit" class="btn btn-vacan btn-sm flex-grow-1">Filtrar Periodo</button>
+                    <a href="{{ url_for('admin.tesoreria_dashboard') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-clockwise"></i></a>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- RESUMEN DE MOVIMIENTOS DEL PERIODO FILTRADO -->
+<div class="row mb-4">
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 bg-light">
+            <div class="card-body py-2 border-start border-success border-4 rounded-end">
+                <p class="text-muted mb-0 small text-uppercase fw-bold">Ingresos del Periodo</p>
+                <h4 class="fw-bold text-success mb-0">${{ "{:,.2f}".format(ingresos_p or 0) }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 bg-light">
+            <div class="card-body py-2 border-start border-danger border-4 rounded-end">
+                <p class="text-muted mb-0 small text-uppercase fw-bold">Egresos del Periodo</p>
+                <h4 class="fw-bold text-danger mb-0">${{ "{:,.2f}".format(egresos_p or 0) }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card shadow-sm border-0 bg-dark text-white">
+            <div class="card-body py-2 border-start border-pink border-4 rounded-end">
+                <p class="text-pink mb-0 small text-uppercase fw-bold">Balance Neto Periodo</p>
+                <h4 class="fw-bold mb-0">${{ "{:,.2f}".format(ingresos_p - egresos_p) }}</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ACCIONES RÁPIDAS -->
+<div class="row mb-4">
+    <div class="col-md-12 text-md-end">
         <div class="btn-group shadow-sm">
             <a href="{{ url_for('admin.historial_cierres') }}" class="btn btn-outline-secondary fw-bold px-3">
                 <i class="bi bi-clock-history"></i> CIERRES PASADOS
@@ -24,44 +75,48 @@
     </div>
 </div>
 
-<!-- RESUMEN DE SALDOS -->
+<!-- SALDOS ACTUALES REALES -->
 <div class="row mb-4 text-dark">
     <div class="col-md-6 mb-2">
         <div class="card bg-dark text-white border-0 shadow-sm p-3">
-            <h6 class="text-white-50 small">TOTAL EFECTIVO (CAJAS)</h6>
+            <h6 class="text-white-50 small">EFECTIVO EN CAJAS (HOY)</h6>
             <h2 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(total_efectivo or 0) }}</h2>
         </div>
     </div>
     <div class="col-md-6 mb-2">
         <div class="card bg-dark text-white border-0 shadow-sm border-start border-pink border-5 p-3">
-            <h6 class="text-white-50 small">TOTAL BANCOS / VIRTUAL</h6>
+            <h6 class="text-white-50 small">BANCOS / VIRTUAL (HOY)</h6>
             <h2 class="fw-bold mb-0 text-info">${{ "{:,.2f}".format(total_virtual or 0) }}</h2>
         </div>
     </div>
 </div>
 
 <div class="row text-dark">
-    <!-- CAJAS FÍSICAS -->
+    <!-- CAJAS FÍSICAS - DETALLE POR PERIODO -->
     <div class="col-md-6 mb-4">
         <div class="card shadow border-0 h-100">
-            <div class="card-header bg-dark text-white fw-bold">CAJAS DE SUCURSALES</div>
+            <div class="card-header bg-dark text-white fw-bold">FLUJO EN CAJAS FÍSICAS</div>
             <ul class="list-group list-group-flush">
                 {% for c in fisicas %}
-                <li class="list-group-item d-flex justify-content-between align-items-center py-3">
-                    <div>
-                        <h5 class="mb-0 fw-bold">{{ c.nombre }}</h5>
-                        <small class="text-muted">Sucursal: {{ c.sucursal.nombre if c.sucursal else 'S/S' }}</small>
-                    </div>
-                    <div class="text-end">
-                        <h4 class="fw-bold text-success mb-0">${{ "{:,.2f}".format(c.saldo_actual) }}</h4>
-                        <div class="mt-1">
-                            <a href="{{ url_for('admin.detalle_caja', id=c.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none me-2 fw-bold text-primary">Historial</a>
-                            <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold me-1" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ c.id }}">
-                                <i class="bi bi-pencil"></i>
-                            </button>
-                            <button class="btn btn-sm btn-outline-danger py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalArqueo{{ c.id }}">
-                                Arqueo
-                            </button>
+                {% set f = flujo_cajas[c.id] %}
+                <li class="list-group-item py-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h5 class="mb-0 fw-bold">{{ c.nombre }}</h5>
+                            <small class="text-muted d-block mt-1">Saldo Real Hoy: <strong>${{ "{:,.2f}".format(c.saldo_actual) }}</strong></small>
+                            <div class="mt-2">
+                                <a href="{{ url_for('admin.detalle_caja', id=c.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none me-3 fw-bold text-primary">Ver Movimientos →</a>
+                                <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold me-1" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ c.id }}"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-sm btn-outline-danger py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalArqueo{{ c.id }}">Arqueo</button>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="text-success small fw-bold" style="font-size: 0.75rem;">+ ${{ "{:,.2f}".format(f.ingresos) }}</div>
+                            <div class="text-danger small fw-bold" style="font-size: 0.75rem;">- ${{ "{:,.2f}".format(f.egresos) }}</div>
+                            <h4 class="fw-bold mt-1 mb-0 {% if f.neto < 0 %}text-danger{% else %}text-dark{% endif %}">
+                                ${{ "{:,.2f}".format(f.neto) }}
+                            </h4>
+                            <small class="text-muted extra-small">Resultado Periodo</small>
                         </div>
                     </div>
                 </li>
@@ -70,24 +125,30 @@
         </div>
     </div>
 
-    <!-- CUENTAS VIRTUALES -->
+    <!-- CUENTAS VIRTUALES - DETALLE POR PERIODO -->
     <div class="col-md-6 mb-4">
         <div class="card shadow border-0 h-100">
-            <div class="card-header bg-dark text-white fw-bold">CUENTAS VIRTUALES / BANCOS</div>
+            <div class="card-header bg-dark text-white fw-bold">FLUJO EN BANCOS / VIRTUAL</div>
             <ul class="list-group list-group-flush">
                 {% for v in virtuales %}
-                <li class="list-group-item d-flex justify-content-between align-items-center py-3">
-                    <div>
-                        <h5 class="mb-0 fw-bold">{{ v.nombre }}</h5>
-                        <small class="text-muted">{{ v.tipo }} | {{ v.sucursal.nombre if v.sucursal else 'Global' }}</small>
-                    </div>
-                    <div class="text-end">
-                        <h4 class="fw-bold text-primary mb-0">${{ "{:,.2f}".format(v.saldo_actual) }}</h4>
-                        <div class="mt-1">
-                            <a href="{{ url_for('admin.detalle_caja', id=v.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none text-pink fw-bold me-2">Ver Movimientos →</a>
-                            <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ v.id }}">
-                                <i class="bi bi-pencil"></i>
-                            </button>
+                {% set f = flujo_cajas[v.id] %}
+                <li class="list-group-item py-3">
+                    <div class="d-flex justify-content-between align-items-start">
+                        <div>
+                            <h5 class="mb-0 fw-bold">{{ v.nombre }}</h5>
+                            <small class="text-muted d-block mt-1">Saldo Real Hoy: <strong>${{ "{:,.2f}".format(v.saldo_actual) }}</strong></small>
+                            <div class="mt-2">
+                                <a href="{{ url_for('admin.detalle_caja', id=v.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none text-pink fw-bold me-2">Ver Movimientos →</a>
+                                <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ v.id }}"><i class="bi bi-pencil"></i></button>
+                            </div>
+                        </div>
+                        <div class="text-end">
+                            <div class="text-success small fw-bold" style="font-size: 0.75rem;">+ ${{ "{:,.2f}".format(f.ingresos) }}</div>
+                            <div class="text-danger small fw-bold" style="font-size: 0.75rem;">- ${{ "{:,.2f}".format(f.egresos) }}</div>
+                            <h4 class="fw-bold mt-1 mb-0 {% if f.neto < 0 %}text-danger{% else %}text-dark{% endif %}">
+                                ${{ "{:,.2f}".format(f.neto) }}
+                            </h4>
+                            <small class="text-muted extra-small">Resultado Periodo</small>
                         </div>
                     </div>
                 </li>
@@ -97,12 +158,10 @@
     </div>
 </div>
 
-<!-- ==========================================
-     MODALES
-     ========================================== -->
+<!-- MODALES (Se mantienen todos sin omitir nada) -->
 
-<!-- 1. MODAL EDITAR CUENTA (CON OPCIÓN GLOBAL) -->
 {% for caja in fisicas + virtuales %}
+<!-- MODAL EDITAR CUENTA -->
 <div class="modal fade" id="modalEditarCaja{{ caja.id }}" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form action="{{ url_for('admin.editar_caja', id=caja.id) }}" method="POST" class="modal-content border-0 shadow-lg text-dark">
@@ -126,9 +185,7 @@
                     <div class="col-6 mb-3">
                         <label class="small fw-bold text-dark">Sucursal Asignada</label>
                         <select name="sucursal_id" class="form-select border-dark text-dark" {% if current_user.rol != 'superadmin' %}disabled{% endif %}>
-                            <!-- CAMBIO 1: OPCIÓN GLOBAL EN EDICIÓN -->
                             <option value="" {% if not caja.sucursal_id %}selected{% endif %}>GLOBAL (Todas las sedes)</option>
-                            
                             {% for s in sucursales_todas %}
                             <option value="{{ s.id }}" {% if caja.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
                             {% endfor %}
@@ -147,7 +204,7 @@
 </div>
 {% endfor %}
 
-<!-- 2. MODAL NUEVO MOVIMIENTO -->
+<!-- MODAL NUEVO MOVIMIENTO -->
 <div class="modal fade" id="modalMovimientoManual" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form action="{{ url_for('admin.movimiento_manual') }}" method="POST" class="modal-content border-0 shadow-lg text-dark">
@@ -158,20 +215,20 @@
                     {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }}</option>{% endfor %}
                 </select>
                 <div class="row">
-                    <div class="col-6 mb-3 text-dark">
+                    <div class="col-6 mb-3">
                         <label class="small fw-bold">Tipo</label>
                         <select name="tipo" class="form-select border-dark"><option value="EGRESO">EGRESO</option><option value="INGRESO">INGRESO</option></select>
                     </div>
-                    <div class="col-6 mb-3 text-dark">
+                    <div class="col-6 mb-3">
                         <label class="small fw-bold">Monto ($)</label>
                         <input type="number" step="0.01" name="monto" class="form-control border-dark" required>
                     </div>
                 </div>
-                <label class="small fw-bold text-dark">Sub-Rubro</label>
+                <label class="small fw-bold">Sub-Rubro</label>
                 <select name="categoria_id" class="form-select mb-3 border-dark" required>
                     {% for cat in categorias %}<option value="{{ cat.id }}">{{ cat.nombre }}</option>{% endfor %}
                 </select>
-                <label class="small fw-bold text-dark">Concepto</label>
+                <label class="small fw-bold">Concepto</label>
                 <input type="text" name="motivo" class="form-control border-dark" required>
             </div>
             <div class="modal-footer bg-light border-0"><button type="submit" class="btn btn-pink w-100 py-2 fw-bold">REGISTRAR</button></div>
@@ -179,12 +236,12 @@
     </div>
 </div>
 
-<!-- 3. MODAL TRASPASO -->
+<!-- MODAL TRASPASO -->
 <div class="modal fade" id="modalTransferencia" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <form action="{{ url_for('admin.transferencia_fondos') }}" method="POST" class="modal-content border-0 shadow-lg text-dark">
             <div class="modal-header bg-primary text-white"><h5>Traspaso entre Cuentas</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body p-4 bg-white text-dark">
+            <div class="modal-body p-4 bg-white">
                 <label class="small fw-bold text-danger">Origen</label>
                 <select name="origen_id" class="form-select mb-3" required>
                     {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }} (${{ "{:,.2f}".format(caja.saldo_actual) }})</option>{% endfor %}
@@ -201,7 +258,7 @@
     </div>
 </div>
 
-<!-- 4. MODALES DE ARQUEO -->
+<!-- MODALES DE ARQUEO -->
 {% for c in fisicas %}
 <div class="modal fade" id="modalArqueo{{ c.id }}" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered text-dark">
@@ -210,9 +267,9 @@
                 <h5 class="modal-title fw-bold">Arqueo: {{ c.nombre }}</h5>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-            <div class="modal-body p-4 bg-white text-dark">
+            <div class="modal-body p-4 bg-white">
                 <div class="text-center mb-3">
-                    <h6 class="text-muted small">SALDO EN SISTEMA</h6>
+                    <h6 class="text-muted small">SALDO EN SISTEMA (Snapshot)</h6>
                     <h3 class="fw-bold">${{ "{:,.2f}".format(c.saldo_actual) }}</h3>
                 </div>
                 <label class="form-label fw-bold text-danger">SALDO REAL CONTADO ($)</label>
@@ -228,34 +285,37 @@
 </div>
 {% endfor %}
 
-<!-- 5. MODAL NUEVA CAJA (CON OPCIÓN GLOBAL) -->
+<!-- MODAL NUEVA CAJA -->
 <div class="modal fade" id="modalNuevaCaja" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered text-dark">
         <form action="{{ url_for('admin.nueva_caja') }}" method="POST" class="modal-content border-0 shadow-lg">
             <div class="modal-header bg-dark text-white"><h5>Habilitar Nueva Cuenta/Caja</h5><button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body p-4 bg-white text-dark">
+            <div class="modal-body p-4 bg-white">
                 <label class="small fw-bold">Nombre</label>
-                <input type="text" name="nombre" class="form-control mb-3 border-dark text-dark" required>
+                <input type="text" name="nombre" class="form-control mb-3 border-dark" required>
                 <div class="row">
                     <div class="col-6">
                         <label class="small fw-bold text-dark">Tipo</label>
-                        <select name="tipo" class="form-select border-dark text-dark"><option value="FISICA">EFECTIVO</option><option value="VIRTUAL">BANCO / VIRTUAL</option></select>
+                        <select name="tipo" class="form-select border-dark">
+                            <option value="FISICA">EFECTIVO</option>
+                            <option value="VIRTUAL">BANCO / VIRTUAL</option>
+                        </select>
                     </div>
                     <div class="col-6">
                         <label class="small fw-bold text-dark">Sucursal</label>
-                        <select name="sucursal_id" class="form-select border-dark text-dark" {% if current_user.rol != 'superadmin' %}disabled{% endif %}>
-                            <!-- CAMBIO 2: OPCIÓN GLOBAL EN ALTA NUEVA -->
+                        <select name="sucursal_id" class="form-select border-dark" {% if current_user.rol != 'superadmin' %}disabled{% endif %}>
                             <option value="">GLOBAL (Todas las sedes)</option>
-                            
                             {% for s in sucursales_todas %}
                             <option value="{{ s.id }}" {% if current_user.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
                             {% endfor %}
                         </select>
-                        {% if current_user.rol != 'superadmin' %}<input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">{% endif %}
+                        {% if current_user.rol != 'superadmin' %}
+                            <input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">
+                        {% endif %}
                     </div>
                 </div>
             </div>
-            <div class="modal-footer bg-light border-0"><button type="submit" class="btn btn-pink w-100 py-2 fw-bold">CREAR</button></div>
+            <div class="modal-footer bg-light border-0"><button type="submit" class="btn btn-pink w-100 py-2 fw-bold">CREAR CUENTA</button></div>
         </form>
     </div>
 </div>
@@ -263,6 +323,8 @@
 <style>
     .btn-pink { background-color: var(--vacan-pink); color: white; border: none; }
     .btn-pink:hover { background-color: #d4006a; color: white; }
-    .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 12px; overflow: hidden; }
+    .modal-content { background-color: #ffffff !important; border-radius: 12px; overflow: hidden; }
+    .extra-small { font-size: 0.65rem; }
+    .italic { font-style: italic; }
 </style>
 {% endblock %}

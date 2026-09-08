@@ -123,6 +123,15 @@ class Repuesto(db.Model):
     autos_compatibles = db.relationship('ModeloAuto', secondary=compatibilidad, backref='repuestos_compatibles')
     historial_precios = db.relationship('HistorialPrecio', back_populates='repuesto', cascade="all, delete-orphan")
     
+    @property
+    def stock_valorizado_costo(self):
+        return self.stock * self.costo
+
+    @property
+    def margen_ganancia(self):
+        if self.costo > 0:
+            return ((self.precio / self.costo) - 1) * 100
+        return 0
     
     
     
@@ -177,6 +186,12 @@ class Venta(db.Model):
     pagos = db.relationship('PagoVenta', back_populates='venta', cascade="all, delete-orphan")
     movimientos_cta = db.relationship('MovimientoCtaCte', back_populates='venta')
     
+    #movimientos_fina = db.relationship('MovimientoFinanciero', backref='venta_asociada_ref', lazy=True)
+    movimientos_fina = db.relationship('MovimientoFinanciero', backref='venta_asociada', lazy=True)
+    
+    @property
+    def saldo_pendiente(self):
+        return round(self.total - self.total_pagado, 2)
     
 class DetalleVenta(db.Model):
     id = db.Column(db.Integer, primary_key=True)

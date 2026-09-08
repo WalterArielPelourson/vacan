@@ -219,6 +219,12 @@
                     <i class="bi bi-calendar-check"></i> Pagar a Proveedores
                 </a>
 
+               
+                <a href="{{ url_for('admin.reporte_operaciones_detallado') }}" class="sidebar-link">
+                    <i class="bi bi-shield-check text-pink"></i> Consolidado de Flujo y Operaciones
+                </a>
+        
+
                 <!-- REPORTE DE AUDITORÍA CORREGIDO -->
                 <a href="{{ url_for('admin.reporte_auditoria') }}" 
                 class="sidebar-link {% if request.endpoint == 'admin.reporte_auditoria' %}active{% endif %}">

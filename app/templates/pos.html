@@ -633,6 +633,29 @@ async function enviarVentaVacan() {
         alert("Error: " + err.message);
     }
 }
+
+// Al cargar la página del POS
+document.addEventListener('DOMContentLoaded', function() {
+    const presupuestoId = "{{ recuperar_id }}";
+    if (presupuestoId && presupuestoId !== 'None') {
+        fetch(`/repuestos/api/presupuesto/${presupuestoId}`) // Ajusta la ruta según tu blueprint
+            .then(res => res.json())
+            .then(data => {
+                // 1. Seleccionar el cliente
+                document.getElementById('cliente_id').value = data.cliente_id;
+                
+                // 2. Cargar los items al carrito (tu función de JS que agrega al carrito)
+                data.items.forEach(item => {
+                    agregarAlCarrito(item.id, item.nombre, item.precio, item.cantidad);
+                });
+                
+                // 3. Guardar el ID del presupuesto original para marcarlo como "CONVERTIDO" al finalizar
+                window.presupuestoOrigenId = data.id;
+                alert("Presupuesto cargado. Puede modificarlo o finalizar la venta.");
+            });
+    }
+})
+
 </script>
 
 <style>

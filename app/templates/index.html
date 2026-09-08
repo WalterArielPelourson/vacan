@@ -275,5 +275,39 @@ function buscarAfuera(query) {
     .x-small { font-size: 0.6rem; letter-spacing: 0.5px; }
     .table-hover tbody tr:hover { background-color: rgba(255, 0, 127, 0.02); }
     .card-header-vacan { background: linear-gradient(45deg, #1a1a1a, #333); color: white; }
+
+function buscarYOrdenar() {
+    let input = document.getElementById("miBuscador").value.toLowerCase();
+    let table = document.querySelector("table tbody");
+    let rows = Array.from(table.querySelectorAll("tr"));
+
+    // 1. Filtrar y asignar puntaje
+    let resultados = rows.map(row => {
+        let texto = row.innerText.toLowerCase();
+        let puntaje = 0;
+
+        if (texto.includes(input)) {
+            // Si es igual exacto o empieza con el texto, puntaje alto
+            if (texto.startsWith(input)) {
+                puntaje = 2; 
+            } else {
+                puntaje = 1; // Lo contiene pero no al principio
+            }
+        }
+        return { row, puntaje };
+    });
+
+    // 2. Ordenar por puntaje (de mayor a menor)
+    resultados.sort((a, b) => b.puntaje - a.puntaje);
+
+    // 3. Volver a mostrar en la tabla
+    table.innerHTML = "";
+    resultados.forEach(item => {
+        if (item.puntaje > 0 || input === "") {
+            table.appendChild(item.row);
+        }
+    });
+}
+
 </style>
 {% endblock %}
