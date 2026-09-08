@@ -198,10 +198,17 @@
                                    target="_blank" class="btn btn-sm btn-light border" title="Imprimir Remito">
                                     <i class="bi bi-printer text-dark"></i>
                                 </a>
-                                <a href="{{ url_for('admin.pdf_remito', id=v.id) }}" 
+                                <!--<a href="{{ url_for('admin.pdf_remito', id=v.id) }}" 
                                    class="btn btn-sm btn-danger" title="Descargar PDF">
                                     <i class="bi bi-file-earmark-pdf"></i>
-                                </a>
+                                </a>-->
+
+                                <!-- NUEVO BOTÓN DE DEVOLUCIÓN -->
+                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                                        onclick="abrirModalDevolucionReporte({{ v.id }})" title="Devolución">
+                                    <i class="bi bi-arrow-counterclockwise"></i>
+                                </button>
+
                             </div>
                         </td>
                     </tr>
@@ -219,6 +226,132 @@
         </div>
     </div>
 </div>
+
+{% for v in ventas %}
+<!-- MODAL DE DEVOLUCIÓN PARA CADA VENTA -->
+<div class="modal fade" id="modalDevReporte{{ v.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content border-0 shadow-lg text-dark">
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title fw-bold">Procesar Devolución: Venta #{{ v.id }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body bg-white">
+                <div class="alert alert-info py-2 small">
+                    <i class="bi bi-info-circle"></i> Indique la cantidad que el cliente devuelve físicamente. El sistema reintegrará el valor exacto de la venta original.
+                </div>
+                
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr class="small text-uppercase">
+                            <th>Producto (SKU)</th>
+                            <th class="text-center">Vendido</th>
+                            <th class="text-end">Precio Unit.</th>
+                            <th style="width: 100px;">Devuelve</th>
+                            <th class="text-end">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody id="items-dev-{{ v.id }}">
+                        {% for d in v.detalles %}
+                        <tr class="fila-dev-reporte" data-id="{{ d.id }}" data-precio="{{ d.precio_unitario }}">
+                            <td>
+                                <strong>{{ d.repuesto.sku if d.repuesto else 'MAN' }}</strong><br>
+                                <small class="text-muted">{{ d.nombre_item }}</small>
+                            </td>
+                            <td class="text-center">{{ d.cantidad }}</td>
+                            <td class="text-end fw-bold text-muted">${{ "{:,.2f}".format(d.precio_unitario) }}</td>
+                            <td>
+                                <input type="number" class="form-control form-control-sm input-cant-dev" 
+                                       min="0" max="{{ d.cantidad }}" value="0" 
+                                       onchange="recalcularTotalReporte({{ v.id }})">
+                            </td>
+                            <td class="text-end fw-bold text-success">$ <span class="sub-dev">0.00</span></td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+
+                <div class="row g-3 bg-light p-3 rounded border">
+                    <div class="col-md-6">
+                        <label class="small fw-bold">DESTINO DEL DINERO:</label>
+                        <select id="metodo-dev-{{ v.id }}" class="form-select" onchange="toggleCajaReporte({{ v.id }})">
+                            <option value="CTA_CTE">CRÉDITO A CUENTA CORRIENTE</option>
+                            <option value="EFECTIVO">DEVOLVER EFECTIVO / BANCO</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 d-none" id="div-caja-reporte-{{ v.id }}">
+                        <label class="small fw-bold text-danger">CUENTA DE SALIDA:</label>
+                        <select id="caja-dev-{{ v.id }}" class="form-select border-danger">
+                            {% for c in cajas %}
+                            <option value="{{ c.id }}">{{ c.nombre }} (${{ "{:,.2f}".format(c.saldo_actual) }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light d-flex justify-content-between">
+                <h4 class="fw-bold mb-0">REINTEGRO: <span class="text-danger" id="total-dev-rep-{{ v.id }}">$ 0.00</span></h4>
+                <button type="button" class="btn btn-danger px-4 fw-bold" onclick="ejecutarDevolucionReporte({{ v.id }})">CONFIRMAR</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<!-- JAVASCRIPT PARA LA LÓGICA -->
+<script>
+function abrirModalDevolucionReporte(id) {
+    new bootstrap.Modal(document.getElementById('modalDevReporte' + id)).show();
+}
+
+function recalcularTotalReporte(id) {
+    let granTotal = 0;
+    document.querySelectorAll('#items-dev-' + id + ' .fila-dev-reporte').forEach(fila => {
+        const precio = parseFloat(fila.dataset.precio);
+        const cant = parseInt(fila.querySelector('.input-cant-dev').value) || 0;
+        const sub = precio * cant;
+        fila.querySelector('.sub-dev').innerText = sub.toFixed(2);
+        granTotal += sub;
+    });
+    document.getElementById('total-dev-rep-' + id).innerText = '$ ' + granTotal.toLocaleString('es-AR', {minimumFractionDigits: 2});
+}
+
+function toggleCajaReporte(id) {
+    const m = document.getElementById('metodo-dev-' + id).value;
+    document.getElementById('div-caja-reporte-' + id).classList.toggle('d-none', m !== 'EFECTIVO');
+}
+
+async function ejecutarDevolucionReporte(id) {
+    const items = [];
+    document.querySelectorAll('#items-dev-' + id + ' .fila-dev-reporte').forEach(fila => {
+        const cant = parseInt(fila.querySelector('.input-cant-dev').value) || 0;
+        if (cant > 0) items.push({ detalle_id: fila.dataset.id, cantidad: cant });
+    });
+
+    if (items.length === 0) return alert("Seleccione productos para devolver.");
+    if (!confirm("¿Desea procesar la devolución? El stock se reingresará automáticamente.")) return;
+
+    const res = await fetch("{{ url_for('admin.procesar_devolucion') }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            venta_id: id,
+            items: items,
+            metodo: document.getElementById('metodo-dev-' + id).value,
+            caja_id: document.getElementById('caja-dev-' + id).value
+        })
+    });
+
+    const data = await res.json();
+    if (data.status === 'ok') {
+        alert(data.message);
+        location.reload();
+    } else {
+        alert("Error: " + data.message);
+    }
+}
+</script>
+
 
 <style>
     .text-pink { color: #e83e8c !important; }

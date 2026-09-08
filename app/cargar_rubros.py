@@ -26,7 +26,10 @@ def cargar_categorias():
         ('Financiero: Intereses Pagados', 'EGRESO'),
         ('Retiro de Socios / Dueños', 'EGRESO'),
         ('Gastos Varios / Menores', 'EGRESO'),
-
+        ('Retiro de Capital / Inversión', 'EGRESO'),      # <--- DESCOMENTADO Y ACTIVADO
+        ('Pago a Proveedores (Mercadería)', 'EGRESO'),
+        
+        
         # --- INGRESOS (Entradas Extra) ---
         ('Aporte de Capital / Inversión', 'INGRESO'),
         ('Venta de Rezagos / Chatarra (Cobre/Aluminio)', 'INGRESO'),

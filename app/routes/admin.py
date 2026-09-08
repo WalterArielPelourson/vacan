@@ -211,6 +211,9 @@ def reportes():
     proveedores = Proveedor.query.filter_by(activo=True).all()
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all() # <--- NUEVO
 
+    # AGREGAR ESTA LÍNEA antes del return:
+    cajas = Caja.query.filter(or_(Caja.sucursal_id == current_user.sucursal_id, Caja.tipo == 'VIRTUAL')).all()
+    
     return render_template('admin/reportes.html', 
                            ventas=ventas, 
                            total=total_recaudado, 
@@ -218,6 +221,7 @@ def reportes():
                            sucursales=sucursales, 
                            proveedores=proveedores, 
                            clientes=clientes, # <--- Enviamos lista de clientes
+                           cajas=cajas,
                            sucursal_actual=Sucursal.query.get(sucursal_id) if sucursal_id else None,
                            filtros={
                                'desde': desde, 
@@ -2742,11 +2746,10 @@ def reporte_operaciones_detallado():
         f_fin = get_argentina_time()
         f_inicio = f_fin - timedelta(days=30)
 
-    # --- 3. CONSULTA DE VENTAS (DETALLE CLIENTES) ---
+    # --- 3. CONSULTA DE VENTAS (FACTURACIÓN) ---
     query_v = Venta.query.options(
         joinedload(Venta.cliente),
         joinedload(Venta.detalles).joinedload(DetalleVenta.repuesto),
-        # Traemos la relación con tesorería para el detalle de la fila
         joinedload(Venta.movimientos_fina).joinedload(MovimientoFinanciero.caja)
     ).filter(Venta.fecha.between(f_inicio, f_fin))
 
@@ -2757,28 +2760,30 @@ def reporte_operaciones_detallado():
     
     ventas = query_v.order_by(Venta.fecha.desc()).all()
 
-    # --- 4. CONSULTA DE COMPRAS (DETALLE PROVEEDORES) ---
+    # --- 4. CONSULTA DE COMPRAS (FACTURACIÓN PROVEEDORES) ---
     query_c = Compra.query.options(
         joinedload(Compra.proveedor),
         joinedload(Compra.detalles).joinedload(DetalleCompra.repuesto),
-        # Navegamos: Compra -> MovCtaCteProv -> MovimientosFinancieros -> Caja
         joinedload(Compra.movimiento_cta).joinedload(MovimientoCtaCteProveedor.detalles_pago).joinedload(MovimientoFinanciero.caja)
     ).filter(Compra.fecha.between(f_inicio, f_fin))
     
     if sucursal_id:
-        # Filtramos compras por la sucursal donde ingresó el stock
         query_c = query_c.join(MovimientoCtaCteProveedor).filter(MovimientoCtaCteProveedor.sucursal_id == sucursal_id)
     
     compras = query_c.order_by(Compra.fecha.desc()).all()
 
-    # --- 5. CONSULTA DE MOVIMIENTOS DE TESORERÍA (COBRANZAS Y PAGOS REALES) ---
+    # --- 5. CONSULTA DE TESORERÍA (COBRANZAS Y PAGOS EXTERNOS) ---
+    # REGLA: es_transferencia == False para no duplicar por movimientos internos
     query_movs = MovimientoFinanciero.query.join(Caja).options(
         joinedload(MovimientoFinanciero.caja)
-    ).filter(MovimientoFinanciero.fecha.between(f_inicio, f_fin))
+    ).filter(
+        MovimientoFinanciero.fecha.between(f_inicio, f_fin),
+        MovimientoFinanciero.es_transferencia == False
+    )
 
     if sucursal_id:
-        # Incluye cajas de la sucursal y cajas Virtuales/Globales
-        query_movs = query_movs.filter(or_(Caja.sucursal_id == sucursal_id, Caja.tipo == 'VIRTUAL'))
+        # Filtro estricto: Solo movimientos de cajas que pertenezcan a esa sucursal
+        query_movs = query_movs.filter(Caja.sucursal_id == sucursal_id)
     
     if caja_id:
         query_movs = query_movs.filter(MovimientoFinanciero.caja_id == caja_id)
@@ -2820,21 +2825,23 @@ def reporte_operaciones_detallado():
     sucursales = Sucursal.query.filter_by(activo=True).all()
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
     
-    if current_user.rol == 'admin':
+    # Selector de cajas dinámico según sucursal
+    if sucursal_id:
+        cajas_dropdown = Caja.query.filter_by(sucursal_id=sucursal_id).all()
+    elif current_user.rol == 'admin':
         cajas_dropdown = Caja.query.filter(or_(Caja.sucursal_id == current_user.sucursal_id, Caja.tipo == 'VIRTUAL')).all()
     else:
         cajas_dropdown = Caja.query.all()
 
     # 8. RETORNO A LA VISTA
-    # Agregamos 'cobranzas' y 'pagos' desglosados para la pestaña de Tesorería si es necesario
     cobranzas_lista = [m for m in movimientos_todos if m.tipo == 'INGRESO']
     pagos_lista = [m for m in movimientos_todos if m.tipo == 'EGRESO']
 
     return render_template('admin/reporte_operaciones_detallado.html',
                            ventas=ventas, 
                            compras=compras, 
-                           cobranzas=cobranzas_lista, # Para la pestaña de dinero entrante
-                           pagos=pagos_lista,         # Para la pestaña de dinero saliente
+                           cobranzas=cobranzas_lista,
+                           pagos=pagos_lista,
                            movimientos=movimientos_todos,
                            resumen=resumen, 
                            sucursales=sucursales, 
@@ -2847,3 +2854,85 @@ def reporte_operaciones_detallado():
                                'caja_id': caja_id,
                                'cliente_id': cliente_id
                            })
+    
+    
+    
+@admin_bp.route('/devoluciones')
+@login_required
+@roles_required('admin', 'superadmin')
+def modulo_devoluciones():
+    q = request.args.get('q', '').strip()
+    ventas = []
+    if q:
+        # Buscamos la venta cargando sus detalles para tener los precios históricos
+        ventas = Venta.query.options(joinedload(Venta.detalles)).join(Cliente).filter(
+            or_(Venta.id == q, Cliente.razon_social.ilike(f"%{q}%"))
+        ).order_by(Venta.id.desc()).limit(10).all()
+    
+    # Filtramos cajas según la sucursal del usuario
+    cajas = Caja.query.filter(or_(Caja.sucursal_id == current_user.sucursal_id, Caja.tipo == 'VIRTUAL')).all()
+    
+    return render_template('admin/devoluciones.html', ventas=ventas, cajas=cajas, busqueda=q)
+
+@admin_bp.route('/devoluciones/procesar', methods=['POST'])
+@login_required
+@roles_required('admin', 'superadmin')
+def procesar_devolucion():
+    data = request.get_json()
+    venta_id = data.get('venta_id')
+    items_a_devolver = data.get('items') # Lista de {detalle_id, cantidad}
+    metodo = data.get('metodo') # 'EFECTIVO' o 'CTA_CTE'
+    caja_id = data.get('caja_id')
+
+    venta = Venta.query.get_or_404(venta_id)
+    total_reintegro = 0
+
+    try:
+        for item in items_a_devolver:
+            detalle = DetalleVenta.query.get(item['detalle_id'])
+            cant_dev = int(item['cantidad'])
+            
+            if cant_dev <= 0: continue
+
+            # 1. RE-INGRESAR STOCK (A la sucursal donde está el vendedor hoy)
+            if detalle.repuesto_id:
+                rep = Repuesto.query.get(detalle.repuesto_id)
+                if rep:
+                    rep.stock += cant_dev
+            
+            # 2. CALCULAR MONTO USANDO EL PRECIO DE VENTA ORIGINAL
+            # detalle.precio_unitario es el valor guardado al momento de la venta
+            total_reintegro += (detalle.precio_unitario * cant_dev)
+
+        # 3. GESTIÓN FINANCIERA
+        if metodo == 'CTA_CTE':
+            # Se le genera un crédito (monto negativo) en su cuenta corriente
+            nuevo_mov = MovimientoCtaCte(
+                cliente_id=venta.cliente_id,
+                monto=-total_reintegro, 
+                tipo='PAGO', # Actúa como un pago a favor
+                sucursal_id=current_user.sucursal_id,
+                descripcion=f"Crédito por Devolución de Mercadería - Venta #{venta.id}"
+            )
+            db.session.add(nuevo_mov)
+        else:
+            # Salida de dinero de Tesorería
+            caja = Caja.query.get(caja_id)
+            if caja:
+                caja.saldo_actual -= total_reintegro
+                mov_f = MovimientoFinanciero(
+                    caja_id=caja.id,
+                    monto=total_reintegro,
+                    tipo='EGRESO',
+                    motivo=f"Reintegro por Devolución - Venta #{venta.id}",
+                    metodo_detalle='DEVOLUCION',
+                    usuario_id=current_user.id
+                )
+                db.session.add(mov_f)
+
+        db.session.commit()
+        return jsonify({"status": "ok", "message": f"Se reintegraron ${total_reintegro:,.2f} con éxito."})
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(e)}), 500
