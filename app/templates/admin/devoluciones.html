@@ -48,8 +48,9 @@
                             <tr>
                                 <th>Item (SKU)</th>
                                 <th class="text-center">Vendido</th>
-                                <th class="text-end">Precio Unit. (Venta)</th>
-                                <th style="width: 120px;">A Devolver</th>
+                                <th class="text-end">Precio Unit.</th>
+                                <th style="width: 100px;" class="text-center text-danger">% Dto. Dev</th>
+                                <th style="width: 110px;">A Devolver</th>
                                 <th class="text-end">Subtotal</th>
                             </tr>
                         </thead>
@@ -62,6 +63,12 @@
                                 </td>
                                 <td class="text-center">{{ d.cantidad }}</td>
                                 <td class="text-end fw-bold text-muted">${{ "{:,.2f}".format(d.precio_unitario) }}</td>
+                                <td>
+                                    <!-- Input para el descuento aplicado específicamente a la devolución -->
+                                    <input type="number" class="form-control form-control-sm dto-input border-danger" 
+                                           min="0" max="100" value="0" 
+                                           onchange="actualizarTotalDev({{ v.id }})">
+                                </td>
                                 <td>
                                     <input type="number" class="form-control form-control-sm cant-input" 
                                            min="0" max="{{ d.cantidad }}" value="0" 
@@ -95,6 +102,7 @@
 
                     <div class="text-end">
                         <h3 class="fw-bold">TOTAL REINTEGRO: <span class="text-pink" id="display-total-{{ v.id }}">$ 0.00</span></h3>
+                        <p class="text-muted small">* El descuento se aplica sobre el precio que figura en el comprobante.</p>
                     </div>
                 </div>
                 <div class="modal-footer bg-light">
@@ -114,9 +122,18 @@ function abrirDevolucion(id) {
 function actualizarTotalDev(ventaId) {
     let granTotal = 0;
     document.querySelectorAll('#items-' + ventaId + ' .fila-dev').forEach(fila => {
+        // Obtenemos el precio unitario original de la venta
         const precioOriginal = parseFloat(fila.dataset.precio);
         const cant = parseInt(fila.querySelector('.cant-input').value) || 0;
-        const sub = precioOriginal * cant;
+        
+        // Obtenemos el porcentaje de descuento a aplicar sobre la devolución
+        const dtoPorcentaje = parseFloat(fila.querySelector('.dto-input').value) || 0;
+        
+        // Calculamos el precio de devolución: Precio Original - Descuento
+        const precioReintegroUnitario = precioOriginal * (1 - (dtoPorcentaje / 100));
+        
+        const sub = precioReintegroUnitario * cant;
+        
         fila.querySelector('.sub-total').innerText = sub.toFixed(2);
         granTotal += sub;
     });
@@ -132,11 +149,19 @@ async function procesarEnvioDevolucion(id) {
     const items = [];
     document.querySelectorAll('#items-' + id + ' .fila-dev').forEach(fila => {
         const cant = parseInt(fila.querySelector('.cant-input').value) || 0;
-        if (cant > 0) items.push({ detalle_id: fila.dataset.id, cantidad: cant });
+        const dto = parseFloat(fila.querySelector('.dto-input').value) || 0; 
+
+        if (cant > 0) {
+            items.push({ 
+                detalle_id: fila.dataset.id, 
+                cantidad: cant,
+                descuento: dto // Enviamos el descuento al servidor
+            });
+        }
     });
 
     if (items.length === 0) return alert("Seleccione al menos un producto.");
-    if (!confirm("¿Confirma la devolución? Se sumará stock y se registrará el movimiento de dinero.")) return;
+    if (!confirm("¿Confirma la devolución? Se sumará stock y se registrará el movimiento de dinero con los descuentos aplicados.")) return;
 
     const res = await fetch("{{ url_for('admin.procesar_devolucion') }}", {
         method: "POST",

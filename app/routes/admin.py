@@ -2880,8 +2880,8 @@ def modulo_devoluciones():
 def procesar_devolucion():
     data = request.get_json()
     venta_id = data.get('venta_id')
-    items_a_devolver = data.get('items') # Lista de {detalle_id, cantidad}
-    metodo = data.get('metodo') # 'EFECTIVO' o 'CTA_CTE'
+    items_a_devolver = data.get('items') # Ahora esperamos: {detalle_id, cantidad, descuento_porcentaje}
+    metodo = data.get('metodo') 
     caja_id = data.get('caja_id')
 
     venta = Venta.query.get_or_404(venta_id)
@@ -2891,44 +2891,52 @@ def procesar_devolucion():
         for item in items_a_devolver:
             detalle = DetalleVenta.query.get(item['detalle_id'])
             cant_dev = int(item['cantidad'])
+            # Obtenemos el descuento, si no viene, por defecto es 0
+            dto_porcentaje = float(item.get('descuento', 0))
             
             if cant_dev <= 0: continue
 
-            # 1. RE-INGRESAR STOCK (A la sucursal donde está el vendedor hoy)
+            # 1. RE-INGRESAR STOCK
             if detalle.repuesto_id:
                 rep = Repuesto.query.get(detalle.repuesto_id)
                 if rep:
                     rep.stock += cant_dev
             
-            # 2. CALCULAR MONTO USANDO EL PRECIO DE VENTA ORIGINAL
-            # detalle.precio_unitario es el valor guardado al momento de la venta
-            total_reintegro += (detalle.precio_unitario * cant_dev)
+            # 2. CALCULAR MONTO CON DESCUENTO
+            # El precio original guardado en la venta
+            precio_original = detalle.precio_unitario
+            
+            # Calculamos el precio de devolución aplicando el descuento
+            # Ejemplo: Si el precio es 100 y el descuento es 10%, devuelve 90.
+            precio_devolucion = precio_original * (1 - (dto_porcentaje / 100))
+            
+            monto_item = precio_devolucion * cant_dev
+            total_reintegro += monto_item
 
         # 3. GESTIÓN FINANCIERA
-        if metodo == 'CTA_CTE':
-            # Se le genera un crédito (monto negativo) en su cuenta corriente
-            nuevo_mov = MovimientoCtaCte(
-                cliente_id=venta.cliente_id,
-                monto=-total_reintegro, 
-                tipo='PAGO', # Actúa como un pago a favor
-                sucursal_id=current_user.sucursal_id,
-                descripcion=f"Crédito por Devolución de Mercadería - Venta #{venta.id}"
-            )
-            db.session.add(nuevo_mov)
-        else:
-            # Salida de dinero de Tesorería
-            caja = Caja.query.get(caja_id)
-            if caja:
-                caja.saldo_actual -= total_reintegro
-                mov_f = MovimientoFinanciero(
-                    caja_id=caja.id,
-                    monto=total_reintegro,
-                    tipo='EGRESO',
-                    motivo=f"Reintegro por Devolución - Venta #{venta.id}",
-                    metodo_detalle='DEVOLUCION',
-                    usuario_id=current_user.id
+        if total_reintegro > 0:
+            if metodo == 'CTA_CTE':
+                nuevo_mov = MovimientoCtaCte(
+                    cliente_id=venta.cliente_id,
+                    monto=-total_reintegro, 
+                    tipo='PAGO', 
+                    sucursal_id=current_user.sucursal_id,
+                    descripcion=f"Crédito por Devolución (con dto) - Venta #{venta.id}"
                 )
-                db.session.add(mov_f)
+                db.session.add(nuevo_mov)
+            else:
+                caja = Caja.query.get(caja_id)
+                if caja:
+                    caja.saldo_actual -= total_reintegro
+                    mov_f = MovimientoFinanciero(
+                        caja_id=caja.id,
+                        monto=total_reintegro,
+                        tipo='EGRESO',
+                        motivo=f"Reintegro por Devolución (con dto) - Venta #{venta.id}",
+                        metodo_detalle='DEVOLUCION',
+                        usuario_id=current_user.id
+                    )
+                    db.session.add(mov_f)
 
         db.session.commit()
         return jsonify({"status": "ok", "message": f"Se reintegraron ${total_reintegro:,.2f} con éxito."})

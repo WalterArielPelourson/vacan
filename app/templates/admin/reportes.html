@@ -35,7 +35,7 @@
                 </select>
             </div>
 
-            <!-- Cliente (REEMPLAZA AL PROVEEDOR) -->
+            <!-- Cliente -->
             <div class="col-md-3">
                 <label class="form-label small fw-bold text-uppercase">Filtrar por Cliente:</label>
                 <select name="cliente_id" class="form-select form-select-sm select2">
@@ -104,7 +104,6 @@
                 <tbody>
                     {% for v in ventas %}
                     <tr>
-                        <!-- ID, CLIENTE Y FECHA -->
                         <td>
                             <span class="fw-bold text-pink">#{{ v.id }}</span><br>
                             <div class="text-uppercase fw-bold small my-1">
@@ -113,13 +112,11 @@
                             <small class="text-muted">{{ v.fecha.strftime('%d/%m/%Y %H:%M') }} hs</small>
                         </td>
 
-                        <!-- SUCURSAL Y VENDEDOR -->
                         <td>
                             <span class="badge bg-outline-dark border text-dark mb-1">{{ v.sucursal.nombre }}</span><br>
                             <small class="text-muted"><i class="bi bi-person"></i> {{ v.usuario.username }}</small>
                         </td>
 
-                        <!-- DETALLE DE PRODUCTOS -->
                         <td>
                             <ul class="list-unstyled mb-0" style="font-size: 0.85rem;">
                                 {% for d in v.detalles %}
@@ -132,10 +129,8 @@
                             </ul>
                         </td>
 
-                        <!-- DESGLOSE DE COBROS REALES EN TESORERÍA -->
                         <td>
                             <div class="p-2 bg-light rounded border border-secondary-subtle">
-                                {# 1. LISTAR INGRESOS REALES A CAJAS/CUENTAS #}
                                 {% if v.movimientos_fina %}
                                     {% for m in v.movimientos_fina %}
                                     <div class="d-flex justify-content-between mb-1 pb-1 border-bottom border-white">
@@ -149,7 +144,6 @@
                                     </div>
                                     {% endfor %}
                                 {% else %}
-                                    {# Mostrar pagos informados si no hay movimientos (Compatibilidad) #}
                                     {% for p in v.pagos %}
                                     <div class="d-flex justify-content-between mb-1">
                                         <span class="text-muted small text-uppercase">{{ p.metodo }}:</span>
@@ -158,7 +152,6 @@
                                     {% endfor %}
                                 {% endif %}
                                 
-                                {# 2. CALCULAR SALDO RESTANTE (DEUDA EN CTA CTE) #}
                                 {% set abonado = v.total_pagado %}
                                 {% if v.total > (abonado + 0.01) %}
                                 <div class="d-flex justify-content-between border-top border-secondary-subtle pt-1 mt-1 text-danger">
@@ -166,49 +159,31 @@
                                     <span class="fw-bold" style="font-size: 0.9rem;">${{ "{:,.2f}".format(v.total - abonado) }}</span>
                                 </div>
                                 {% endif %}
-
-                                {# 3. REFERENCIA DEL MÉTODO PRINCIPAL #}
-                                <div class="mt-1 pt-1 border-top border-light d-flex justify-content-between text-muted" style="font-size: 0.7rem;">
-                                    <span>Clasificación original:</span>
-                                    <span>{{ v.metodo_pago }}</span>
-                                </div>
                             </div>
                         </td>
 
-                        <!-- TOTAL -->
                         <td class="text-end fw-bold text-dark" style="font-size: 1.1rem;">
                             ${{ "{:,.2f}".format(v.total) }}
                         </td>
 
-                        <!-- ESTADO DE PAGO -->
                         <td class="text-center">
                             {% if v.esta_pagada %}
                                 <span class="badge bg-success rounded-pill px-3">Pagado</span>
                             {% else %}
-                                <span class="badge bg-warning text-dark rounded-pill px-3">
-                                    Pendiente
-                                </span>
+                                <span class="badge bg-warning text-dark rounded-pill px-3">Pendiente</span>
                             {% endif %}
                         </td>
 
-                        <!-- ACCIONES -->
                         <td class="text-center">
                             <div class="btn-group shadow-sm">
                                 <a href="{{ url_for('inventory.imprimir_comprobante', id=v.id, tipo='remito') }}" 
                                    target="_blank" class="btn btn-sm btn-light border" title="Imprimir Remito">
                                     <i class="bi bi-printer text-dark"></i>
                                 </a>
-                                <!--<a href="{{ url_for('admin.pdf_remito', id=v.id) }}" 
-                                   class="btn btn-sm btn-danger" title="Descargar PDF">
-                                    <i class="bi bi-file-earmark-pdf"></i>
-                                </a>-->
-
-                                <!-- NUEVO BOTÓN DE DEVOLUCIÓN -->
                                 <button type="button" class="btn btn-sm btn-outline-danger" 
                                         onclick="abrirModalDevolucionReporte({{ v.id }})" title="Devolución">
                                     <i class="bi bi-arrow-counterclockwise"></i>
                                 </button>
-
                             </div>
                         </td>
                     </tr>
@@ -217,7 +192,6 @@
                         <td colspan="7" class="text-center py-5">
                             <i class="bi bi-search display-4 text-muted"></i>
                             <p class="mt-2 text-muted">No se encontraron ventas con los filtros aplicados.</p>
-                            <a href="{{ url_for('admin.reportes') }}" class="btn btn-sm btn-link text-pink">Limpiar filtros</a>
                         </td>
                     </tr>
                     {% endfor %}
@@ -238,7 +212,7 @@
             </div>
             <div class="modal-body bg-white">
                 <div class="alert alert-info py-2 small">
-                    <i class="bi bi-info-circle"></i> Indique la cantidad que el cliente devuelve físicamente. El sistema reintegrará el valor exacto de la venta original.
+                    <i class="bi bi-info-circle"></i> Indique la cantidad y, si lo desea, un porcentaje de descuento sobre el precio original para el reintegro.
                 </div>
                 
                 <table class="table table-sm align-middle">
@@ -247,6 +221,7 @@
                             <th>Producto (SKU)</th>
                             <th class="text-center">Vendido</th>
                             <th class="text-end">Precio Unit.</th>
+                            <th style="width: 90px;" class="text-center text-danger">% Dto.</th>
                             <th style="width: 100px;">Devuelve</th>
                             <th class="text-end">Subtotal</th>
                         </tr>
@@ -260,6 +235,12 @@
                             </td>
                             <td class="text-center">{{ d.cantidad }}</td>
                             <td class="text-end fw-bold text-muted">${{ "{:,.2f}".format(d.precio_unitario) }}</td>
+                            <td>
+                                <!-- NUEVO CAMPO DE DESCUENTO -->
+                                <input type="number" class="form-control form-control-sm input-dto-dev text-center border-danger" 
+                                       min="0" max="100" value="0" 
+                                       onchange="recalcularTotalReporte({{ v.id }})">
+                            </td>
                             <td>
                                 <input type="number" class="form-control form-control-sm input-cant-dev" 
                                        min="0" max="{{ d.cantidad }}" value="0" 
@@ -298,7 +279,6 @@
 </div>
 {% endfor %}
 
-<!-- JAVASCRIPT PARA LA LÓGICA -->
 <script>
 function abrirModalDevolucionReporte(id) {
     new bootstrap.Modal(document.getElementById('modalDevReporte' + id)).show();
@@ -307,9 +287,14 @@ function abrirModalDevolucionReporte(id) {
 function recalcularTotalReporte(id) {
     let granTotal = 0;
     document.querySelectorAll('#items-dev-' + id + ' .fila-dev-reporte').forEach(fila => {
-        const precio = parseFloat(fila.dataset.precio);
+        const precioOriginal = parseFloat(fila.dataset.precio);
         const cant = parseInt(fila.querySelector('.input-cant-dev').value) || 0;
-        const sub = precio * cant;
+        const dto = parseFloat(fila.querySelector('.input-dto-dev').value) || 0;
+
+        // Cálculo: Precio Original aplicando el descuento de devolución
+        const precioConDescuento = precioOriginal * (1 - (dto / 100));
+        const sub = precioConDescuento * cant;
+        
         fila.querySelector('.sub-dev').innerText = sub.toFixed(2);
         granTotal += sub;
     });
@@ -325,40 +310,50 @@ async function ejecutarDevolucionReporte(id) {
     const items = [];
     document.querySelectorAll('#items-dev-' + id + ' .fila-dev-reporte').forEach(fila => {
         const cant = parseInt(fila.querySelector('.input-cant-dev').value) || 0;
-        if (cant > 0) items.push({ detalle_id: fila.dataset.id, cantidad: cant });
+        const dto = parseFloat(fila.querySelector('.input-dto-dev').value) || 0;
+        
+        if (cant > 0) {
+            items.push({ 
+                detalle_id: fila.dataset.id, 
+                cantidad: cant,
+                descuento: dto
+            });
+        }
     });
 
     if (items.length === 0) return alert("Seleccione productos para devolver.");
-    if (!confirm("¿Desea procesar la devolución? El stock se reingresará automáticamente.")) return;
+    if (!confirm("¿Desea procesar la devolución? Se ajustará el stock y el saldo financiero con los descuentos aplicados.")) return;
 
-    const res = await fetch("{{ url_for('admin.procesar_devolucion') }}", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            venta_id: id,
-            items: items,
-            metodo: document.getElementById('metodo-dev-' + id).value,
-            caja_id: document.getElementById('caja-dev-' + id).value
-        })
-    });
+    try {
+        const res = await fetch("{{ url_for('admin.procesar_devolucion') }}", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                venta_id: id,
+                items: items,
+                metodo: document.getElementById('metodo-dev-' + id).value,
+                caja_id: document.getElementById('caja-dev-' + id).value
+            })
+        });
 
-    const data = await res.json();
-    if (data.status === 'ok') {
-        alert(data.message);
-        location.reload();
-    } else {
-        alert("Error: " + data.message);
+        const data = await res.json();
+        if (data.status === 'ok') {
+            alert(data.message);
+            location.reload();
+        } else {
+            alert("Error: " + data.message);
+        }
+    } catch (e) {
+        alert("Ocurrió un error al procesar la solicitud.");
     }
 }
 </script>
-
 
 <style>
     .text-pink { color: #e83e8c !important; }
     .btn-vacan { background-color: #e83e8c; color: white; border: none; }
     .btn-vacan:hover { background-color: #d81b60; color: white; }
     .card-header-vacan { background-color: #212529; border-bottom: 3px solid #e83e8c; }
-    .bg-outline-dark { background-color: transparent; }
     .border-pink { border-color: #e83e8c !important; }
     .table-hover tbody tr:hover { background-color: rgba(232, 62, 140, 0.03); }
 </style>
