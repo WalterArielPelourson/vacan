@@ -21,6 +21,7 @@ instance/
 vacan.db
 vacan.bd
 *.db
+*.bd
 *.sqlite3
 *.db-journal
 *.db-wal
@@ -36,7 +37,3 @@ Thumbs.db
 # Logs
 *.log
 
-vacan.bd
-vacan.db
-*.bd
-*.db
