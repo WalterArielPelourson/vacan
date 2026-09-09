@@ -85,7 +85,8 @@ def nuevo_repuesto():
             ubicacion=request.form.get('ubicacion'),
             rubro=request.form.get('rubro').upper(),
             subrubro=request.form.get('subrubro').upper(),
-            sucursal_id=request.form.get('sucursal_id'),    # ID de Sucursal
+            sucursal_id=request.form.get('sucursal_id'),
+            proveedor_id=request.form.get('proveedor_id') or None, # <--- ¡AQUÍ SE GUARDA EL PROVEEDOR!# ID de Sucursal
             stock=int(request.form.get('stock') or 0),
             costo=float(request.form.get('costo') or 0),
             precio=float(request.form.get('precio') or 0),
@@ -121,11 +122,14 @@ def nuevo_repuesto():
     # LÓGICA GET: Preparamos sugerencias y listas
     sugerencia = generar_proximo_sku_vacan() # La función que busca el último VAC-
     sucursales = Sucursal.query.filter_by(activo=True).all()
+    Proveedor.query.filter_by(activo=True).order_by(Proveedor.razon_social).all() # <--- ¡AQUÍ SE CONSULTA!
+    proveedores = Proveedor.query.filter_by(activo=True).order_by(Proveedor.razon_social).all()  # <--- ESTA LÍNEA ES LA QUE FALTA
     modelos = ModeloAuto.query.order_by(ModeloAuto.marca).all()
     
     return render_template('nuevo_repuesto.html', 
                            sugerencia_sku=sugerencia, 
-                           sucursales=sucursales, 
+                           sucursales=sucursales,
+                           proveedores=proveedores, # <--- ¡AQUÍ SE ENVÍA AL TEMPLATE! 
                            modelos=modelos)
 
 
