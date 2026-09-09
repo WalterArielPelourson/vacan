@@ -14,58 +14,87 @@ from datetime import datetime, timedelta
 inventory_bp = Blueprint('inventory', __name__)
 
 @inventory_bp.route('/dashboard')
+@inventory_bp.route('/buscar')
 @login_required
 def index():
-    # 1. Capturamos los filtros de la URL
+    # 1. Leemos el texto y los selectores
+    query_texto = request.args.get('q', '').strip()
     f_rubro = request.args.get('rubro')
     f_subrubro = request.args.get('subrubro')
     f_sucursal = request.args.get('sucursal_id', type=int)
-    f_stock = request.args.get('stock_status') # 'disponible' o 'agotado'
+    f_stock = request.args.get('stock_status')
     f_vehiculo = request.args.get('modelo_id', type=int)
 
-    # 2. Construimos la consulta base
-    query = Repuesto.query
+    # 2. Consulta base
+    query = Repuesto.query.outerjoin(Repuesto.autos_compatibles).outerjoin(Repuesto.sucursal)
 
-    # 3. Aplicamos filtros si el usuario eligió alguno
+    # 3. SI HAY TEXTO EN EL BUSCADOR: Filtra por palabras sin borrar los selectores
+    if query_texto:
+        palabras = query_texto.split()
+        filtros_palabras = []
+        for p in palabras:
+            termino = f"%{p}%"
+            condicion = or_(
+                Repuesto.nombre.ilike(termino),
+                Repuesto.sku.ilike(termino),
+                Repuesto.sku_vacan.ilike(termino),
+                Repuesto.codigo_oem.ilike(termino),
+                Repuesto.rubro.ilike(termino),
+                Repuesto.subrubro.ilike(termino),
+                Repuesto.ubicacion.ilike(termino),
+                Repuesto.sku_denso.ilike(termino),
+                Repuesto.sku_cromosol.ilike(termino),
+                Repuesto.sku_expoyer.ilike(termino),
+                Repuesto.sku_repuestos_jl.ilike(termino),
+                Repuesto.sku_facor.ilike(termino),
+                Repuesto.sku_altri.ilike(termino),
+                Repuesto.sku_rosparts.ilike(termino),
+                Repuesto.otros_codigos.ilike(termino),
+                ModeloAuto.marca.ilike(termino),
+                ModeloAuto.modelo.ilike(termino),
+                Sucursal.nombre.ilike(termino)
+            )
+            filtros_palabras.append(condicion)
+        query = query.filter(and_(*filtros_palabras))
+
+    # 4. SI HAY SELECTORES ELEGIDOS: Se aplican en conjunto con el texto
     if f_rubro:
-        query = query.filter_by(rubro=f_rubro)
+        query = query.filter(Repuesto.rubro == f_rubro)
     if f_subrubro:
-        query = query.filter_by(subrubro=f_subrubro)
+        query = query.filter(Repuesto.subrubro == f_subrubro)
     if f_sucursal:
-        query = query.filter_by(sucursal_id=f_sucursal)
-        
-    # --- NUEVO FILTRO DE STOCK ---
+        query = query.filter(Repuesto.sucursal_id == f_sucursal)
     if f_stock == 'disponible':
         query = query.filter(Repuesto.stock > 0)
     elif f_stock == 'agotado':
         query = query.filter(Repuesto.stock <= 0)
-    # -----------------------------
-
-    # --- FILTRO POR VEHÍCULO (RELACIÓN MUCHOS A MUCHOS) ---
     if f_vehiculo:
-        query = query.join(Repuesto.autos_compatibles).filter(ModeloAuto.id == f_vehiculo)
-        
-        
-    # Traemos los repuestos filtrados
-    repuestos = query.order_by(Repuesto.id.desc()).all()
+        query = query.filter(ModeloAuto.id == f_vehiculo)
 
-    # 4. Obtenemos datos únicos para llenar los selectores del HTML
-    rubros_unicos = db.session.query(Repuesto.rubro).distinct().all()
-    subrubros_unicos = db.session.query(Repuesto.subrubro).distinct().all()
-    # Traemos las sucursales para el filtro
+    repuestos = query.distinct().order_by(Repuesto.id.desc()).all()
+
+    # 5. Listas completas para los dropdowns
+    rubros_unicos = [r[0] for r in db.session.query(Repuesto.rubro).distinct().all() if r[0]]
+    subrubros_unicos = [s[0] for s in db.session.query(Repuesto.subrubro).distinct().all() if s[0]]
     sucursales = Sucursal.query.filter_by(activo=True).all()
-    vehiculos = ModeloAuto.query.order_by(ModeloAuto.marca).all()
-    
-    # --- APLICACIÓN DEL PUNTO 3: Sincronización de nombres con el HTML ---
-    # Cambiamos los nombres de las variables para que el HTML los reconozca
-    return render_template('index.html', 
+    vehiculos = ModeloAuto.query.order_by(ModeloAuto.marca, ModeloAuto.modelo).all()
+
+    # 6. Enviamos el diccionario "filtros" y "busqueda" para mantener los valores en pantalla
+    return render_template('index.html',
                            repuestos=repuestos,
-                           rubros_list=[r[0] for r in rubros_unicos if r[0]],
-                           subrubros_list=[s[0] for s in subrubros_unicos if s[0]],
+                           rubros_list=rubros_unicos,
+                           subrubros_list=subrubros_unicos,
                            sucursales_list=sucursales,
                            vehiculos_list=vehiculos,
-                           busqueda=None)
-    
+                           busqueda=query_texto,
+                           filtros={
+                               'q': query_texto,
+                               'rubro': f_rubro,
+                               'subrubro': f_subrubro,
+                               'sucursal_id': f_sucursal,
+                               'stock_status': f_stock,
+                               'modelo_id': f_vehiculo
+                           })
     
     
 @inventory_bp.route('/repuesto/nuevo', methods=['GET', 'POST'])

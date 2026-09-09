@@ -2944,3 +2944,116 @@ def procesar_devolucion():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
+    
+    
+from sqlalchemy.orm import joinedload
+
+@admin_bp.route('/reportes/rentabilidad-ventas')
+@login_required
+@roles_required('admin', 'superadmin')
+def reporte_rentabilidad_ventas():
+    # 1. Filtros
+    desde_str = request.args.get('desde', date.today().replace(day=1).strftime('%Y-%m-%d'))
+    hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
+    f_sucursal = request.args.get('sucursal_id', type=int)
+    f_cliente = request.args.get('cliente_id', type=int)
+
+    desde = datetime.strptime(desde_str, '%Y-%m-%d')
+    hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+
+    # Si es admin de sucursal, restringir a su local
+    if current_user.rol == 'admin':
+        f_sucursal = current_user.sucursal_id
+
+    # 2. Consulta de Ventas con detalles y repuesto vinculado
+    query = Venta.query.options(
+        joinedload(Venta.cliente),
+        joinedload(Venta.sucursal),
+        joinedload(Venta.detalles).joinedload(DetalleVenta.repuesto)
+    ).filter(Venta.fecha.between(desde, hasta))
+
+    if f_sucursal:
+        query = query.filter(Venta.sucursal_id == f_sucursal)
+    if f_cliente:
+        query = query.filter(Venta.cliente_id == f_cliente)
+
+    ventas = query.order_by(Venta.fecha.desc()).all()
+
+    # 3. Procesamiento ítem por ítem para el detalle
+    items_reporte = []
+    total_venta_global = 0.0
+    total_costo_global = 0.0
+    total_unidades = 0
+
+    for v in ventas:
+        for d in v.detalles:
+            cant = d.cantidad or 0
+            precio_u = d.precio_unitario or 0.0
+            
+            # Si el repuesto existe en la base, tomamos su costo registrado; si no, 0
+            costo_u = (d.repuesto.costo if d.repuesto and d.repuesto.costo else 0.0)
+            
+            subtotal_venta = cant * precio_u
+            subtotal_costo = cant * costo_u
+            ganancia_item = subtotal_venta - subtotal_costo
+
+            # Margen = (Ganancia / Costo) * 100 si costo > 0; sino 100%
+            if subtotal_costo > 0:
+                margen_porc = round(((subtotal_venta / subtotal_costo) - 1) * 100, 2)
+            elif subtotal_venta > 0:
+                margen_porc = 100.0
+            else:
+                margen_porc = 0.0
+
+            items_reporte.append({
+                'fecha': v.fecha,
+                'venta_id': v.id,
+                'tipo_comp': v.tipo_comprobante or 'REMITO',
+                'cliente': v.cliente.razon_social if v.cliente else 'Consumidor Final',
+                'sucursal': v.sucursal.nombre if v.sucursal else 'S/D',
+                'sku': d.repuesto.sku if d.repuesto else 'MANUAL',
+                'nombre': d.nombre_item or (d.repuesto.nombre if d.repuesto else 'S/D'),
+                'cantidad': cant,
+                'costo_unitario': costo_u,
+                'costo_total': subtotal_costo,
+                'precio_unitario': precio_u,
+                'venta_total': subtotal_venta,
+                'ganancia': ganancia_item,
+                'margen_porc': margen_porc
+            })
+
+            total_venta_global += subtotal_venta
+            total_costo_global += subtotal_costo
+            total_unidades += cant
+
+    # 4. Cálculos Globales
+    ganancia_global = total_venta_global - total_costo_global
+    if total_costo_global > 0:
+        margen_global_porc = round(((total_venta_global / total_costo_global) - 1) * 100, 2)
+    elif total_venta_global > 0:
+        margen_global_porc = 100.0
+    else:
+        margen_global_porc = 0.0
+
+    # Margen sobre venta (Markup vs Margin)
+    margen_sobre_venta = round((ganancia_global / total_venta_global * 100), 2) if total_venta_global > 0 else 0.0
+
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+    clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
+
+    return render_template('admin/reporte_rentabilidad_ventas.html',
+                           items=items_reporte,
+                           total_venta=total_venta_global,
+                           total_costo=total_costo_global,
+                           ganancia_global=ganancia_global,
+                           margen_global=margen_global_porc,
+                           margen_sobre_venta=margen_sobre_venta,
+                           total_unidades=total_unidades,
+                           sucursales=sucursales,
+                           clientes=clientes,
+                           filtros={
+                               'desde': desde_str,
+                               'hasta': hasta_str,
+                               'sucursal_id': f_sucursal,
+                               'cliente_id': f_cliente
+                           })

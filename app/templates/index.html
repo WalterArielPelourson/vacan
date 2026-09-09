@@ -25,100 +25,7 @@
     
     /* Permitir que la descripción use dos líneas si es necesario */
     .desc-cell { white-space: normal !important; line-height: 1.1; }
-</style>
 
-<div class="row mb-3 align-items-center">
-    <!-- BUSCADOR PRINCIPAL -->
-    <div class="col-md-5">
-        <form action="{{ url_for('inventory.buscar') }}" method="GET" class="d-flex shadow-sm">
-            <input class="form-control me-2 border-dark form-control-sm" type="search" name="q" 
-                placeholder="Nombre, marca o cualquier código..." value="{{ busqueda or '' }}">
-            <button class="btn btn-dark btn-sm fw-bold px-4" type="submit">BUSCAR</button>
-        </form>
-    </div>
-
-    {% if current_user.rol in ['admin', 'superadmin'] %}
-    <div class="col-md-7 text-md-end">
-        <a href="{{ url_for('inventory.nuevo_repuesto') }}" class="btn btn-vacan shadow-sm btn-sm fw-bold text-uppercase">
-            <i class="bi bi-plus-circle"></i> Nuevo Repuesto
-        </a>
-    </div>
-    {% endif %}
-</div>
-
-<!-- BARRA DE FILTROS BLACK PREMIUM AMPLIADA -->
-<div class="card mb-4 border-0 shadow-lg" style="background-color: #000; border-radius: 15px; padding: 25px 0;">
-    <div class="card-body">
-        <form action="{{ url_for('inventory.index') }}" method="GET" class="row g-3 justify-content-center align-items-end mx-0">
-            
-            <!-- RUBRO -->
-            <div class="col-md-2">
-                <label class="filter-label-dark"><i class="bi bi-tag-fill me-1"></i> RUBRO</label>
-                <select name="rubro" class="form-select filter-select-dark" onchange="this.form.submit()">
-                    <option value="">-- Todos --</option>
-                    {% for rub in rubros_list %}
-                    <option value="{{ rub }}" {% if request.args.get('rubro') == rub %}selected{% endif %}>{{ rub }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- SUB-RUBRO -->
-            <div class="col-md-2">
-                <label class="filter-label-dark"><i class="bi bi-layers-half me-1"></i> SUB-RUBRO</label>
-                <select name="subrubro" class="form-select filter-select-dark" onchange="this.form.submit()">
-                    <option value="">-- Todos --</option>
-                    {% for sub in subrubros_list %}
-                    <option value="{{ sub }}" {% if request.args.get('subrubro') == sub %}selected{% endif %}>{{ sub }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- VEHÍCULO (COMPATIBILIDAD) - NUEVO -->
-            <div class="col-md-2">
-                <label class="filter-label-dark"><i class="bi bi-car-front-fill me-1"></i> VEHÍCULO</label>
-                <select name="modelo_id" class="form-select filter-select-dark" onchange="this.form.submit()">
-                    <option value="">-- Buscar Vehículo --</option>
-                    {% for v in vehiculos_list %}
-                    <option value="{{ v.id }}" {% if request.args.get('modelo_id')|int == v.id %}selected{% endif %}>
-                        {{ v.marca }} {{ v.modelo }} ({{ v.anio_inicio or '' }})
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- SUCURSAL -->
-            <div class="col-md-2">
-                <label class="filter-label-dark"><i class="bi bi-shop me-1"></i> SUCURSAL</label>
-                <select name="sucursal_id" class="form-select filter-select-dark" onchange="this.form.submit()">
-                    <option value="">-- Sede --</option>
-                    {% for suc in sucursales_list %}
-                    <option value="{{ suc.id }}" {% if request.args.get('sucursal_id')|int == suc.id %}selected{% endif %}>{{ suc.nombre }}</option>
-                    {% endfor %}
-                </select>
-            </div>
-
-            <!-- STOCK -->
-            <div class="col-md-2">
-                <label class="filter-label-dark"><i class="bi bi-check-circle-fill me-1"></i> STOCK</label>
-                <select name="stock_status" class="form-select filter-select-dark" onchange="this.form.submit()">
-                    <option value="">-- Mostrar Todo --</option>
-                    <option value="disponible" {% if request.args.get('stock_status') == 'disponible' %}selected{% endif %}>Con Stock</option>
-                    <option value="agotado" {% if request.args.get('stock_status') == 'agotado' %}selected{% endif %}>Agotado</option>
-                </select>
-            </div>
-
-            <!-- BOTÓN LIMPIAR -->
-            <div class="col-md-1">
-                <a href="{{ url_for('inventory.index') }}" class="btn btn-clean-dark w-100 shadow-sm" title="Limpiar Filtros">
-                    <i class="bi bi-trash3-fill"></i>
-                </a>
-            </div>
-
-        </form>
-    </div>
-</div>
-
-<style>
     /* Estilos Dark Premium Reforzados */
     .filter-label-dark {
         font-size: 0.65rem;
@@ -130,8 +37,9 @@
         letter-spacing: 1.2px;
     }
 
+    .filter-input-dark,
     .filter-select-dark {
-        background-color: #111 !important; /* Más oscuro aún */
+        background-color: #111 !important;
         color: #ffffff !important;
         border: 1px solid #333 !important;
         font-size: 0.78rem !important;
@@ -141,9 +49,13 @@
         transition: all 0.3s ease;
     }
 
-    .filter-select-dark:hover {
+    .filter-input-dark:focus,
+    .filter-select-dark:hover,
+    .filter-select-dark:focus {
         border-color: var(--vacan-pink) !important;
         background-color: #1a1a1a !important;
+        color: #ffffff !important;
+        box-shadow: 0 0 0 0.2rem rgba(255, 0, 127, 0.25) !important;
     }
 
     .btn-clean-dark {
@@ -161,11 +73,135 @@
         border-color: #ff4d4d;
     }
 
+    /* Botón de filtrar dentro de la barra */
+    .btn-filter-dark {
+        background-color: var(--vacan-pink);
+        color: #ffffff;
+        border: 1px solid var(--vacan-pink);
+        border-radius: 10px;
+        padding: 0.55rem 0.8rem;
+        font-weight: 700;
+        font-size: 0.78rem;
+        transition: all 0.3s ease;
+    }
+
+    .btn-filter-dark:hover {
+        background-color: #d4006a;
+        color: white;
+        border-color: #d4006a;
+    }
+
     /* Ajuste de flechitas para selects oscuros */
     .form-select {
         background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ff007f' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
     }
+
+    .btn-vacan { background-color: var(--vacan-pink); color: white; border: none; }
+    .btn-vacan:hover { background-color: #d4006a; color: white; }
+    .x-small { font-size: 0.6rem; letter-spacing: 0.5px; }
+    .table-hover tbody tr:hover { background-color: rgba(255, 0, 127, 0.02); }
+    .card-header-vacan { background: linear-gradient(45deg, #1a1a1a, #333); color: white; }
 </style>
+
+<!-- ENCABEZADO SUPERIOR CON BOTÓN NUEVO REPUESTO -->
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h5 class="mb-0 text-uppercase fw-bold text-dark">
+            <i class="bi bi-box-seam text-pink me-2"></i>Gestión de Stock
+        </h5>
+        <small class="text-muted">Inventario general de repuestos y autopartes</small>
+    </div>
+
+    {% if current_user.rol in ['admin', 'superadmin'] %}
+    <div>
+        <a href="{{ url_for('inventory.nuevo_repuesto') }}" class="btn btn-vacan shadow-sm btn-sm fw-bold text-uppercase">
+            <i class="bi bi-plus-circle me-1"></i> Nuevo Repuesto
+        </a>
+    </div>
+    {% endif %}
+</div>
+
+<!-- BARRA DE FILTROS BLACK PREMIUM AMPLIADA (TODO LINEAL EN CONJUNTO) -->
+<div class="card mb-4 border-0 shadow-lg" style="background-color: #000; border-radius: 15px; padding: 18px 0;">
+    <div class="card-body px-3">
+        <form action="{{ url_for('inventory.index') }}" method="GET" class="row g-2 align-items-end mx-0">
+        
+            <!-- 1. BUSCADOR PRINCIPAL POR TEXTO -->
+            <div class="col-12 col-xl-3 col-lg-3 col-md-12">
+                <label class="filter-label-dark"><i class="bi bi-search me-1"></i> Búsqueda por texto</label>
+                <input class="form-control filter-input-dark" type="search" name="q" 
+                    placeholder="Nombre, marca, SKU o código..." value="{{ busqueda or '' }}">
+            </div>
+
+            <!-- 2. RUBRO -->
+            <div class="col-6 col-xl-2 col-lg-2 col-md-3">
+                <label class="filter-label-dark"><i class="bi bi-tag-fill me-1"></i> RUBRO</label>
+                <select name="rubro" class="form-select filter-select-dark">
+                    <option value="">-- Todos --</option>
+                    {% for rub in rubros_list %}
+                    <option value="{{ rub }}" {% if (filtros and filtros.rubro == rub) or request.args.get('rubro') == rub %}selected{% endif %}>{{ rub }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 3. SUB-RUBRO -->
+            <div class="col-6 col-xl-2 col-lg-2 col-md-3">
+                <label class="filter-label-dark"><i class="bi bi-layers-half me-1"></i> SUB-RUBRO</label>
+                <select name="subrubro" class="form-select filter-select-dark">
+                    <option value="">-- Todos --</option>
+                    {% for sub in subrubros_list %}
+                    <option value="{{ sub }}" {% if (filtros and filtros.subrubro == sub) or request.args.get('subrubro') == sub %}selected{% endif %}>{{ sub }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 4. VEHÍCULO (COMPATIBILIDAD) -->
+            <div class="col-6 col-xl-2 col-lg-2 col-md-3">
+                <label class="filter-label-dark"><i class="bi bi-car-front-fill me-1"></i> VEHÍCULO</label>
+                <select name="modelo_id" class="form-select filter-select-dark">
+                    <option value="">-- Vehículo --</option>
+                    {% for v in vehiculos_list %}
+                    <option value="{{ v.id }}" {% if (filtros and filtros.modelo_id == v.id) or request.args.get('modelo_id')|int == v.id %}selected{% endif %}>
+                        {{ v.marca }} {{ v.modelo }} ({{ v.anio_inicio or '' }})
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 5. SUCURSAL -->
+            <div class="col-6 col-xl-1 col-lg-1 col-md-3">
+                <label class="filter-label-dark"><i class="bi bi-shop me-1"></i> SUCURSAL</label>
+                <select name="sucursal_id" class="form-select filter-select-dark">
+                    <option value="">-- Sede --</option>
+                    {% for suc in sucursales_list %}
+                    <option value="{{ suc.id }}" {% if (filtros and filtros.sucursal_id == suc.id) or request.args.get('sucursal_id')|int == suc.id %}selected{% endif %}>{{ suc.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- 6. STOCK -->
+            <div class="col-6 col-xl-1 col-lg-1 col-md-4">
+                <label class="filter-label-dark"><i class="bi bi-check-circle-fill me-1"></i> STOCK</label>
+                <select name="stock_status" class="form-select filter-select-dark">
+                    <option value="">-- Todo --</option>
+                    <option value="disponible" {% if (filtros and filtros.stock_status == 'disponible') or request.args.get('stock_status') == 'disponible' %}selected{% endif %}>Con Stock</option>
+                    <option value="agotado" {% if (filtros and filtros.stock_status == 'agotado') or request.args.get('stock_status') == 'agotado' %}selected{% endif %}>Agotado</option>
+                </select>
+            </div>
+
+            <!-- 7. BOTÓN FILTRAR Y BOTÓN LIMPIAR -->
+            <div class="col-12 col-xl-1 col-lg-1 col-md-8 d-flex gap-1">
+                <button type="submit" class="btn btn-filter-dark w-100 shadow-sm" title="Aplicar búsqueda y filtros">
+                    <i class="bi bi-funnel-fill"></i>
+                </button>
+                <a href="{{ url_for('inventory.index') }}" class="btn btn-clean-dark shadow-sm px-3" title="Limpiar Filtros">
+                    <i class="bi bi-trash3-fill"></i>
+                </a>
+            </div>
+
+        </form>
+    </div>
+</div>
 
 {% if busqueda %}
 <div class="card border-info mb-3 shadow-sm" style="background-color: #f0faff;">
@@ -268,46 +304,4 @@ function buscarAfuera(query) {
     sitios.forEach(url => window.open(url, '_blank'));
 }
 </script>
-
-<style>
-    .btn-vacan { background-color: var(--vacan-pink); color: white; border: none; }
-    .btn-vacan:hover { background-color: #d4006a; color: white; }
-    .x-small { font-size: 0.6rem; letter-spacing: 0.5px; }
-    .table-hover tbody tr:hover { background-color: rgba(255, 0, 127, 0.02); }
-    .card-header-vacan { background: linear-gradient(45deg, #1a1a1a, #333); color: white; }
-
-function buscarYOrdenar() {
-    let input = document.getElementById("miBuscador").value.toLowerCase();
-    let table = document.querySelector("table tbody");
-    let rows = Array.from(table.querySelectorAll("tr"));
-
-    // 1. Filtrar y asignar puntaje
-    let resultados = rows.map(row => {
-        let texto = row.innerText.toLowerCase();
-        let puntaje = 0;
-
-        if (texto.includes(input)) {
-            // Si es igual exacto o empieza con el texto, puntaje alto
-            if (texto.startsWith(input)) {
-                puntaje = 2; 
-            } else {
-                puntaje = 1; // Lo contiene pero no al principio
-            }
-        }
-        return { row, puntaje };
-    });
-
-    // 2. Ordenar por puntaje (de mayor a menor)
-    resultados.sort((a, b) => b.puntaje - a.puntaje);
-
-    // 3. Volver a mostrar en la tabla
-    table.innerHTML = "";
-    resultados.forEach(item => {
-        if (item.puntaje > 0 || input === "") {
-            table.appendChild(item.row);
-        }
-    });
-}
-
-</style>
 {% endblock %}

@@ -1,0 +1,182 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<style>
+    .kpi-card {
+        border-radius: 12px;
+        padding: 1rem;
+        background: #111;
+        border: 1px solid #222;
+        color: white;
+    }
+    .kpi-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; color: #888; font-weight: 700; }
+    .kpi-value { font-size: 1.4rem; font-weight: 800; }
+    .table-rentabilidad { font-size: 0.74rem !important; }
+    .table-rentabilidad th { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; }
+</style>
+
+<div class="container-fluid px-2">
+    <!-- ENCABEZADO -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h5 class="mb-0 fw-bold text-uppercase text-dark">
+                <i class="bi bi-graph-up-arrow text-pink me-2"></i>Rentabilidad por Repuesto Vendido
+            </h5>
+            <small class="text-muted">Análisis comparativo de Costo vs Venta y Margen de Utilidad</small>
+        </div>
+    </div>
+
+    <!-- BARRA DE FILTROS SUPERIOR -->
+    <div class="card mb-4 border-0 shadow-sm" style="background-color: #000; border-radius: 12px; padding: 12px 0;">
+        <div class="card-body px-3 py-1">
+            <form method="GET" action="{{ url_for('admin.reporte_rentabilidad_ventas') }}" class="row g-2 align-items-end mx-0">
+                <div class="col-6 col-md-2">
+                    <label class="form-label text-white small mb-1 fw-bold">DESDE</label>
+                    <input type="date" name="desde" value="{{ filtros.desde }}" class="form-control form-control-sm bg-dark text-white border-secondary">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label text-white small mb-1 fw-bold">HASTA</label>
+                    <input type="date" name="hasta" value="{{ filtros.hasta }}" class="form-control form-control-sm bg-dark text-white border-secondary">
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label text-white small mb-1 fw-bold">SUCURSAL</label>
+                    <select name="sucursal_id" class="form-select form-select-sm bg-dark text-white border-secondary">
+                        <option value="">Todas las Sedes</option>
+                        {% for s in sucursales %}
+                        <option value="{{ s.id }}" {% if filtros.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label text-white small mb-1 fw-bold">CLIENTE</label>
+                    <select name="cliente_id" class="form-select form-select-sm bg-dark text-white border-secondary">
+                        <option value="">Todos los Clientes</option>
+                        {% for c in clientes %}
+                        <option value="{{ c.id }}" {% if filtros.cliente_id == c.id %}selected{% endif %}>{{ c.razon_social }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-12 col-md-2 d-flex gap-1">
+                    <button type="submit" class="btn btn-warning btn-sm fw-bold w-100"><i class="bi bi-funnel-fill me-1"></i> Filtrar</button>
+                    <a href="{{ url_for('admin.reporte_rentabilidad_ventas') }}" class="btn btn-outline-light btn-sm"><i class="bi bi-undo"></i></a>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TARJETAS TOTALIZADORAS GLOBALES (KPIs) -->
+    <div class="row g-2 mb-4">
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card shadow-sm">
+                <div class="kpi-title"><i class="bi bi-box-seam me-1 text-info"></i> Unidades</div>
+                <div class="kpi-value text-info">{{ total_unidades }}</div>
+                <small class="text-muted">Artículos vendidos</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card shadow-sm">
+                <div class="kpi-title"><i class="bi bi-cart-check me-1 text-primary"></i> Total Vendido</div>
+                <div class="kpi-value text-primary">${{ "{:,.2f}".format(total_venta) }}</div>
+                <small class="text-muted">Facturación Bruta</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-4 col-xl-2">
+            <div class="kpi-card shadow-sm">
+                <div class="kpi-title"><i class="bi bi-receipt me-1 text-danger"></i> Costo Total</div>
+                <div class="kpi-value text-danger">${{ "{:,.2f}".format(total_costo) }}</div>
+                <small class="text-muted">Costo mercadería</small>
+            </div>
+        </div>
+        <div class="col-6 col-md-6 col-xl-3">
+            <div class="kpi-card shadow-sm border-success">
+                <div class="kpi-title"><i class="bi bi-cash-stack me-1 text-success"></i> Ganancia Neta ($)</div>
+                <div class="kpi-value text-success">${{ "{:,.2f}".format(ganancia_global) }}</div>
+                <small class="text-muted">Venta (-) Costo</small>
+            </div>
+        </div>
+        <div class="col-12 col-md-6 col-xl-3">
+            <div class="kpi-card shadow-sm border-warning">
+                <div class="kpi-title"><i class="bi bi-percent me-1 text-warning"></i> Rentabilidad Global</div>
+                <div class="kpi-value {% if margen_global >= 30 %}text-success{% elif margen_global >= 15 %}text-warning{% else %}text-danger{% endif %}">
+                    {{ margen_global }}%
+                </div>
+                <small class="text-muted">Margen s/ Venta: <strong>{{ margen_sobre_venta }}%</strong></small>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLA DETALLE POR REPUESTO VENDIDO -->
+    <div class="card shadow-sm border-0">
+        <div class="card-header bg-dark text-white py-2 px-3 d-flex justify-content-between align-items-center">
+            <span class="small fw-bold text-uppercase">Detalle de Repuestos Vendidos ({{ items|length }} registros)</span>
+            <button onclick="window.print()" class="btn btn-sm btn-outline-light py-0"><i class="bi bi-printer me-1"></i> Imprimir</button>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover table-striped mb-0 align-middle table-rentabilidad">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 7%;">Fecha</th>
+                            <th style="width: 6%;">Comp #</th>
+                            <th style="width: 11%;">Cliente</th>
+                            <th style="width: 7%;">Sucursal</th>
+                            <th style="width: 8%;">SKU</th>
+                            <th style="width: 17%;">Descripción</th>
+                            <th style="width: 4%;" class="text-center">Cant</th>
+                            <th style="width: 7%;" class="text-end">Costo U.</th>
+                            <th style="width: 8%;" class="text-end text-danger">Costo Tot.</th>
+                            <th style="width: 7%;" class="text-end">Venta U.</th>
+                            <th style="width: 8%;" class="text-end text-primary">Venta Tot.</th>
+                            <th style="width: 8%;" class="text-end text-success">Utilidad ($)</th>
+                            <th style="width: 6%;" class="text-center">Rent. (%)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for it in items %}
+                        <tr>
+                            <td>{{ it.fecha.strftime('%d/%m/%Y') }}</td>
+                            <td><span class="badge bg-secondary">{{ it.tipo_comp[:3] }} #{{ it.venta_id }}</span></td>
+                            <td class="text-truncate" style="max-width: 120px;" title="{{ it.cliente }}">{{ it.cliente }}</td>
+                            <td>{{ it.sucursal }}</td>
+                            <td><span class="badge bg-dark">{{ it.sku }}</span></td>
+                            <td class="text-truncate fw-bold" style="max-width: 180px;" title="{{ it.nombre }}">{{ it.nombre }}</td>
+                            <td class="text-center fw-bold">{{ it.cantidad }}</td>
+                            <td class="text-end text-muted">${{ "{:,.2f}".format(it.costo_unitario) }}</td>
+                            <td class="text-end text-danger">${{ "{:,.2f}".format(it.costo_total) }}</td>
+                            <td class="text-end text-muted">${{ "{:,.2f}".format(it.precio_unitario) }}</td>
+                            <td class="text-end text-primary fw-bold">${{ "{:,.2f}".format(it.venta_total) }}</td>
+                            <td class="text-end fw-bold {% if it.ganancia >= 0 %}text-success{% else %}text-danger{% endif %}">
+                                ${{ "{:,.2f}".format(it.ganancia) }}
+                            </td>
+                            <td class="text-center">
+                                <span class="badge {% if it.margen_porc >= 35 %}bg-success{% elif it.margen_porc >= 15 %}bg-warning text-dark{% elif it.margen_porc >= 0 %}bg-info text-dark{% else %}bg-danger{% endif %}">
+                                    {{ it.margen_porc }}%
+                                </span>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="13" class="text-center py-5 text-muted fst-italic">
+                                No se registraron ventas en el período seleccionado.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot class="table-dark fw-bold">
+                        <tr>
+                            <td colspan="6" class="text-uppercase text-end">TOTALES DEL PERÍODO:</td>
+                            <td class="text-center text-info">{{ total_unidades }}</td>
+                            <td></td>
+                            <td class="text-end text-danger">${{ "{:,.2f}".format(total_costo) }}</td>
+                            <td></td>
+                            <td class="text-end text-primary">${{ "{:,.2f}".format(total_venta) }}</td>
+                            <td class="text-end text-success">${{ "{:,.2f}".format(ganancia_global) }}</td>
+                            <td class="text-center text-warning">{{ margen_global }}%</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
