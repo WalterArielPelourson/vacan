@@ -101,6 +101,35 @@
     .x-small { font-size: 0.6rem; letter-spacing: 0.5px; }
     .table-hover tbody tr:hover { background-color: rgba(255, 0, 127, 0.02); }
     .card-header-vacan { background: linear-gradient(45deg, #1a1a1a, #333); color: white; }
+
+    /* ESTILOS NUEVOS PARA ENCABEZADOS ORDENABLES (OPCIÓN A) */
+    .sortable-th {
+        cursor: pointer;
+        user-select: none;
+        transition: background-color 0.2s ease;
+    }
+    .sortable-th:hover {
+        background-color: #ececec !important;
+        color: var(--vacan-pink) !important;
+    }
+    .sort-icon {
+        font-size: 0.65rem;
+        margin-left: 2px;
+        opacity: 0.45;
+        transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .sortable-th:hover .sort-icon {
+        opacity: 1;
+        color: var(--vacan-pink);
+    }
+    .sortable-th.active-sort {
+        color: var(--vacan-pink) !important;
+        background-color: #f7e6ef !important;
+    }
+    .sortable-th.active-sort .sort-icon {
+        opacity: 1;
+        color: var(--vacan-pink);
+    }
 </style>
 
 <!-- ENCABEZADO SUPERIOR CON BOTÓN NUEVO REPUESTO -->
@@ -215,24 +244,72 @@
 <div class="card shadow-sm border-0">
     <div class="card-header card-header-vacan py-1 px-3 d-flex justify-content-between align-items-center">
         <h6 class="mb-0 text-uppercase small fw-bold">Inventario Vacan</h6>
-        <small class="text-white-50">Total: {{ repuestos|length }} ítems</small>
+        <div>
+            <span class="badge bg-secondary me-2"><i class="bi bi-arrow-down-up me-1"></i>Haz clic en cualquier columna para ordenar</span>
+            <small class="text-white-50">Total: {{ repuestos|length }} ítems</small>
+        </div>
     </div>
     <div class="card-body">
         <div class="table-responsive">
-            <table class="table table-hover mb-0 align-middle">
+            <table class="table table-hover mb-0 align-middle" id="tablaStockVacan">
                 <thead class="table-light">
                     <tr class="text-uppercase text-muted">
-                        <th style="width: 7%;">SKU Prov</th>
-                        <th style="width: 7%;">Maestro</th>
-                        <th style="width: 10%;">Proveedor</th>
-                        <th style="width: 18%;">Descripción / Rubro</th>
-                        <th style="width: 8%;">Sucursal</th>
-                        <th style="width: 8%;">Ubicación</th>
-                        <th style="width: 5%;" class="text-center">Stock</th>
-                        <th style="width: 7%;" class="text-end">Cost s/I</th>
-                        <th style="width: 7%;" class="text-end text-danger">Cost c/I</th>
-                        <th style="width: 7%;" class="text-end">Vent s/I</th>
-                        <th style="width: 8%;" class="text-end text-primary">Vent c/I</th>
+                        <!-- COLUMNA 0: SKU PROV -->
+                        <th style="width: 7%;" class="sortable-th" onclick="ordenarTabla(0, 'str')">
+                            SKU Prov <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 1: MAESTRO -->
+                        <th style="width: 7%;" class="sortable-th" onclick="ordenarTabla(1, 'str')">
+                            Maestro <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 2: PROVEEDOR -->
+                        <th style="width: 10%;" class="sortable-th" onclick="ordenarTabla(2, 'str')">
+                            Proveedor <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 3: DESCRIPCIÓN -->
+                        <th style="width: 18%;" class="sortable-th" onclick="ordenarTabla(3, 'str')">
+                            Descripción / Rubro <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 4: SUCURSAL -->
+                        <th style="width: 8%;" class="sortable-th" onclick="ordenarTabla(4, 'str')">
+                            Sucursal <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 5: UBICACIÓN -->
+                        <th style="width: 8%;" class="sortable-th" onclick="ordenarTabla(5, 'str')">
+                            Ubicación <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 6: STOCK (NUMÉRICO) -->
+                        <th style="width: 5%;" class="text-center sortable-th" onclick="ordenarTabla(6, 'num')">
+                            Stock <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 7: COST S/I (MONEDA) -->
+                        <th style="width: 7%;" class="text-end sortable-th" onclick="ordenarTabla(7, 'currency')">
+                            Cost s/I <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 8: COST C/I (MONEDA) -->
+                        <th style="width: 7%;" class="text-end text-danger sortable-th" onclick="ordenarTabla(8, 'currency')">
+                            Cost c/I <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 9: VENT S/I (MONEDA) -->
+                        <th style="width: 7%;" class="text-end sortable-th" onclick="ordenarTabla(9, 'currency')">
+                            Vent s/I <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 10: VENT C/I (MONEDA) -->
+                        <th style="width: 8%;" class="text-end text-primary sortable-th" onclick="ordenarTabla(10, 'currency')">
+                            Vent c/I <i class="bi bi-arrow-down-up sort-icon"></i>
+                        </th>
+                        
+                        <!-- COLUMNA 11: ACCIONES (NO ORDENABLE) -->
                         <th style="width: 8%;" class="text-center">Acción</th> 
                     </tr>
                 </thead>
@@ -302,6 +379,73 @@ function buscarAfuera(query) {
         `https://www.expoyerweb.com.ar/catalogo`
     ];
     sitios.forEach(url => window.open(url, '_blank'));
+}
+
+// =================================================================
+// MOTOR DE ORDENAMIENTO INSTANTÁNEO EN TABLA (OPCIÓN A)
+// =================================================================
+let ordenActual = { columna: -1, asc: true };
+
+function ordenarTabla(colIdx, tipo) {
+    const table = document.getElementById("tablaStockVacan");
+    const tbody = table.querySelector("tbody");
+    const rows = Array.from(tbody.querySelectorAll("tr"));
+
+    // Si la tabla está vacía o tiene el mensaje de "No se encontraron artículos", no hace nada
+    if (rows.length === 1 && rows[0].querySelector("td[colspan]")) return;
+
+    // Determinar dirección: si toca la misma columna invierte; si es nueva, empieza ascendente
+    let asc = true;
+    if (ordenActual.columna === colIdx) {
+        asc = !ordenActual.asc;
+    }
+    ordenActual = { columna: colIdx, asc: asc };
+
+    // Actualizar iconos de todos los th
+    const ths = table.querySelectorAll("thead th.sortable-th");
+    ths.forEach(th => {
+        th.classList.remove("active-sort");
+        const icon = th.querySelector(".sort-icon");
+        if (icon) {
+            icon.className = "bi bi-arrow-down-up sort-icon";
+        }
+    });
+
+    const thActivo = ths[colIdx];
+    if (thActivo) {
+        thActivo.classList.add("active-sort");
+        const icon = thActivo.querySelector(".sort-icon");
+        if (icon) {
+            if (tipo === 'num' || tipo === 'currency') {
+                icon.className = asc ? "bi bi-sort-numeric-down sort-icon" : "bi bi-sort-numeric-up-alt sort-icon";
+            } else {
+                icon.className = asc ? "bi bi-sort-alpha-down sort-icon" : "bi bi-sort-alpha-up-alt sort-icon";
+            }
+        }
+    }
+
+    // Ordenar las filas
+    rows.sort((rowA, rowB) => {
+        const cellA = rowA.children[colIdx];
+        const cellB = rowB.children[colIdx];
+        if (!cellA || !cellB) return 0;
+
+        let valA = cellA.innerText.trim();
+        let valB = cellB.innerText.trim();
+
+        if (tipo === 'num' || tipo === 'currency') {
+            // Limpiar símbolos de moneda, comas de miles y formatear punto decimal
+            let numA = parseFloat(valA.replace(/[^0-9.-]+/g, "")) || 0;
+            let numB = parseFloat(valB.replace(/[^0-9.-]+/g, "")) || 0;
+            return asc ? numA - numB : numB - numA;
+        } else {
+            // Comparación de texto alfabético
+            return asc ? valA.localeCompare(valB, 'es', { numeric: true }) : valB.localeCompare(valA, 'es', { numeric: true });
+        }
+    });
+
+    // Reinyectar filas ordenadas en el DOM
+    rows.forEach(r => tbody.appendChild(r));
 }
 </script>
 {% endblock %}
