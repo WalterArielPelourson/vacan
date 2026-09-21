@@ -20,7 +20,7 @@
 <div class="row g-3">
     <!-- COLUMNA IZQUIERDA: BÚSQUEDA Y CARGA -->
     <div class="col-md-4">
-        <div class="card shadow-sm border-0 mb-3">
+        <div class="card shadow-sm border-0 mb-3" id="card_seleccion_cliente">
             <div class="card-header bg-dark text-white fw-bold small text-uppercase">1. Selección de Cliente</div>
             <div class="card-body p-3 bg-light text-dark">
                 
@@ -61,49 +61,22 @@
                 </div>
             </div>
         </div>
-        <!-- (Aquí continuaría la parte de Cargar Productos) -->
-        <!--<div class="card shadow-sm border-0">
+
+        <div class="card shadow-sm border-0">
             <div class="card-header bg-dark text-white fw-bold small text-uppercase">2. Cargar Productos / Servicios</div>
             <div class="card-body p-3 text-dark">
-                <label class="small fw-bold">Buscar en Stock:</label>
+                <label class="small fw-bold">Buscar en Stock Local:</label>
                 <div class="input-group mb-3">
                     <span class="input-group-text"><i class="bi bi-search"></i></span>
-                    <input type="text" id="busqueda_prod" class="form-control" placeholder="Nombre o SKU..." onkeyup="filtrarProductos(this.value)">
+                    <input type="text" id="busqueda_prod" class="form-control" placeholder="Escriba nombre o código..." onkeyup="buscarEnServidor(this.value)">
                 </div>
                 
-                <div id="lista_sugerencias" class="list-group mb-3 overflow-auto" style="max-height: 200px;">
-                    {% for p in productos %}
-                    <button type="button" class="list-group-item list-group-item-action item-prod small text-dark" 
-                            onclick="seleccionarProducto('{{ p.id }}', '{{ p.nombre }}', {{ p.precio }}, {{ p.stock }})">
-                        <div class="d-flex justify-content-between">
-                            <span class="fw-bold">{{ p.nombre }}</span>
-                            <span class="badge bg-secondary">Stk: {{ p.stock }}</span>
-                        </div>
-                        <small class="text-muted">{{ p.sku }} | <strong>${{ "{:,.2f}".format(p.precio) }}</strong></small>
-                    </button>
-                    {% endfor %}
+                <!-- Esta lista ahora comenzará vacía y se llenará dinámicamente -->
+                <div id="lista_sugerencias" class="list-group mb-3 overflow-auto" style="max-height: 250px;">
+                    <p class="text-muted small text-center py-3">Escriba para buscar productos en este local...</p>
                 </div>
-                 <hr>-->
-            <!-- En pos.html, busca la sección de Buscador de Productos y déjala así -->
-            <div class="card shadow-sm border-0">
-                <div class="card-header bg-dark text-white fw-bold small text-uppercase">2. Cargar Productos / Servicios</div>
-                <div class="card-body p-3 text-dark">
-                    <label class="small fw-bold">Buscar en Stock Local:</label>
-                    <div class="input-group mb-3">
-                        <span class="input-group-text"><i class="bi bi-search"></i></span>
-                        <!-- Cambiamos filtrarProductos por buscarEnServidor -->
-                        <input type="text" id="busqueda_prod" class="form-control" placeholder="Escriba nombre o código..." onkeyup="buscarEnServidor(this.value)">
-                    </div>
-                    
-                    <!-- Esta lista ahora comenzará vacía y se llenará dinámicamente -->
-                    <div id="lista_sugerencias" class="list-group mb-3 overflow-auto" style="max-height: 250px;">
-                        <p class="text-muted small text-center py-3">Escriba para buscar productos en este local...</p>
-                    </div>
-                    
-                    <hr>
-                    <!-- (Aquí sigue tu sección de Ítem Manual igual que antes) -->    
-
-        
+                
+                <hr>
 
                 <label class="small fw-bold text-pink">Ítem Manual (Mano de Obra / Varios):</label>
                 <div class="row g-1">
@@ -140,7 +113,7 @@
                 </div>
             </div>
 
-            <!-- PANEL DE AJUSTES GLOBALES (NUEVO) -->
+            <!-- PANEL DE AJUSTES GLOBALES -->
             <div class="card-footer bg-light border-top">
                 <div class="row g-2">
                     <div class="col-3">
@@ -149,7 +122,6 @@
                             <option value="0">Exento</option>
                             <option value="21">21%</option>
                             <option value="10.5">10.5%</option>
-                            
                         </select>
                     </div>
                     <div class="col-3">
@@ -214,7 +186,7 @@
                 <div id="wrapper_cheque_pos" class="d-none border border-success p-2 rounded mb-2 bg-white">
                     <input type="text" id="ch_banco" class="form-control form-control-sm mb-1" placeholder="Banco">
                     <input type="text" id="ch_nro" class="form-control form-control-sm mb-1" placeholder="Nro Cheque">
-                    <input type="text" id="ch_emisor" class="form-control form-control-sm mb-1" placeholder="Emisor (Titular del cheque)"> <!-- NUEVO -->
+                    <input type="text" id="ch_emisor" class="form-control form-control-sm mb-1" placeholder="Emisor (Titular del cheque)">
                     <label class="x-small fw-bold">Vencimiento:</label>
                     <input type="date" id="ch_venc" class="form-control form-control-sm">
                 </div>
@@ -243,7 +215,6 @@
         </div>
     </div>
 </div>
-
 
 <!-- MODAL ALTA RÁPIDA CLIENTE -->
 <div class="modal fade" id="modalNuevoCliente" tabindex="-1" aria-hidden="true">
@@ -280,7 +251,6 @@ let timeout = null;
 function buscarEnServidor(q) {
     const lista = document.getElementById('lista_sugerencias');
 
-    // "Debounce": Esperamos a que el usuario deje de escribir por 300ms para no saturar el servidor
     clearTimeout(timeout);
     
     if (q.length < 2) {
@@ -298,7 +268,7 @@ function buscarEnServidor(q) {
                 return;
             }
 
-            lista.innerHTML = ''; // Limpiamos mensajes anteriores
+            lista.innerHTML = '';
             productos.forEach(p => {
                 lista.innerHTML += `
                     <button type="button" class="list-group-item list-group-item-action item-prod small text-dark" 
@@ -350,17 +320,15 @@ function buscarClientes(q) {
 }
 
 function seleccionarClienteParaVenta(id, nombre, cuit) {
-    // 1. Guardar el ID en el campo oculto
     document.getElementById('cliente_id').value = id;
-    
-    // 2. Mostrar el recuadro de cliente seleccionado
     document.getElementById('disp_nombre').innerText = nombre;
     document.getElementById('disp_cuit').innerText = "CUIT/DNI: " + cuit;
     document.getElementById('cliente_seleccionado_display').classList.remove('d-none');
-    
-    // 3. Ocultar el buscador y la lista
     document.getElementById('buscar_cliente_input').parentElement.classList.add('d-none');
     document.getElementById('sugerencias_clientes').classList.add('d-none');
+    
+    // Quitar advertencia si estaba activa
+    document.getElementById('card_seleccion_cliente').classList.remove('border-danger', 'border-2');
 }
 
 function deseleccionarCliente() {
@@ -370,7 +338,6 @@ function deseleccionarCliente() {
     document.getElementById('buscar_cliente_input').value = "";
     document.getElementById('buscar_cliente_input').focus();
 }
-
 
 function filtrarProductos(q) {
     const term = q.toLowerCase();
@@ -420,7 +387,6 @@ function dibujarTabla() {
         const sub = item.precio * item.cantidad;
         subtotalNetoItems += sub;
         
-        // --- CAMBIO: El nombre ahora es un INPUT editable para el Remito/Factura ---
         tbody.innerHTML += `
             <tr>
                 <td style="width: 70px;">
@@ -439,32 +405,25 @@ function dibujarTabla() {
             </tr>`;
     });
 
-    // 1. Obtener porcentajes
     const recP = parseFloat(document.getElementById('recargo_p').value) || 0;
     const desP = parseFloat(document.getElementById('descuento_p').value) || 0;
     const ivaP = parseFloat(document.getElementById('iva_porcentaje').value) || 0;
     
-    // 2. Calcular Neto con Ajustes
     let netoFinal = subtotalNetoItems * (1 + (recP / 100));
     netoFinal = netoFinal * (1 - (desP / 100));
 
-    // 3. SUMAR EL IVA
     totalFinal = netoFinal * (1 + (ivaP / 100));
 
-    // 4. Mostrar en pantalla
     document.getElementById('label_total_venta').innerText = `$ ${totalFinal.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
     
-    // Actualizar sugerencia de pago
     const pagado = obtenerTotalPagado();
     document.getElementById('pago_monto').value = Math.max(0, totalFinal - pagado).toFixed(2);
     
     actualizarEstadoPago();
 }
 
-// NUEVA FUNCIÓN: Guarda el nombre editado en la lista temporal del carrito
 function cambiarNombre(index, nuevoNombre) {
     itemsVenta[index].nombre = nuevoNombre.toUpperCase();
-    // No redibujamos aquí para que el usuario no pierda el foco si sigue escribiendo
 }
 
 async function guardarClienteRapido() {
@@ -482,17 +441,11 @@ async function guardarClienteRapido() {
     const res = await response.json();
 
     if (response.ok) {
-        // 1. Agregar el nuevo cliente al selector de arriba
-        const selector = document.getElementById('cliente_id');
-        const nuevaOpcion = new Option(`${res.razon_social} (${res.cuit})`, res.id, true, true);
-        selector.add(nuevaOpcion);
-        
-        // 2. Cerrar el modal y limpiar
+        seleccionarClienteParaVenta(res.id, res.razon_social, res.cuit);
         bootstrap.Modal.getInstance(document.getElementById('modalNuevoCliente')).hide();
         document.getElementById('quick_razon').value = "";
         document.getElementById('quick_cuit').value = "";
-        
-        alert("Cliente registrado y seleccionado.");
+        alert("Cliente registrado y seleccionado con éxito.");
     } else {
         alert("Error: " + res.message);
     }
@@ -502,11 +455,17 @@ function toggleInputsPago(medio) {
     const wrapperCaja = document.getElementById('wrapper_caja_destino');
     const wrapperCheque = document.getElementById('wrapper_cheque_pos');
     
-    // Si es CTA_CTE, no hay caja de destino porque no entra dinero
     if (medio === 'CTA_CTE') {
         wrapperCaja.classList.add('d-none');
+        // Alerta visual si no hay cliente seleccionado al elegir Cta Cte
+        const clienteId = document.getElementById('cliente_id').value;
+        if (!clienteId || clienteId === "") {
+            const cardCli = document.getElementById('card_seleccion_cliente');
+            cardCli.classList.add('border-danger', 'border-2');
+        }
     } else {
         wrapperCaja.classList.remove('d-none');
+        document.getElementById('card_seleccion_cliente').classList.remove('border-danger', 'border-2');
     }
 
     medio === 'CHEQUE' ? wrapperCheque.classList.remove('d-none') : wrapperCheque.classList.add('d-none');
@@ -515,27 +474,41 @@ function toggleInputsPago(medio) {
 function agregarPagoABolsa() {
     const medio = document.getElementById('pago_medio').value;
     const monto = parseFloat(document.getElementById('pago_monto').value);
-    const selCaja = document.getElementById('pago_caja_id'); // Selector de Caja/Banco
+    const selCaja = document.getElementById('pago_caja_id');
+    const clienteId = document.getElementById('cliente_id').value;
     
+    // --- VALIDACIÓN ESTRICTA: CUENTA CORRIENTE EXIGE CLIENTE ---
+    if (medio === 'CTA_CTE') {
+        if (!clienteId || clienteId.trim() === "" || clienteId === "0") {
+            const cardCli = document.getElementById('card_seleccion_cliente');
+            cardCli.classList.add('border-danger', 'border-2');
+            
+            alert("⚠️ ATENCIÓN: Para enviar una venta a CUENTA CORRIENTE es OBLIGATORIO seleccionar un Cliente primero.\n\nPor favor, elija o registre el cliente en el paso 1.");
+            
+            const inputBusq = document.getElementById('buscar_cliente_input');
+            if (inputBusq && !inputBusq.parentElement.classList.contains('d-none')) {
+                inputBusq.focus();
+            }
+            return; // FRENA LA CARGA DEL PAGO
+        }
+    }
+    // -------------------------------------------------------------
+
     if (isNaN(monto) || monto <= 0) return alert("Monto inválido");
 
     let pago = { 
         medio: medio, 
         monto: monto,
-        // CAPTURA DE CAJA: Si es CTA_CTE el ID es null. 
-        // Si NO es CTA_CTE, tomamos el valor exacto seleccionado por el usuario.
         caja_id: (medio !== 'CTA_CTE') ? selCaja.value : null,
         caja_nombre: (medio !== 'CTA_CTE') ? selCaja.options[selCaja.selectedIndex].getAttribute('data-nombre') : 'A CUENTA'
     };
 
-    // LÓGICA ESPECIAL PARA CHEQUES
     if (medio === 'CHEQUE') {
         const banco = document.getElementById('ch_banco').value;
         const nro = document.getElementById('ch_nro').value;
-        const emisor = document.getElementById('ch_emisor').value; // Captura Emisor
+        const emisor = document.getElementById('ch_emisor').value;
         const venc = document.getElementById('ch_venc').value;
         
-        // Validación estricta de datos de valor
         if(!banco || !nro || !venc || !emisor) {
             return alert("Por favor, complete todos los datos del cheque: Banco, Nro, Emisor y Vencimiento.");
         }
@@ -543,23 +516,19 @@ function agregarPagoABolsa() {
         pago.cheque_data = { 
             banco: banco.toUpperCase(), 
             numero: nro, 
-            emisor: emisor.toUpperCase(), // Viaja al servidor
+            emisor: emisor.toUpperCase(),
             vencimiento: venc, 
             tipo: 'FISICO' 
         };
         
-        // Detalle descriptivo para la tabla visual
         pago.detalle = `CH ${banco.toUpperCase()} (Em: ${emisor.toUpperCase()})`;
     } else {
-        // Para Efectivo, Tarjetas o Transferencias, el detalle es el medio y la cuenta elegida
         pago.detalle = `${medio} (${pago.caja_nombre})`;
     }
 
-    // Guardamos en la bolsa y refrescamos la tabla de pagos en pantalla
     bolsaPagos.push(pago);
     dibujarPagos();
 
-    // LIMPIEZA DE CAMPOS PARA NUEVO PAGO
     document.getElementById('pago_monto').value = "";
     if (medio === 'CHEQUE') {
         document.getElementById('ch_banco').value = "";
@@ -575,7 +544,7 @@ function dibujarPagos() {
     bolsaPagos.forEach((p, index) => {
         div.innerHTML += `
             <div class="d-flex justify-content-between align-items-center mb-1 bg-white p-2 border rounded shadow-sm">
-                <span class="badge bg-success">${p.medio}</span>
+                <span class="badge ${p.medio === 'CTA_CTE' ? 'bg-danger' : 'bg-success'}">${p.medio}</span>
                 <span class="fw-bold">$${p.monto.toLocaleString('es-AR', {minimumFractionDigits:2})}</span>
                 <button class="btn btn-sm text-danger" onclick="bolsaPagos.splice(${index},1);dibujarPagos()">×</button>
             </div>`;
@@ -606,8 +575,18 @@ function actualizarEstadoPago() {
 }
 
 async function enviarVentaVacan() {
+    const clienteId = document.getElementById('cliente_id').value;
+
+    // VALIDACIÓN PREVIA ANTES DEL ENVÍO AL SERVIDOR
+    const tieneCtaCte = bolsaPagos.some(p => p.medio === 'CTA_CTE');
+    if (tieneCtaCte && (!clienteId || clienteId.trim() === "" || clienteId === "0")) {
+        alert("⚠️ No se puede finalizar: La venta incluye un saldo a Cuenta Corriente y no hay ningún Cliente seleccionado.");
+        document.getElementById('card_seleccion_cliente').classList.add('border-danger', 'border-2');
+        return;
+    }
+
     const payload = {
-        cliente_id: document.getElementById('cliente_id').value,
+        cliente_id: clienteId || null,
         tipo_comprobante: document.getElementById('tipo_comprobante').value,
         iva_porcentaje: document.getElementById('iva_porcentaje').value,
         plazo_pago: document.getElementById('plazo_pago').value,
@@ -638,24 +617,20 @@ async function enviarVentaVacan() {
 document.addEventListener('DOMContentLoaded', function() {
     const presupuestoId = "{{ recuperar_id }}";
     if (presupuestoId && presupuestoId !== 'None') {
-        fetch(`/repuestos/api/presupuesto/${presupuestoId}`) // Ajusta la ruta según tu blueprint
+        fetch(`/repuestos/api/presupuesto/${presupuestoId}`)
             .then(res => res.json())
             .then(data => {
-                // 1. Seleccionar el cliente
                 document.getElementById('cliente_id').value = data.cliente_id;
                 
-                // 2. Cargar los items al carrito (tu función de JS que agrega al carrito)
                 data.items.forEach(item => {
                     agregarAlCarrito(item.id, item.nombre, item.precio, item.cantidad);
                 });
                 
-                // 3. Guardar el ID del presupuesto original para marcarlo como "CONVERTIDO" al finalizar
                 window.presupuestoOrigenId = data.id;
                 alert("Presupuesto cargado. Puede modificarlo o finalizar la venta.");
             });
     }
-})
-
+});
 </script>
 
 <style>
