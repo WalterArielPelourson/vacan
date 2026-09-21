@@ -76,30 +76,47 @@
     </div>
 </div>
 
-<!-- NIVEL 2: COMPARATIVA DE RENDIMIENTO -->
+<!-- NIVEL 2: COMPARATIVA DE RENDIMIENTO (CON DEVOLUCIONES) -->
 <div class="card shadow border-0 mb-4 bg-light">
     <div class="card-header bg-dark text-white fw-bold text-center small text-uppercase py-2">Evolución de Rendimiento (Periodo Actual)</div>
     <div class="card-body">
-        <div class="row text-center text-dark">
-            <div class="col-md-3 border-end">
-                <p class="mb-1 small text-muted text-uppercase">Ventas Totales</p>
+        <div class="row text-center text-dark g-2">
+            <!-- VENTAS TOTALES NETAS -->
+            <div class="col-md-2 col-sm-6 border-end">
+                <p class="mb-1 small text-muted text-uppercase">Ventas Netas</p>
                 <h4 class="fw-bold mb-0 text-dark">${{ "{:,.2f}".format(g_ventas) }}</h4>
                 {% set var_v = ((g_ventas - ant_ventas) / ant_ventas * 100) if ant_ventas > 0 else 100 %}
                 <small class="fw-bold {{ 'text-success' if var_v >= 0 else 'text-danger' }}">
                     <i class="bi bi-caret-{{ 'up' if var_v >= 0 else 'down' }}-fill"></i> {{ "{:,.1f}%".format(var_v) }}
                 </small>
+                <div class="text-muted x-small">Bruto: ${{ "{:,.0f}".format(g_ventas_bruto or g_ventas) }}</div>
             </div>
-            <div class="col-md-3 border-end">
+
+            <!-- DEVOLUCIONES TOTALES (NUEVA TARJETA) -->
+            <div class="col-md-2 col-sm-6 border-end">
+                <p class="mb-1 small text-danger text-uppercase fw-bold"><i class="bi bi-arrow-counterclockwise"></i> Devoluciones</p>
+                <h4 class="fw-bold mb-0 text-danger">-${{ "{:,.2f}".format(g_devoluciones or 0) }}</h4>
+                <small class="text-muted x-small d-block">
+                    Caja: ${{ "{:,.0f}".format(g_devs_caja or 0) }} | Cta: ${{ "{:,.0f}".format(g_devs_cta or 0) }}
+                </small>
+            </div>
+
+            <!-- COMPRAS REALIZADAS -->
+            <div class="col-md-3 col-sm-6 border-end">
                 <p class="mb-1 small text-muted text-uppercase">Compras Realizadas</p>
                 <h4 class="fw-bold mb-0 text-primary">${{ "{:,.2f}".format(g_compras) }}</h4>
                 <small class="fw-bold text-muted small italic">Suma de facturas ingresadas</small>
             </div>
-            <div class="col-md-3 border-end">
+
+            <!-- COBRANZAS (CASH) -->
+            <div class="col-md-2 col-sm-6 border-end">
                 <p class="mb-1 small text-muted text-uppercase">Cobranzas (Cash)</p>
                 <h4 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(g_cobranzas) }}</h4>
                 <small class="text-muted small italic">Dinero real que entró a caja</small>
             </div>
-            <div class="col-md-3">
+
+            <!-- UTILIDAD REAL NETA -->
+            <div class="col-md-3 col-sm-12">
                 <p class="mb-1 small text-muted text-uppercase">Utilidad Real (Neto)</p>
                 {# Utilidad Real calculada sobre el neto sin IVA: Ventas/1.21 - Compras/1.21 - Gastos/1.21 #}
                 {% set util_neta = (g_ventas / 1.21) - (g_compras / 1.21) - (g_gastos / 1.21) %}
@@ -166,7 +183,7 @@
     </div>
 </div>
 
-<!-- NIVEL 4: TABLA DETALLADA -->
+<!-- NIVEL 4: TABLA DETALLADA (INCLUYENDO DEVOLUCIONES) -->
 <div class="card shadow border-0 mb-4 text-dark">
     <div class="card-header bg-dark text-white fw-bold small text-uppercase py-2">Desglose Operativo por Punto de Venta</div>
     <div class="table-responsive">
@@ -174,10 +191,12 @@
             <thead class="table-light small text-uppercase">
                 <tr>
                     <th>Sucursal</th>
-                    <th class="text-end">Ventas ($)</th>
-                    <th class="text-end">Gastos ($)</th>
-                    <th class="text-end">Cobranzas ($)</th>
-                    <th class="text-end">Patrimonio (Stock)</th>
+                    <th class="text-end">Venta Bruta</th>
+                    <th class="text-end text-danger">(-) Devoluciones</th>
+                    <th class="text-end text-primary">(=) Venta Neta</th>
+                    <th class="text-end text-danger">Gastos ($)</th>
+                    <th class="text-end text-success">Cobranzas ($)</th>
+                    <th class="text-end text-muted">Patrimonio (Stock)</th>
                     <th class="text-end">Utilidad Estimada</th>
                 </tr>
             </thead>
@@ -185,14 +204,40 @@
                 {% for s in sucursales_data %}
                 <tr>
                     <td><i class="bi bi-geo-alt-fill text-danger"></i> <strong>{{ s.nombre }}</strong></td>
-                    <td class="text-end fw-bold">${{ "{:,.2f}".format(s.ventas) }}</td>
+                    <td class="text-end text-muted">${{ "{:,.2f}".format(s.ventas_bruto or s.ventas) }}</td>
+                    <td class="text-end text-danger fw-bold">
+                        {% if s.devoluciones and s.devoluciones > 0 %}
+                            -${{ "{:,.2f}".format(s.devoluciones) }}
+                            <small class="d-block text-muted x-small">
+                                Caja: ${{ "{:,.0f}".format(s.devs_caja or 0) }} | Cta: ${{ "{:,.0f}".format(s.devs_cta or 0) }}
+                            </small>
+                        {% else %}
+                            $0.00
+                        {% endif %}
+                    </td>
+                    <td class="text-end fw-bold text-primary">${{ "{:,.2f}".format(s.ventas) }}</td>
                     <td class="text-end text-danger">${{ "{:,.2f}".format(s.gastos) }}</td>
                     <td class="text-end text-success">${{ "{:,.2f}".format(s.cobranzas) }}</td>
                     <td class="text-end text-muted">${{ "{:,.2f}".format(s.stock_costo) }}</td>
-                    <td class="text-end fw-bold text-primary">${{ "{:,.2f}".format(s.utilidad) }}</td>
+                    <td class="text-end fw-bold text-pink">${{ "{:,.2f}".format(s.utilidad) }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
+            <tfoot class="table-dark fw-bold small text-uppercase">
+                <tr>
+                    <td>TOTALES:</td>
+                    <td class="text-end">${{ "{:,.2f}".format(g_ventas_bruto or g_ventas) }}</td>
+                    <td class="text-end text-danger">-${{ "{:,.2f}".format(g_devoluciones or 0) }}</td>
+                    <td class="text-end text-primary">${{ "{:,.2f}".format(g_ventas) }}</td>
+                    <td class="text-end text-danger">${{ "{:,.2f}".format(g_gastos) }}</td>
+                    <td class="text-end text-success">${{ "{:,.2f}".format(g_cobranzas) }}</td>
+                    <td class="text-end text-muted">${{ "{:,.2f}".format(g_stock_costo) }}</td>
+                    <td class="text-end text-pink">
+                        {% set total_util = (g_ventas / 1.21) - (g_compras / 1.21) - (g_gastos / 1.21) %}
+                        ${{ "{:,.2f}".format(total_util) }}
+                    </td>
+                </tr>
+            </tfoot>
         </table>
     </div>
 </div>
@@ -237,7 +282,7 @@ new Chart(ctx, {
     data: {
         labels: [{% for s in sucursales_data %}'{{ s.nombre }}',{% endfor %}],
         datasets: [
-            { label: 'Ventas', data: [{% for s in sucursales_data %}{{ s.ventas }},{% endfor %}], backgroundColor: '#ff007f' },
+            { label: 'Ventas Netas', data: [{% for s in sucursales_data %}{{ s.ventas }},{% endfor %}], backgroundColor: '#ff007f' },
             { label: 'Gastos', data: [{% for s in sucursales_data %}{{ s.gastos }},{% endfor %}], backgroundColor: '#0f172a' }
         ]
     },

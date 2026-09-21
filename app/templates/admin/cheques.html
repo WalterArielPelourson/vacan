@@ -1,14 +1,63 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<div class="row mb-4">
+<div class="row mb-3 align-items-center">
     <div class="col-md-8">
         <h2 class="fw-bold"><span class="text-pink">Cartera</span> de Valores</h2>
         <p class="text-muted">Gestión de cheques. Controla vencimientos, depósitos y devoluciones de clientes o proveedores.</p>
     </div>
+    <div class="col-md-4 text-md-end">
+        <!-- BOTÓN PARA ABRIR MODAL -->
+        <button class="btn btn-dark fw-bold shadow-sm" data-bs-toggle="modal" data-bs-target="#modalChequeManual">
+            <i class="bi bi-plus-circle-fill text-pink me-1"></i> CARGAR CHEQUE EXISTENTE
+        </button>
+    </div>
 </div>
 
-<!-- NAVEGACIÓN POR ESTADOS (NUEVO) -->
+<!-- BARRA DE FILTROS: SUCURSAL Y FORMATO (E-CHEQ VS FÍSICO) -->
+<div class="card mb-4 border-0 shadow-sm bg-dark text-white" style="border-radius: 12px;">
+    <div class="card-body py-2 px-3">
+        <form action="{{ url_for('admin.cartera_cheques') }}" method="GET" class="row g-2 align-items-end">
+            <!-- FILTRO DE SUCURSAL -->
+            <div class="col-md-4 col-sm-6">
+                <label class="x-small fw-bold text-pink mb-1">SUCURSAL</label>
+                <select name="sucursal_id" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()" {% if current_user.rol == 'admin' %}disabled{% endif %}>
+                    <option value="">Todas las Sucursales</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if (request.args.get('sucursal_id')|int == s.id) or (filtros and filtros.sucursal_id == s.id) %}selected{% endif %}>
+                        {{ s.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if current_user.rol == 'admin' %}
+                    <input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">
+                {% endif %}
+            </div>
+
+            <!-- FILTRO TIPO: FÍSICO VS E-CHEQ -->
+            <div class="col-md-3 col-sm-6">
+                <label class="x-small fw-bold text-pink mb-1">TIPO DE CHEQUE</label>
+                <select name="tipo" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
+                    <option value="">Todos los tipos</option>
+                    <option value="FISICO" {% if request.args.get('tipo') == 'FISICO' or (filtros and filtros.tipo == 'FISICO') %}selected{% endif %}>
+                        📄 Cheque Físico
+                    </option>
+                    <option value="ECHEQ" {% if request.args.get('tipo') == 'ECHEQ' or (filtros and filtros.tipo == 'ECHEQ') %}selected{% endif %}>
+                        💻 E-Cheq (Digital)
+                    </option>
+                </select>
+            </div>
+
+            <!-- BOTONES DE FILTRO -->
+            <div class="col-md-2 col-sm-12 d-flex gap-1">
+                <button type="submit" class="btn btn-sm btn-pink fw-bold w-100"><i class="bi bi-funnel-fill me-1"></i> Filtrar</button>
+                <a href="{{ url_for('admin.cartera_cheques') }}" class="btn btn-sm btn-outline-light" title="Limpiar"><i class="bi bi-arrow-counterclockwise"></i></a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- NAVEGACIÓN POR ESTADOS -->
 <ul class="nav nav-pills mb-4 bg-white p-2 rounded shadow-sm" id="pills-tab" role="tablist">
     <li class="nav-item" role="presentation">
         <button class="nav-link active fw-bold" id="pills-cartera-tab" data-bs-toggle="pill" data-bs-target="#pills-cartera" type="button" role="tab">
@@ -20,22 +69,16 @@
             <i class="bi bi-clock-history"></i> PROCESADOS / ENTREGADOS
         </button>
     </li>
-
-    <!-- BOTÓN PARA ABRIR MODAL -->
-    <button class="btn btn-dark fw-bold shadow-sm mb-3" data-bs-toggle="modal" data-bs-target="#modalChequeManual">
-        <i class="bi bi-plus-circle-fill text-pink"></i> CARGAR CHEQUE EXISTENTE
-    </button>
-
-
 </ul>
-
 
 <div class="tab-content" id="pills-tabContent">
     
     <!-- PESTAÑA 1: VALORES EN MANO -->
     <div class="tab-pane fade show active" id="pills-cartera" role="tabpanel">
         <div class="card shadow border-0">
-            <div class="card-header bg-dark text-white fw-bold">CHEQUES DISPONIBLES EN CAJA</div>
+            <div class="card-header bg-dark text-white fw-bold d-flex justify-content-between align-items-center">
+                <span>CHEQUES DISPONIBLES EN CAJA</span>
+            </div>
             <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
@@ -43,7 +86,7 @@
                             <tr>
                                 <th>Vencimiento</th>
                                 <th>Banco / Emisor</th>
-                                <th>Número</th>
+                                <th>Tipo / Número</th>
                                 <th>Monto</th>
                                 <th class="text-end px-4">Acciones</th>
                             </tr>
@@ -58,7 +101,14 @@
                                     {% if ch.fecha_vencimiento <= hoy %}<br><small class="text-danger fw-bold">VENCIDO</small>{% endif %}
                                 </td>
                                 <td><strong>{{ ch.banco }}</strong><br><small>{{ ch.emisor }}</small></td>
-                                <td><code>{{ ch.numero }}</code></td>
+                                <td>
+                                    <code>{{ ch.numero }}</code>
+                                    {% if ch.tipo == 'ECHEQ' or (ch.tipo and 'ECH' in ch.tipo|upper) %}
+                                        <span class="badge bg-primary text-white ms-1" style="font-size: 0.65rem;"><i class="bi bi-laptop me-1"></i>E-CHEQ</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary text-white ms-1" style="font-size: 0.65rem;"><i class="bi bi-file-earmark-text me-1"></i>FÍSICO</span>
+                                    {% endif %}
+                                </td>
                                 <td class="fw-bold h5 text-dark">${{ "{:,.2f}".format(ch.monto) }}</td>
                                 <td class="text-end px-4">
                                     <div class="btn-group">
@@ -69,7 +119,7 @@
                             </tr>
                             {% endfor %}
                             {% if count_cartera.value == 0 %}
-                            <tr><td colspan="5" class="text-center py-5 text-muted">No hay cheques físicos en cartera.</td></tr>
+                            <tr><td colspan="5" class="text-center py-5 text-muted">No hay cheques en cartera con los filtros seleccionados.</td></tr>
                             {% endif %}
                         </tbody>
                     </table>
@@ -89,6 +139,7 @@
                             <tr>
                                 <th>Vencimiento</th>
                                 <th>Banco / Emisor</th>
+                                <th>Tipo / Número</th>
                                 <th>Monto</th>
                                 <th>Estado / Ubicación</th>
                                 <th class="text-end px-4">Acciones</th>
@@ -100,7 +151,15 @@
                             {% set count_proc.value = count_proc.value + 1 %}
                             <tr class="{% if ch.estado == 'RECHAZADO' %}table-danger{% endif %}">
                                 <td>{{ ch.fecha_vencimiento.strftime('%d/%m/%Y') }}</td>
-                                <td><strong>{{ ch.banco }}</strong><br><small>N° {{ ch.numero }}</small></td>
+                                <td><strong>{{ ch.banco }}</strong><br><small>{{ ch.emisor or 'S/E' }}</small></td>
+                                <td>
+                                    <code>{{ ch.numero }}</code>
+                                    {% if ch.tipo == 'ECHEQ' or (ch.tipo and 'ECH' in ch.tipo|upper) %}
+                                        <span class="badge bg-primary text-white ms-1" style="font-size: 0.65rem;"><i class="bi bi-laptop me-1"></i>E-CHEQ</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary text-white ms-1" style="font-size: 0.65rem;"><i class="bi bi-file-earmark-text me-1"></i>FÍSICO</span>
+                                    {% endif %}
+                                </td>
                                 <td class="fw-bold">${{ "{:,.2f}".format(ch.monto) }}</td>
                                 <td>
                                     {% if ch.estado == 'DEPOSITADO' %}
@@ -126,7 +185,7 @@
                             </tr>
                             {% endfor %}
                             {% if count_proc.value == 0 %}
-                            <tr><td colspan="5" class="text-center py-5 text-muted">No hay historial de cheques procesados.</td></tr>
+                            <tr><td colspan="6" class="text-center py-5 text-muted">No hay historial de cheques procesados con los filtros seleccionados.</td></tr>
                             {% endif %}
                         </tbody>
                     </table>
@@ -140,65 +199,63 @@
      SECCIÓN DE MODALES (FUERA DE LAS TABLAS)
      ========================================== -->
 
-{% for ch in cheques %}
-
-    
-
-    <!-- MODAL CARGA MANUAL -->
-        <div class="modal fade" id="modalChequeManual" tabindex="-1" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered text-dark">
-                <form action="{{ url_for('admin.cargar_cheque_manual') }}" method="POST" class="modal-content border-0 shadow-lg">
-                    <div class="modal-header bg-dark text-white">
-                        <h5 class="modal-title fw-bold">Carga Manual de Cheque</h5>
-                        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                    </div>
-                    <div class="modal-body p-4">
-                        <div class="row g-2">
-                            <div class="col-md-6 mb-2">
-                                <label class="small fw-bold">Banco</label>
-                                <input type="text" name="banco" class="form-control form-control-sm" placeholder="Ej: Galicia" required>
-                            </div>
-                            <div class="col-md-6 mb-2">
-                                <label class="small fw-bold">Número</label>
-                                <input type="text" name="numero" class="form-control form-control-sm" required>
-                            </div>
-                            <div class="col-12 mb-2">
-                                <label class="small fw-bold">Emisor (Titular)</label>
-                                <input type="text" name="emisor" class="form-control form-control-sm" placeholder="Nombre de quien firmó" required>
-                            </div>
-                            <div class="col-md-6 mb-2">
-                                <label class="small fw-bold">Vencimiento</label>
-                                <input type="date" name="vencimiento" class="form-control form-control-sm" required>
-                            </div>
-                            <div class="col-md-6 mb-2">
-                                <label class="small fw-bold">Monto ($)</label>
-                                <input type="number" step="0.01" name="monto" class="form-control form-control-sm fw-bold border-primary" required>
-                            </div>
-                            <div class="col-md-6 mb-2">
-                                <label class="small fw-bold">Tipo</label>
-                                <select name="tipo" class="form-select form-select-sm">
-                                    <option value="FISICO">Físico</option>
-                                    <option value="ECHEQ">E-Cheq</option>
-                                </select>
-                            </div>
-                            <div class="col-md-6 mb-2">
-                                <label class="small fw-bold">Caja donde se guarda</label>
-                                <select name="caja_id" class="form-select form-select-sm" required>
-                                    {% for c in cajas %}
-                                        {% if c.tipo == 'FISICA' %}
-                                        <option value="{{ c.id }}">{{ c.nombre }}</option>
-                                        {% endif %}
-                                    {% endfor %}
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer bg-light">
-                        <button type="submit" class="btn btn-pink w-100 fw-bold">INGRESAR VALOR A CARTERA</button>
-                    </div>
-                </form>
+<!-- MODAL CARGA MANUAL -->
+<div class="modal fade" id="modalChequeManual" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered text-dark">
+        <form action="{{ url_for('admin.cargar_cheque_manual') }}" method="POST" class="modal-content border-0 shadow-lg">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold">Carga Manual de Cheque</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
-        </div>
+            <div class="modal-body p-4">
+                <div class="row g-2">
+                    <div class="col-md-6 mb-2">
+                        <label class="small fw-bold">Banco</label>
+                        <input type="text" name="banco" class="form-control form-control-sm" placeholder="Ej: Galicia" required>
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="small fw-bold">Número</label>
+                        <input type="text" name="numero" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-12 mb-2">
+                        <label class="small fw-bold">Emisor (Titular)</label>
+                        <input type="text" name="emisor" class="form-control form-control-sm" placeholder="Nombre de quien firmó" required>
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="small fw-bold">Vencimiento</label>
+                        <input type="date" name="vencimiento" class="form-control form-control-sm" required>
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="small fw-bold">Monto ($)</label>
+                        <input type="number" step="0.01" name="monto" class="form-control form-control-sm fw-bold border-primary" required>
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="small fw-bold">Tipo</label>
+                        <select name="tipo" class="form-select form-select-sm">
+                            <option value="FISICO">Físico</option>
+                            <option value="ECHEQ">E-Cheq</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6 mb-2">
+                        <label class="small fw-bold">Caja donde se guarda</label>
+                        <select name="caja_id" class="form-select form-select-sm" required>
+                            {% for c in cajas %}
+                                {% if c.tipo == 'FISICA' %}
+                                <option value="{{ c.id }}">{{ c.nombre }}</option>
+                                {% endif %}
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="submit" class="btn btn-pink w-100 fw-bold">INGRESAR VALOR A CARTERA</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% for ch in cheques %}
 
     <!-- 1. MODAL LIQUIDAR -->
     <div class="modal fade" id="modalLiquidar{{ ch.id }}" tabindex="-1" aria-hidden="true" data-bs-backdrop="static">
@@ -309,5 +366,6 @@
     .table-warning { background-color: rgba(255, 193, 7, 0.15) !important; }
     .table-danger { background-color: rgba(220, 53, 69, 0.1) !important; }
     .italic { font-style: italic; }
+    .x-small { font-size: 0.65rem; }
 </style>
 {% endblock %}

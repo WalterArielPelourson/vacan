@@ -61,7 +61,7 @@
     </div>
 </div>
 
-<!-- TARJETAS DE RESUMEN -->
+<!-- TARJETAS DE RESUMEN 
 <div class="row mb-4 text-center">
     <div class="col-md-6">
         <div class="card bg-dark text-white shadow border-0">
@@ -76,6 +76,58 @@
             <div class="card-body">
                 <h6 class="text-dark text-uppercase small">Cantidad de Operaciones</h6>
                 <h2 class="fw-bold">{{ cantidad }} ventas</h2>
+            </div>
+        </div>
+    </div>
+</div>-->
+<!-- TARJETAS DE RESUMEN CON DEVOLUCIONES -->
+<div class="row g-3 mb-4 text-center">
+    <!-- 1. FACTURACIÓN BRUTA -->
+    <div class="col-md-3 col-sm-6">
+        <div class="card bg-dark text-white shadow border-0 h-100">
+            <div class="card-body py-3">
+                <h6 class="text-pink text-uppercase small mb-1">
+                    <i class="bi bi-receipt me-1"></i> Facturación Bruta
+                </h6>
+                <h3 class="fw-bold mb-0 text-white">${{ "{:,.2f}".format(total_bruto or total) }}</h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. DEVOLUCIONES REALIZADAS -->
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow border-danger border-4 border-top-0 border-end-0 border-bottom-0 h-100" style="background-color: #111;">
+            <div class="card-body py-3">
+                <h6 class="text-danger text-uppercase small mb-1">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i> (-) Devoluciones
+                </h6>
+                <h3 class="fw-bold mb-0 text-danger">
+                    -${{ "{:,.2f}".format(total_devoluciones or 0) }}
+                </h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. TOTAL NETO REAL -->
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow border-success border-4 border-top-0 border-end-0 border-bottom-0 h-100" style="background-color: #111;">
+            <div class="card-body py-3">
+                <h6 class="text-success text-uppercase small mb-1">
+                    <i class="bi bi-cash-stack me-1"></i> (=) Total Neto Real
+                </h6>
+                <h3 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(total) }}</h3>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. CANTIDAD DE OPERACIONES -->
+    <div class="col-md-3 col-sm-6">
+        <div class="card shadow border-pink border-4 border-top-0 border-end-0 border-bottom-0 h-100">
+            <div class="card-body py-3">
+                <h6 class="text-dark text-uppercase small mb-1">
+                    <i class="bi bi-bag-check me-1"></i> Operaciones
+                </h6>
+                <h3 class="fw-bold mb-0 text-dark">{{ cantidad }} ventas</h3>
             </div>
         </div>
     </div>

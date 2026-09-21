@@ -12,22 +12,48 @@
 <div class="card mb-4 border-0 shadow-sm bg-dark text-white">
     <div class="card-body py-3">
         <form action="{{ url_for('admin.reporte_historico_cheques') }}" method="GET" class="row g-2 align-items-end">
+            <!-- SUCURSAL (NUEVO) -->
+            <div class="col-md-2 col-6">
+                <label class="x-small fw-bold text-pink">SUCURSAL</label>
+                <select name="sucursal_id" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()" {% if current_user.rol == 'admin' %}disabled{% endif %}>
+                    <option value="">-- Todas --</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if (request.args.get('sucursal_id')|int == s.id) or (filtros and filtros.sucursal_id == s.id) %}selected{% endif %}>
+                        {{ s.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+                {% if current_user.rol == 'admin' %}
+                    <input type="hidden" name="sucursal_id" value="{{ current_user.sucursal_id }}">
+                {% endif %}
+            </div>
+
+            <!-- TIPO DE VALOR: FÍSICO VS E-CHEQ (NUEVO) -->
+            <div class="col-md-2 col-6">
+                <label class="x-small fw-bold text-pink">TIPO DE VALOR</label>
+                <select name="tipo" class="form-select form-select-sm bg-light text-dark" onchange="this.form.submit()">
+                    <option value="">-- Todos --</option>
+                    <option value="FISICO" {% if request.args.get('tipo') == 'FISICO' or (filtros and filtros.tipo == 'FISICO') %}selected{% endif %}>📄 Cheque Físico</option>
+                    <option value="ECHEQ" {% if request.args.get('tipo') == 'ECHEQ' or (filtros and filtros.tipo == 'ECHEQ') %}selected{% endif %}>💻 E-Cheq (Digital)</option>
+                </select>
+            </div>
+
             <!-- RANGO DE FECHAS -->
-            <div class="col-md-2">
+            <div class="col-md-2 col-6">
                 <label class="x-small fw-bold text-pink">VENCIMIENTO DESDE</label>
                 <input type="date" name="inicio" class="form-control form-control-sm bg-light" value="{{ request.args.get('inicio','') }}">
             </div>
-            <div class="col-md-2">
+            <div class="col-md-2 col-6">
                 <label class="x-small fw-bold text-pink">VENCIMIENTO HASTA</label>
                 <input type="date" name="fin" class="form-control form-control-sm bg-light" value="{{ request.args.get('fin','') }}">
             </div>
 
-             <!-- FILTRO DE CLIENTE (EL QUE FALTABA) -->
-            <div class="col-md-2">
+            <!-- FILTRO DE CLIENTE -->
+            <div class="col-md-2 col-6">
                 <label class="x-small fw-bold text-pink">CLIENTE ORIGEN</label>
                 <select name="cliente_id" class="form-select form-select-sm bg-light" onchange="this.form.submit()">
                     <option value="">-- Todos --</option>
-                    {% for c in clientes_list %}
+                    {% for c in (clientes or clientes_list) %}
                     <option value="{{ c.id }}" {% if request.args.get('cliente_id')|int == c.id %}selected{% endif %}>
                         {{ c.razon_social }}
                     </option>
@@ -35,8 +61,8 @@
                 </select>
             </div>
             
-            <!-- OTROS FILTROS -->
-            <div class="col-md-2">
+            <!-- ESTADO -->
+            <div class="col-md-2 col-6">
                 <label class="x-small fw-bold text-pink">ESTADO</label>
                 <select name="estado" class="form-select form-select-sm bg-light" onchange="this.form.submit()">
                     <option value="">-- Todos --</option>
@@ -46,11 +72,15 @@
                     <option value="RECHAZADO" {% if request.args.get('estado') == 'RECHAZADO' %}selected{% endif %}>RECHAZADO</option>
                 </select>
             </div>
-            <div class="col-md-3">
+
+            <!-- BUSCADOR POR TEXTO -->
+            <div class="col-md-8 col-12">
                 <label class="x-small fw-bold text-pink">N° CHEQUE O EMISOR</label>
                 <input type="text" name="q" class="form-control form-control-sm bg-light" placeholder="Escriba para buscar..." value="{{ request.args.get('q','') }}">
             </div>
-            <div class="col-md-3">
+
+            <!-- BOTONES -->
+            <div class="col-md-4 col-12">
                 <div class="btn-group w-100">
                     <button type="submit" class="btn btn-sm btn-pink fw-bold px-4">FILTRAR</button>
                     <a href="{{ url_for('admin.reporte_historico_cheques') }}" class="btn btn-sm btn-outline-light">LIMPIAR</a>
@@ -60,12 +90,17 @@
     </div>
 </div>
 
-<!-- RESUMEN DE CARTERA (IGUAL QUE ANTES) -->
+<!-- RESUMEN DE CARTERA CON DESGLOSE -->
 <div class="row mb-4 text-center">
     <div class="col-md-3 mb-2">
         <div class="card border-0 shadow-sm p-3 bg-white h-100">
             <h6 class="text-muted small fw-bold text-uppercase">Total Filtrado</h6>
             <h3 class="fw-bold mb-0 text-dark">${{ "{:,.2f}".format(stats.total_monto) }}</h3>
+            {% if stats.total_echeqs is defined or stats.total_fisicos is defined %}
+            <div class="text-muted x-small mt-1">
+                Físicos: ${{ "{:,.0f}".format(stats.total_fisicos or 0) }} | E-Cheqs: ${{ "{:,.0f}".format(stats.total_echeqs or 0) }}
+            </div>
+            {% endif %}
         </div>
     </div>
     <div class="col-md-3 mb-2">
@@ -88,7 +123,7 @@
     </div>
 </div>
 
-<!-- TABLA DE TRAZABILIDAD (Mantenida) -->
+<!-- TABLA DE TRAZABILIDAD -->
 <div class="card shadow border-0">
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -106,12 +141,19 @@
                     {% for ch in cheques %}
                     <tr class="{% if ch.estado == 'RECHAZADO' %}table-danger{% endif %}">
                         <td>
-                            <strong class="text-dark">{{ ch.banco }}</strong><br>
+                            <div class="d-flex align-items-center gap-1">
+                                <strong class="text-dark">{{ ch.banco }}</strong>
+                                {% if ch.tipo == 'ECHEQ' or (ch.tipo and 'ECH' in ch.tipo|upper) %}
+                                    <span class="badge bg-primary text-white x-small"><i class="bi bi-laptop me-1"></i>E-CHEQ</span>
+                                {% else %}
+                                    <span class="badge bg-secondary text-white x-small"><i class="bi bi-file-earmark-text me-1"></i>FÍSICO</span>
+                                {% endif %}
+                            </div>
                             <small class="text-muted">N° {{ ch.numero }} | <strong>Vence: {{ ch.fecha_vencimiento.strftime('%d/%m/%Y') }}</strong></small>
                         </td>
                         
                         <td>
-                            <i class="bi bi-person-fill text-muted"></i> {{ ch.cliente_rel.razon_social if ch.cliente_rel else 'Venta Directa' }}<br>
+                            <i class="bi bi-person-fill text-muted"></i> {{ ch.cliente.razon_social if ch.cliente else (ch.cliente_rel.razon_social if ch.cliente_rel else 'Venta Directa') }}<br>
                             <small class="text-muted italic">{{ ch.emisor }}</small>
                         </td>
 

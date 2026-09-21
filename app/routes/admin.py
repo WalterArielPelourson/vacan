@@ -203,8 +203,27 @@ def reportes():
         query_ventas = query_ventas.join(DetalleVenta).join(Repuesto).filter(Repuesto.proveedor_id == proveedor_id)
 
     # 4. EJECUCIÓN Y CÁLCULOS
+    #ventas = query_ventas.order_by(Venta.id.desc()).all()
+    #total_recaudado = sum(v.total for v in ventas)
     ventas = query_ventas.order_by(Venta.id.desc()).all()
-    total_recaudado = sum(v.total for v in ventas)
+    
+    total_bruto = sum(v.total for v in ventas)
+    ventas_ids = [v.id for v in ventas]
+
+    # Calcular devoluciones de estas ventas
+    devs_caja = db.session.query(func.sum(MovimientoFinanciero.monto)).filter(
+        MovimientoFinanciero.venta_id.in_(ventas_ids) if ventas_ids else False,
+        MovimientoFinanciero.metodo_detalle == 'DEVOLUCION'
+    ).scalar() or 0.0
+
+    devs_cta = db.session.query(func.sum(func.abs(MovimientoCtaCte.monto))).filter(
+        MovimientoCtaCte.venta_id.in_(ventas_ids) if ventas_ids else False,
+        MovimientoCtaCte.tipo == 'DEVOLUCION'
+    ).scalar() or 0.0
+
+    total_devoluciones = devs_caja + devs_cta
+    total_neto = total_bruto - total_devoluciones
+    
     
     # 5. DATOS PARA LOS SELECTORES DEL FORMULARIO
     sucursales = Sucursal.query.filter_by(activo=True).all()
@@ -216,7 +235,10 @@ def reportes():
     
     return render_template('admin/reportes.html', 
                            ventas=ventas, 
-                           total=total_recaudado, 
+                           #total=total_recaudado,
+                           total=total_neto,
+                           total_bruto=total_bruto,
+                           total_devoluciones=total_devoluciones, 
                            cantidad=len(ventas),
                            sucursales=sucursales, 
                            proveedores=proveedores, 
@@ -1321,18 +1343,71 @@ def toggle_caja(id):
 
 #CHEQUES EN CARTERA
 
+#@admin_bp.route('/cheques')
+#@login_required
+#@roles_required('admin', 'superadmin')
+#def cartera_cheques():
+#    hoy = date.today()
+    # Solo mostramos los que están físicamente en la empresa
+    #cheques = Cheque.query.filter_by(estado='EN_CARTERA').order_by(Cheque.fecha_vencimiento.asc()).all()
+#    cheques = Cheque.query.order_by(Cheque.fecha_vencimiento.asc()).all()
+    # Traemos todas las cajas (físicas y virtuales) para que elijas destino
+#    cajas = Caja.query.all()
+    
+#    return render_template('admin/cheques.html', cheques=cheques, hoy=hoy, cajas=cajas)
+
+# CHEQUES EN CARTERA (CON FILTROS DE TIPO Y SUCURSAL)
+# CHEQUES EN CARTERA (CON FILTROS DE TIPO Y SUCURSAL)
 @admin_bp.route('/cheques')
 @login_required
 @roles_required('admin', 'superadmin')
 def cartera_cheques():
     hoy = date.today()
-    # Solo mostramos los que están físicamente en la empresa
-    #cheques = Cheque.query.filter_by(estado='EN_CARTERA').order_by(Cheque.fecha_vencimiento.asc()).all()
-    cheques = Cheque.query.order_by(Cheque.fecha_vencimiento.asc()).all()
-    # Traemos todas las cajas (físicas y virtuales) para que elijas destino
-    cajas = Caja.query.all()
     
-    return render_template('admin/cheques.html', cheques=cheques, hoy=hoy, cajas=cajas)
+    # 1. Captura de filtros
+    f_tipo = request.args.get('tipo')           # 'FISICO' vs 'ECHEQ'
+    f_sucursal = request.args.get('sucursal_id', type=int)
+    f_estado = request.args.get('estado')
+
+    # Si es admin de sucursal, restringir a su local
+    if current_user.rol == 'admin':
+        f_sucursal = current_user.sucursal_id
+
+    # 2. Consulta Base limpia (usamos Cheque.query directo sin joinedload erróneo)
+    query = Cheque.query
+
+    # 3. Aplicar Filtro de Tipo (Físico vs E-Cheq)
+    if f_tipo:
+        query = query.filter(Cheque.tipo == f_tipo)
+
+    # 4. Aplicar Filtro de Sucursal (a través de la Venta o relación)
+    if f_sucursal:
+        query = query.outerjoin(Venta, Cheque.venta_id == Venta.id).filter(
+            Venta.sucursal_id == f_sucursal
+        )
+
+    # 5. Aplicar Filtro de Estado
+    if f_estado:
+        query = query.filter(Cheque.estado == f_estado)
+
+    cheques = query.order_by(Cheque.fecha_vencimiento.asc()).all()
+    
+    # Cajas disponibles según permisos
+    if current_user.rol == 'admin':
+        cajas = Caja.query.filter(or_(Caja.sucursal_id == current_user.sucursal_id, Caja.tipo == 'VIRTUAL')).all()
+    else:
+        cajas = Caja.query.all()
+
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+    
+    return render_template('admin/cheques.html', 
+                           cheques=cheques, 
+                           hoy=hoy, 
+                           cajas=cajas,
+                           sucursales=sucursales,
+                           filtros={'tipo': f_tipo, 'sucursal_id': f_sucursal, 'estado': f_estado})
+
+
 
 @admin_bp.route('/cheque/procesar/<int:id>', methods=['POST'])
 @login_required
@@ -1798,24 +1873,41 @@ def devolver_cheque_cartera(id):
 @login_required
 @roles_required('admin', 'superadmin')
 def reporte_historico_cheques():
-    # 1. Captura de Filtros (Incluyendo Fechas)
+    # 1. Captura de Filtros (Incluyendo Tipo y Sucursal)
     f_estado = request.args.get('estado')
+    f_tipo = request.args.get('tipo')                   # 'FISICO' vs 'ECHEQ'
+    f_sucursal = request.args.get('sucursal_id', type=int)
     f_banco = request.args.get('banco')
-    f_cliente = request.args.get('cliente_id', type=int) # <--- FILTRO DE CLIENTE
-    f_inicio = request.args.get('inicio') # Fecha desde
-    f_fin = request.args.get('fin')       # Fecha hasta
+    f_cliente = request.args.get('cliente_id', type=int)
+    f_inicio = request.args.get('inicio')
+    f_fin = request.args.get('fin')
     query_busqueda = request.args.get('q', '').strip().lower()
 
-    # 2. Consulta Base
+    # Si es admin de sucursal, restringir automáticamente
+    if current_user.rol == 'admin':
+        f_sucursal = current_user.sucursal_id
+
+    # 2. Consulta Base directa
     query = Cheque.query
 
     # 3. Aplicación de Filtros
+    # A. Filtro por Tipo (Físico vs E-Cheq)
+    if f_tipo:
+        query = query.filter(Cheque.tipo == f_tipo)
+
+    # B. Filtro por Sucursal (vía la Venta de donde vino el cheque)
+    if f_sucursal:
+        query = query.outerjoin(Venta, Cheque.venta_id == Venta.id).filter(
+            Venta.sucursal_id == f_sucursal
+        )
+
+    # C. Resto de filtros
     if f_estado:
         query = query.filter_by(estado=f_estado)
     if f_banco:
         query = query.filter(Cheque.banco.ilike(f"%{f_banco}%"))
     if f_cliente:
-        query = query.filter_by(cliente_id=f_cliente) # <--- APLICADO
+        query = query.filter_by(cliente_id=f_cliente)
     if f_inicio:
         query = query.filter(Cheque.fecha_vencimiento >= datetime.strptime(f_inicio, '%Y-%m-%d').date())
     if f_fin:
@@ -1828,22 +1920,44 @@ def reporte_historico_cheques():
 
     cheques = query.order_by(Cheque.fecha_vencimiento.desc()).all()
     
-    # 4. Estadísticas y Datos para Selectores
+    # 4. Estadísticas y Desglose de Físicos vs E-Cheqs
+    total_monto = sum(c.monto for c in cheques)
+    total_echeqs = sum(c.monto for c in cheques if (c.tipo or '').upper() == 'ECHEQ')
+    total_fisicos = sum(c.monto for c in cheques if (c.tipo or '').upper() == 'FISICO')
+
     stats = {
-        'total_monto': sum(c.monto for c in cheques),
+        'total_monto': total_monto,
+        'total_echeqs': total_echeqs,
+        'total_fisicos': total_fisicos,
         'en_cartera': len([c for c in cheques if c.estado == 'EN_CARTERA']),
         'rechazados': len([c for c in cheques if c.estado == 'RECHAZADO']),
-        'entregados': len([c for c in cheques if c.estado == 'ENTREGADO'])
+        'entregados': len([c for c in cheques if c.estado == 'ENTREGADO']),
+        'depositados': len([c for c in cheques if c.estado in ['DEPOSITADO', 'COBRADO']])
     }
+    
     bancos = db.session.query(Cheque.banco).distinct().all()
+    sucursales = Sucursal.query.filter_by(activo=True).all()
+    clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
 
     return render_template('admin/reporte_cheques.html', 
                            cheques=cheques, 
                            stats=stats, 
                            bancos=[b[0] for b in bancos if b[0]],
+                           sucursales=sucursales,
+                           clientes=clientes,
+                           clientes_list=clientes,
+                           filtros={
+                               'estado': f_estado,
+                               'tipo': f_tipo,
+                               'sucursal_id': f_sucursal,
+                               'banco': f_banco,
+                               'cliente_id': f_cliente,
+                               'inicio': f_inicio,
+                               'fin': f_fin,
+                               'q': query_busqueda
+                           },
                            hoy=get_argentina_time().date())
-    
-                  
+           
 
 @admin_bp.route('/proveedores/ajuste/<int:id>', methods=['POST'])
 @login_required
@@ -2243,7 +2357,11 @@ def reporte_rentabilidad():
     # --- TOTALES GLOBALES (INICIALIZACIÓN) ---
     g_stock_costo = 0
     g_stock_venta = 0
-    g_ventas = 0
+    g_ventas_bruto = 0       # <--- Facturación bruta total
+    g_devoluciones = 0        # <--- Devoluciones totales
+    g_devs_caja = 0           # <--- Devoluciones por caja
+    g_devs_cta = 0            # <--- Devoluciones por cta cte
+    g_ventas = 0              # <--- Ventas netas totales
     g_compras = 0
     g_cobranzas = 0
     g_gastos = 0
@@ -2256,14 +2374,51 @@ def reporte_rentabilidad():
         s_costo = db.session.query(func.sum(Repuesto.stock * Repuesto.costo)).filter(Repuesto.sucursal_id == suc.id).scalar() or 0
         s_venta = db.session.query(func.sum(Repuesto.stock * Repuesto.precio)).filter(Repuesto.sucursal_id == suc.id).scalar() or 0
         
-        # B. VENTAS (Directo de la tabla Venta para evitar fallos de relación)
+        # B. VENTAS (Descontando devoluciones de forma precisa)
         ventas_suc_todas = Venta.query.filter(Venta.sucursal_id == suc.id, Venta.fecha.between(desde, hasta)).all()
-        s_ventas = sum(v.total for v in ventas_suc_todas)
+        s_ventas_bruto = sum(v.total for v in ventas_suc_todas)
+        s_v_ids = [v.id for v in ventas_suc_todas]
+
+        # Devoluciones en caja (por venta_id o por caja de la sucursal)
+        cajas_suc_ids = [c.id for c in suc.cajas]
+        
+        q_dev_caja = MovimientoFinanciero.query.filter(
+            MovimientoFinanciero.fecha.between(desde, hasta),
+            or_(
+                MovimientoFinanciero.metodo_detalle == 'DEVOLUCION',
+                MovimientoFinanciero.motivo.ilike('%Devolución%')
+            )
+        )
+        if cajas_suc_ids:
+            q_dev_caja = q_dev_caja.filter(
+                or_(
+                    MovimientoFinanciero.caja_id.in_(cajas_suc_ids),
+                    MovimientoFinanciero.venta_id.in_(s_v_ids) if s_v_ids else False
+                )
+            )
+        else:
+            q_dev_caja = q_dev_caja.filter(MovimientoFinanciero.venta_id.in_(s_v_ids) if s_v_ids else False)
+        
+        s_dev_caja = sum(m.monto for m in q_dev_caja.all())
+
+        # Devoluciones en Cuenta Corriente
+        q_dev_cta = MovimientoCtaCte.query.filter(
+            MovimientoCtaCte.sucursal_id == suc.id,
+            MovimientoCtaCte.fecha.between(desde, hasta),
+            or_(
+                MovimientoCtaCte.tipo == 'DEVOLUCION',
+                MovimientoCtaCte.descripcion.ilike('%Devolución%')
+            )
+        )
+        s_dev_cta = sum(abs(m.monto) for m in q_dev_cta.all())
+
+        s_devoluciones = s_dev_caja + s_dev_cta
+        s_ventas = s_ventas_bruto - s_devoluciones  # <--- Venta neta real
+
         # IVA de Ventas solo de las Facturadas
         s_iva_v_suc = sum(v.total - (v.total / 1.21) for v in ventas_suc_todas if v.estado_arca == 'FACTURADO')
 
-        # C. COMPRAS (Buscamos en Movimientos de Proveedor - ELIMINA EL ERROR DE 0)
-        # Sumamos todos los movimientos positivos (facturas/deudas) asignados a esta sucursal
+        # C. COMPRAS (Buscamos en Movimientos de Proveedor)
         s_compras_suc = db.session.query(func.sum(MovimientoCtaCteProveedor.monto)).filter(
             MovimientoCtaCteProveedor.sucursal_id == suc.id,
             MovimientoCtaCteProveedor.monto > 0,
@@ -2275,13 +2430,13 @@ def reporte_rentabilidad():
             .join(MovimientoCtaCteProveedor, Compra.id == MovimientoCtaCteProveedor.compra_id)\
             .filter(MovimientoCtaCteProveedor.sucursal_id == suc.id, MovimientoCtaCteProveedor.fecha.between(desde, hasta)).scalar() or 0
 
-        # D. GASTOS Y COBRANZAS (Usando IDs de cajas para evitar JOINs que rompen la suma)
-        cajas_suc_ids = [c.id for c in suc.cajas]
-        
-        # Gastos: Cualquier EGRESO en las cajas de esta sucursal
+        # D. GASTOS Y COBRANZAS (Excluyendo 'DEVOLUCION' para no descontarlo dos veces)
+        # Gastos: Cualquier EGRESO en las cajas de esta sucursal que NO sea devolución
         s_gastos_suc = db.session.query(func.sum(MovimientoFinanciero.monto)).filter(
             MovimientoFinanciero.caja_id.in_(cajas_suc_ids) if cajas_suc_ids else False,
             MovimientoFinanciero.tipo == 'EGRESO',
+            MovimientoFinanciero.metodo_detalle != 'DEVOLUCION',
+            ~MovimientoFinanciero.motivo.ilike('%Devolución%'),
             MovimientoFinanciero.fecha.between(desde, hasta)
         ).scalar() or 0
 
@@ -2299,7 +2454,12 @@ def reporte_rentabilidad():
         reporte_sucursales.append({
             'nombre': suc.nombre,
             'stock_costo': s_costo,
+            'ventas_bruto': s_ventas_bruto,
+            'devoluciones': s_devoluciones,
+            'devs_caja': s_dev_caja,
+            'devs_cta': s_dev_cta,
             'ventas': s_ventas,
+            'compras': s_compras_suc,
             'gastos': s_gastos_suc,
             'cobranzas': s_cobranzas_suc,
             'utilidad': s_utilidad
@@ -2308,6 +2468,10 @@ def reporte_rentabilidad():
         # ACUMULAR TOTALES GLOBALES
         g_stock_costo += s_costo
         g_stock_venta += s_venta
+        g_ventas_bruto += s_ventas_bruto
+        g_devoluciones += s_devoluciones
+        g_devs_caja += s_dev_caja
+        g_devs_cta += s_dev_cta
         g_ventas += s_ventas
         g_compras += s_compras_suc
         g_cobranzas += s_cobranzas_suc
@@ -2347,6 +2511,10 @@ def reporte_rentabilidad():
                            f_sucursal=f_sucursal,
                            g_stock_costo=g_stock_costo,
                            g_stock_venta=g_stock_venta,
+                           g_ventas_bruto=g_ventas_bruto,
+                           g_devoluciones=g_devoluciones,
+                           g_devs_caja=g_devs_caja,
+                           g_devs_cta=g_devs_cta,
                            g_ventas=g_ventas,
                            g_compras=g_compras,
                            g_cobranzas=g_cobranzas,
@@ -2359,7 +2527,6 @@ def reporte_rentabilidad():
                            ant_compras=0, # Compras periodo anterior (opcional)
                            total_clientes=total_cta_cte_clientes,
                            total_prov=total_cta_cte_prov)
-    
       
     
 @admin_bp.route('/auditoria')
@@ -2791,15 +2958,51 @@ def reporte_operaciones_detallado():
     movimientos_todos = query_movs.order_by(MovimientoFinanciero.fecha.desc()).all()
 
     # --- 6. PROCESAMIENTO DE TOTALES PARA EL RESUMEN ---
+    #cobros_detalle = {}
+    #pagos_detalle = {}
+    #total_cobrado = 0
+    #total_pagado = 0
+
+    #for m in movimientos_todos:
+    #    nombre_caja = m.caja.nombre
+    #    tipo_caja = m.caja.tipo or 'FISICA'
+        
+    #    if m.tipo == 'INGRESO':
+    #        if nombre_caja not in cobros_detalle:
+    #            cobros_detalle[nombre_caja] = {'monto': 0, 'tipo': tipo_caja}
+    #        cobros_detalle[nombre_caja]['monto'] += m.monto
+    #        total_cobrado += m.monto
+    #    else:
+    #        if nombre_caja not in pagos_detalle:
+    #            pagos_detalle[nombre_caja] = {'monto': 0, 'tipo': tipo_caja}
+    #        pagos_detalle[nombre_caja]['monto'] += m.monto
+    #        total_pagado += m.monto
+
+    #resumen = {
+    #    'ventas_total': sum(v.total for v in ventas),
+    #    'compras_total': sum(c.total for c in compras),
+    #    'total_cobrado': total_cobrado,
+    #    'total_pagado': total_pagado,
+    #    'cobros_detalle': cobros_detalle,
+    #    'pagos_detalle': pagos_detalle,
+    #    'balance_caja': total_cobrado - total_pagado
+    #}
+
+    # --- 6. PROCESAMIENTO DE TOTALES PARA EL RESUMEN (CON DEVOLUCIONES) ---
     cobros_detalle = {}
     pagos_detalle = {}
     total_cobrado = 0
     total_pagado = 0
+    total_devoluciones = 0
 
     for m in movimientos_todos:
         nombre_caja = m.caja.nombre
         tipo_caja = m.caja.tipo or 'FISICA'
         
+        # Identificar si es una devolución de dinero por caja
+        if m.metodo_detalle == 'DEVOLUCION':
+            total_devoluciones += m.monto
+
         if m.tipo == 'INGRESO':
             if nombre_caja not in cobros_detalle:
                 cobros_detalle[nombre_caja] = {'monto': 0, 'tipo': tipo_caja}
@@ -2811,8 +3014,12 @@ def reporte_operaciones_detallado():
             pagos_detalle[nombre_caja]['monto'] += m.monto
             total_pagado += m.monto
 
+    ventas_total_bruto = sum(v.total for v in ventas)
+
     resumen = {
-        'ventas_total': sum(v.total for v in ventas),
+        'ventas_total': ventas_total_bruto,
+        'devoluciones_total': total_devoluciones,                          # <--- NUEVO
+        'ventas_netas': ventas_total_bruto - total_devoluciones,           # <--- NUEVO: Ventas reales descontadas
         'compras_total': sum(c.total for c in compras),
         'total_cobrado': total_cobrado,
         'total_pagado': total_pagado,
@@ -2821,6 +3028,8 @@ def reporte_operaciones_detallado():
         'balance_caja': total_cobrado - total_pagado
     }
 
+    
+    
     # 7. DATOS PARA FILTROS
     sucursales = Sucursal.query.filter_by(activo=True).all()
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
@@ -2916,15 +3125,22 @@ def procesar_devolucion():
         # 3. GESTIÓN FINANCIERA
         if total_reintegro > 0:
             if metodo == 'CTA_CTE':
+                # Registramos el movimiento en la cuenta corriente del cliente como DEVOLUCION
                 nuevo_mov = MovimientoCtaCte(
                     cliente_id=venta.cliente_id,
+                    venta_id=venta.id,  
                     monto=-total_reintegro, 
-                    tipo='PAGO', 
+                    tipo='DEVOLUCION', # <--- CORREGIDO: ahora es 'DEVOLUCION' (antes era 'PAGO')
                     sucursal_id=current_user.sucursal_id,
                     descripcion=f"Crédito por Devolución (con dto) - Venta #{venta.id}"
                 )
                 db.session.add(nuevo_mov)
+
+                # Ajustamos el saldo de la venta para que quede equilibrada en Cta Cte
+                if venta.total_pagado and venta.total_pagado >= total_reintegro:
+                    venta.total_pagado -= total_reintegro
             else:
+                # Salida de dinero real de la caja física o virtual seleccionada
                 caja = Caja.query.get(caja_id)
                 if caja:
                     caja.saldo_actual -= total_reintegro
@@ -2934,7 +3150,8 @@ def procesar_devolucion():
                         tipo='EGRESO',
                         motivo=f"Reintegro por Devolución (con dto) - Venta #{venta.id}",
                         metodo_detalle='DEVOLUCION',
-                        usuario_id=current_user.id
+                        usuario_id=current_user.id,
+                        venta_id=venta.id
                     )
                     db.session.add(mov_f)
 
@@ -2945,14 +3162,13 @@ def procesar_devolucion():
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
     
-    
 from sqlalchemy.orm import joinedload
 
 @admin_bp.route('/reportes/rentabilidad-ventas')
 @login_required
 @roles_required('admin', 'superadmin')
 def reporte_rentabilidad_ventas():
-    # 1. Filtros
+    # 1. Filtros de Fecha, Sucursal y Cliente
     desde_str = request.args.get('desde', date.today().replace(day=1).strftime('%Y-%m-%d'))
     hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
     f_sucursal = request.args.get('sucursal_id', type=int)
@@ -2961,11 +3177,10 @@ def reporte_rentabilidad_ventas():
     desde = datetime.strptime(desde_str, '%Y-%m-%d')
     hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
 
-    # Si es admin de sucursal, restringir a su local
     if current_user.rol == 'admin':
         f_sucursal = current_user.sucursal_id
 
-    # 2. Consulta de Ventas con detalles y repuesto vinculado
+    # 2. Consulta de Ventas del período
     query = Venta.query.options(
         joinedload(Venta.cliente),
         joinedload(Venta.sucursal),
@@ -2979,25 +3194,22 @@ def reporte_rentabilidad_ventas():
 
     ventas = query.order_by(Venta.fecha.desc()).all()
 
-    # 3. Procesamiento ítem por ítem para el detalle
+    # 3. Procesar ítems vendidos
     items_reporte = []
-    total_venta_global = 0.0
-    total_costo_global = 0.0
+    total_venta_bruto = 0.0
+    total_costo_bruto = 0.0
     total_unidades = 0
 
     for v in ventas:
         for d in v.detalles:
             cant = d.cantidad or 0
             precio_u = d.precio_unitario or 0.0
-            
-            # Si el repuesto existe en la base, tomamos su costo registrado; si no, 0
             costo_u = (d.repuesto.costo if d.repuesto and d.repuesto.costo else 0.0)
             
             subtotal_venta = cant * precio_u
             subtotal_costo = cant * costo_u
             ganancia_item = subtotal_venta - subtotal_costo
 
-            # Margen = (Ganancia / Costo) * 100 si costo > 0; sino 100%
             if subtotal_costo > 0:
                 margen_porc = round(((subtotal_venta / subtotal_costo) - 1) * 100, 2)
             elif subtotal_venta > 0:
@@ -3022,33 +3234,81 @@ def reporte_rentabilidad_ventas():
                 'margen_porc': margen_porc
             })
 
-            total_venta_global += subtotal_venta
-            total_costo_global += subtotal_costo
+            total_venta_bruto += subtotal_venta
+            total_costo_bruto += subtotal_costo
             total_unidades += cant
 
-    # 4. Cálculos Globales
-    ganancia_global = total_venta_global - total_costo_global
-    if total_costo_global > 0:
-        margen_global_porc = round(((total_venta_global / total_costo_global) - 1) * 100, 2)
-    elif total_venta_global > 0:
+    # 4. CAPTURAR Y CALCULAR DEVOLUCIONES DEL PERÍODO (Caja y Cta Cte)
+    q_dev_caja = MovimientoFinanciero.query.filter(
+        or_(
+            MovimientoFinanciero.metodo_detalle == 'DEVOLUCION',
+            MovimientoFinanciero.motivo.ilike('%Devolución%')
+        ),
+        MovimientoFinanciero.fecha.between(desde, hasta)
+    )
+    if f_sucursal:
+        q_dev_caja = q_dev_caja.join(Caja).filter(Caja.sucursal_id == f_sucursal)
+
+    q_dev_cta = MovimientoCtaCte.query.filter(
+        or_(
+            MovimientoCtaCte.tipo == 'DEVOLUCION',
+            MovimientoCtaCte.descripcion.ilike('%Devolución%')
+        ),
+        MovimientoCtaCte.fecha.between(desde, hasta)
+    )
+    if f_sucursal:
+        q_dev_cta = q_dev_cta.filter(MovimientoCtaCte.sucursal_id == f_sucursal)
+    if f_cliente:
+        q_dev_cta = q_dev_cta.filter(MovimientoCtaCte.cliente_id == f_cliente)
+
+    devs_caja_monto = sum(m.monto for m in q_dev_caja.all())
+    devs_cta_monto = sum(abs(m.monto) for m in q_dev_cta.all())
+    total_devoluciones = devs_caja_monto + devs_cta_monto
+
+    # 5. CÁLCULOS NETOS REALES
+    venta_neta_real = total_venta_bruto - total_devoluciones
+    ganancia_neta_real = venta_neta_real - total_costo_bruto
+
+    if total_costo_bruto > 0:
+        margen_global_porc = round(((venta_neta_real / total_costo_bruto) - 1) * 100, 2)
+    elif venta_neta_real > 0:
         margen_global_porc = 100.0
     else:
         margen_global_porc = 0.0
 
-    # Margen sobre venta (Markup vs Margin)
-    margen_sobre_venta = round((ganancia_global / total_venta_global * 100), 2) if total_venta_global > 0 else 0.0
+    margen_sobre_venta = round((ganancia_neta_real / venta_neta_real * 100), 2) if venta_neta_real > 0 else 0.0
+
+    # Lista consolidada de devoluciones para el modal/detalle
+    lista_devoluciones = []
+    for dc in q_dev_caja.all():
+        lista_devoluciones.append({
+            'fecha': dc.fecha, 'tipo': 'CAJA / EFECTIVO', 
+            'cuenta': dc.caja.nombre if dc.caja else 'Caja',
+            'motivo': dc.motivo, 'monto': dc.monto
+        })
+    for dcta in q_dev_cta.all():
+        lista_devoluciones.append({
+            'fecha': dcta.fecha, 'tipo': 'CTA CTE (CRÉDITO)', 
+            'cuenta': dcta.cliente.razon_social if dcta.cliente else 'Cliente',
+            'motivo': dcta.descripcion, 'monto': abs(dcta.monto)
+        })
 
     sucursales = Sucursal.query.filter_by(activo=True).all()
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
 
     return render_template('admin/reporte_rentabilidad_ventas.html',
                            items=items_reporte,
-                           total_venta=total_venta_global,
-                           total_costo=total_costo_global,
-                           ganancia_global=ganancia_global,
-                           margen_global=margen_global_porc,
+                           total_venta_bruto=total_venta_bruto,
+                           total_devoluciones=total_devoluciones,
+                           devs_caja_monto=devs_caja_monto,
+                           devs_cta_monto=devs_cta_monto,
+                           total_venta=venta_neta_real,          # Venta neta final
+                           total_costo=total_costo_bruto,
+                           ganancia_global=ganancia_neta_real,   # Ganancia neta real
+                           margen_global=margen_global_porc,     # Margen neto real
                            margen_sobre_venta=margen_sobre_venta,
                            total_unidades=total_unidades,
+                           devoluciones=lista_devoluciones,
                            sucursales=sucursales,
                            clientes=clientes,
                            filtros={

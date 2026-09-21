@@ -26,6 +26,65 @@ migrate = Migrate()
 
 login_manager = LoginManager() 
 
+
+# --- FUNCIÓN DE AUTO-SINCRONIZACIÓN DE RUBROS/CATEGORÍAS ---
+def auto_cargar_categorias():
+    from .models import CategoriaMovimiento
+
+    categorias = [
+        # --- EGRESOS (Gastos) ---
+        ('Logística: Fletes y Envíos', 'EGRESO'),
+        ('Logística: Comisionistas', 'EGRESO'),
+        ('Logística: Cadetería / Motomensajería', 'EGRESO'),
+        ('Personal: Sueldos y Jornales', 'EGRESO'),
+        ('Personal: Adelantos y Vales', 'EGRESO'),
+        ('Personal: Viáticos y Refrigerios', 'EGRESO'),
+        ('Servicios: Luz (EPE/Empresa)', 'EGRESO'),
+        ('Servicios: Agua y Gas', 'EGRESO'),
+        ('Servicios: Internet y Telefonía', 'EGRESO'),
+        ('Local: Alquiler', 'EGRESO'),
+        ('Local: Insumos de Oficina / Papelería', 'EGRESO'),
+        ('Local: Artículos de Limpieza', 'EGRESO'),
+        ('Local: Mantenimiento y Reparaciones', 'EGRESO'),
+        ('Impuestos: AFIP (IVA / Monotributo)', 'EGRESO'),
+        ('Impuestos: Ingresos Brutos / Tasas', 'EGRESO'),
+        ('Financiero: Comisiones Bancarias', 'EGRESO'),
+        ('Financiero: Intereses Pagados', 'EGRESO'),
+        ('Retiro de Socios / Dueños', 'EGRESO'),
+        ('Gastos Varios / Menores', 'EGRESO'),
+        ('Retiro de Capital / Inversión', 'EGRESO'),      # <--- DESCOMENTADO Y ACTIVADO
+        ('Pago a Proveedores (Mercadería)', 'EGRESO'),
+        
+        # --- INGRESOS (Entradas Extra) ---
+        ('Aporte de Capital / Inversión', 'INGRESO'),
+        ('Venta de Rezagos / Chatarra (Cobre/Aluminio)', 'INGRESO'),
+        ('Intereses Ganados / Plazo Fijo', 'INGRESO'),
+        ('Ajuste de Saldo (+) ', 'INGRESO'),
+        ('Cobro de Servicios no Inventariados', 'INGRESO')
+    ]
+
+    try:
+        hubo_cambios = False
+        for nombre, tipo in categorias:
+            # Verificamos si ya existe para no duplicar
+            existe = CategoriaMovimiento.query.filter_by(nombre=nombre).first()
+            if not existe:
+                nueva = CategoriaMovimiento(nombre=nombre, tipo=tipo)
+                db.session.add(nueva)
+                hubo_cambios = True
+
+        if hubo_cambios:
+            db.session.commit()
+            print("[INFO] Categorías de tesorería sincronizadas con éxito.")
+    except Exception as e:
+        db.session.rollback()
+        # En caso de que la tabla aún no exista durante migraciones iniciales
+        print(f"[WARN] No se pudieron sincronizar categorías (aún sin tabla): {e}")
+
+
+
+
+
 def create_app():
     app = Flask(__name__)
     app.config.from_object(Config)
@@ -63,5 +122,9 @@ def create_app():
     app.register_blueprint(inventory_bp)
     app.register_blueprint(auth_bp)
     app.register_blueprint(admin_bp)
+
+    # 8. Auto-sincronización de rubros al arrancar la aplicación
+    with app.app_context():
+        auto_cargar_categorias()
 
     return app
