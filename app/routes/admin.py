@@ -155,7 +155,7 @@ def toggle_usuario(id):
 
 @admin_bp.route('/reportes')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def reportes():
     # 1. CAPTURA DE PARÁMETROS DESDE LA URL
     sucursal_id = request.args.get('sucursal_id', type=int)
@@ -408,7 +408,7 @@ def toggle_proveedor(id):
 
 @admin_bp.route('/proveedores/saldos')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor' )
 def lista_saldos_proveedores():
     # 1. Obtener todos los proveedores
     proveedores = Proveedor.query.all()
@@ -457,7 +457,7 @@ def lista_saldos_proveedores():
     
 @admin_bp.route('/proveedores/pago/<int:id>', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def registrar_pago_proveedor(id):
     prov = Proveedor.query.get_or_404(id)
     
@@ -535,19 +535,23 @@ from app.utils.security import sucursal_filter # Asegúrate de que esté importa
 
 @admin_bp.route('/proveedores/detalle/<int:id>')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def detalle_cta_cte_proveedor(id):
     proveedor = Proveedor.query.get_or_404(id)
     
     # --- CAPTURA DEL FILTRO DE SUCURSAL ---
     f_sucursal = request.args.get('sucursal_id', type=int)
     
-    # --- FILTRO DE MOVIMIENTOS POR SUCURSAL ---
-    # Iniciamos la consulta filtrando por el proveedor elegido
-    query_m = MovimientoCtaCteProveedor.query.filter_by(proveedor_id=id)
+    # --- FILTRO DE MOVIMIENTOS POR SUCURSAL CON DETALLES DE COMPRA (Eager Loading) ---
+    # Iniciamos la consulta filtrando por el proveedor elegido y cargando la compra con sus renglones y repuestos
+    query_m = MovimientoCtaCteProveedor.query.options(
+        joinedload(MovimientoCtaCteProveedor.compra)
+            .joinedload(Compra.detalles)
+            .joinedload(DetalleCompra.repuesto)
+    ).filter_by(proveedor_id=id)
     
-    if current_user.rol == 'admin':
-        # El Administrador solo ve las facturas y pagos de SU sucursal
+    if current_user.rol in ['admin', 'vendedor']:
+        # El Administrador y el Vendedor solo ven las facturas y pagos de SU sucursal
         query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
         f_sucursal = current_user.sucursal_id # Forzamos el ID para la lógica posterior
     elif f_sucursal:
@@ -583,12 +587,11 @@ def detalle_cta_cte_proveedor(id):
                            cajas=cajas,
                            sucursales=sucursales,
                            f_sucursal=f_sucursal,
-                           cheques_en_cartera=cheques_en_cartera)
-    
+                           cheques_en_cartera=cheques_en_cartera) 
     
 @admin_bp.route('/cta-cte')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def lista_cta_cte():
     saldos = []
     total_global_sucursal = 0
@@ -667,7 +670,7 @@ def lista_cta_cte():
 #                           saldo=saldo_actual, cajas=cajas, hoy=hoy)
 @admin_bp.route('/cta-cte/<int:cliente_id>')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def detalle_cta_cte(cliente_id):
     cliente = Cliente.query.get_or_404(cliente_id)
     
@@ -715,7 +718,7 @@ def detalle_cta_cte(cliente_id):
     
 @admin_bp.route('/proveedores/pago-compuesto/<int:id>', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def pago_compuesto_proveedor(id):
     prov = Proveedor.query.get_or_404(id)
     data = request.get_json()
@@ -791,7 +794,7 @@ def pago_compuesto_proveedor(id):
 
 @admin_bp.route('/cta-cte/pago/<int:cliente_id>', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def registrar_pago(cliente_id):
     # --- CAPTURA DE DATOS DEL FORMULARIO ---
     monto = float(request.form.get('monto'))
@@ -854,7 +857,7 @@ def registrar_pago(cliente_id):
 
 @admin_bp.route('/cta-cte/pago-compuesto/<int:id>', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def pago_compuesto_cliente(id):
     cliente = Cliente.query.get_or_404(id)
     data = request.get_json()
@@ -1633,7 +1636,7 @@ def historial_cierres():
 
 @admin_bp.route('/compras')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def modulo_compras():
     # Necesitamos las sucursales para que el usuario elija dónde entra la mercadería
     proveedores = Proveedor.query.filter_by(activo=True).all()
@@ -1668,7 +1671,7 @@ def generar_proximo_sku_vacan():
 
 @admin_bp.route('/compras/procesar', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def procesar_compra():
     # 1. IDENTIFICAR SUCURSAL Y PROVEEDOR DE DESTINO (Mandan sobre todo lo demás)
     if 'archivo_excel' in request.files:
@@ -2229,7 +2232,7 @@ def pdf_recibo(mov_id):
 
 @admin_bp.route('/traspasos')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def modulo_traspasos():
     sucursales = Sucursal.query.filter_by(activo=True).all()
     # Enviamos los traspasos realizados para el historial
@@ -2262,7 +2265,7 @@ def obtener_stock_sucursal(sucursal_id):
 
 @admin_bp.route('/traspasos/procesar', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def procesar_traspaso():
     data = request.get_json()
     origen_id = int(data.get('origen_id'))
@@ -2538,7 +2541,7 @@ def reporte_auditoria():
     hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
     f_sucursal = request.args.get('sucursal_id', type=int)
     f_usuario = request.args.get('usuario_id', type=int)
-    f_tipo = request.args.get('tipo_op') # VENTA, AJUSTE_CTA, COMPRA, CAJA, PRECIO, TRASPASO
+    f_tipo = request.args.get('tipo_op') # VENTA, DEVOLUCION, AJUSTE_CTA, COMPRA, CAJA, PRECIO, TRASPASO, CHEQUE, CIERRE
 
     desde = datetime.strptime(desde_str, '%Y-%m-%d')
     hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
@@ -2548,69 +2551,159 @@ def reporte_auditoria():
 
     log_auditoria = []
 
-    # --- A. AUDITORÍA DE VENTAS (Detalle ampliado con ajustes) ---
+    # --- A. AUDITORÍA DE VENTAS (Protegido contra NoneType en cliente) ---
     if not f_tipo or f_tipo == 'VENTA':
-        q_v = Venta.query.options(joinedload(Venta.usuario), joinedload(Venta.sucursal), joinedload(Venta.cliente)).filter(Venta.fecha.between(desde, hasta))
+        q_v = Venta.query.options(
+            joinedload(Venta.usuario), 
+            joinedload(Venta.sucursal), 
+            joinedload(Venta.cliente)
+        ).filter(Venta.fecha.between(desde, hasta))
+        
         if f_sucursal: q_v = q_v.filter(Venta.sucursal_id == f_sucursal)
         if f_usuario: q_v = q_v.filter(Venta.usuario_id == f_usuario)
+        
         for v in q_v.all():
-            # Construimos un detalle que explique la configuración fiscal de la venta
-            det_v = f"Cliente: {v.cliente.razon_social} | IVA: {v.iva_porcentaje}%"
+            # PROTECCIÓN: Si el cliente no está seteado
+            nombre_cliente = v.cliente.razon_social if v.cliente else 'Consumidor Final'
+            
+            det_v = f"Cliente: {nombre_cliente} | IVA: {v.iva_porcentaje or 0}%"
             if (v.recargo_global or 0) > 0: det_v += f" | Recargo: {v.recargo_global}%"
             if (v.descuento_global or 0) > 0: det_v += f" | Desc: {v.descuento_global}%"
             
             log_auditoria.append({
-                'fecha': v.fecha, 'usuario': v.usuario.username if v.usuario else 'SISTEMA', 
+                'fecha': v.fecha, 
+                'usuario': v.usuario.username if v.usuario else 'SISTEMA', 
                 'sucursal': v.sucursal.nombre if v.sucursal else 'S/D',
-                'tipo': 'VENTA', 'referencia': f"Remito #{v.id}", 
-                'detalle': det_v, 'monto': v.total, 'clase': 'success'
+                'tipo': 'VENTA', 
+                'referencia': f"Remito #{v.id}", 
+                'detalle': det_v, 
+                'monto': v.total, 
+                'clase': 'success'
             })
 
-    # --- B. NUEVO: AUDITORÍA DE AJUSTES MANUALES (Trabajos, Saldos Iniciales, Notas Manuales) ---
+    # --- B. AUDITORÍA DE DEVOLUCIONES / REINTEGROS (NUEVO) ---
+    if not f_tipo or f_tipo == 'DEVOLUCION':
+        # 1. Devoluciones que afectaron Cuenta Corriente
+        q_dev_cta = MovimientoCtaCte.query.options(
+            joinedload(MovimientoCtaCte.cliente), 
+            joinedload(MovimientoCtaCte.sucursal)
+        ).filter(
+            MovimientoCtaCte.tipo == 'DEVOLUCION',
+            MovimientoCtaCte.fecha.between(desde, hasta)
+        )
+        if f_sucursal: q_dev_cta = q_dev_cta.filter(MovimientoCtaCte.sucursal_id == f_sucursal)
+        for dc in q_dev_cta.all():
+            nom_c = dc.cliente.razon_social if dc.cliente else 'Consumidor Final'
+            log_auditoria.append({
+                'fecha': dc.fecha,
+                'usuario': 'CAJERO/ADMIN',
+                'sucursal': dc.sucursal.nombre if dc.sucursal else 'S/D',
+                'tipo': 'DEVOLUCION (CTA)',
+                'referencia': f"Venta #{dc.venta_id}" if dc.venta_id else 'REINTEGRO',
+                'detalle': f"Crédito a {nom_c}: {dc.descripcion}",
+                'monto': abs(dc.monto),
+                'clase': 'danger'
+            })
+
+        # 2. Devoluciones que salieron en efectivo por caja
+        q_dev_caja = MovimientoFinanciero.query.options(
+            joinedload(MovimientoFinanciero.caja),
+            joinedload(MovimientoFinanciero.usuario)
+        ).filter(
+            or_(
+                MovimientoFinanciero.metodo_detalle == 'DEVOLUCION',
+                MovimientoFinanciero.motivo.ilike('%Devolución%')
+            ),
+            MovimientoFinanciero.fecha.between(desde, hasta)
+        )
+        if f_sucursal: q_dev_caja = q_dev_caja.join(Caja).filter(Caja.sucursal_id == f_sucursal)
+        if f_usuario: q_dev_caja = q_dev_caja.filter(MovimientoFinanciero.usuario_id == f_usuario)
+        for dcj in q_dev_caja.all():
+            log_auditoria.append({
+                'fecha': dcj.fecha,
+                'usuario': dcj.usuario.username if dcj.usuario else 'SISTEMA',
+                'sucursal': dcj.caja.nombre if dcj.caja else 'CAJA',
+                'tipo': 'DEVOLUCION (CAJA)',
+                'referencia': f"Venta #{dcj.venta_id}" if dcj.venta_id else 'EFECTIVO',
+                'detalle': f"Reintegro físico de fondos: {dcj.motivo}",
+                'monto': dcj.monto,
+                'clase': 'danger'
+            })
+
+    # --- C. AUDITORÍA DE AJUSTES MANUALES (Protegido contra NoneType) ---
     if not f_tipo or f_tipo == 'AJUSTE_CTA':
-        # Ajustes en Clientes (Movimientos que NO nacen de una Venta)
-        q_aj_cli = MovimientoCtaCte.query.options(joinedload(MovimientoCtaCte.cliente), joinedload(MovimientoCtaCte.sucursal)).filter(
-            MovimientoCtaCte.venta_id == None, 
+        # Ajustes en Clientes (Movimientos que NO nacen de una Venta ni son DEVOLUCION)
+        q_aj_cli = MovimientoCtaCte.query.options(
+            joinedload(MovimientoCtaCte.cliente), 
+            joinedload(MovimientoCtaCte.sucursal)
+        ).filter(
+            MovimientoCtaCte.venta_id == None,
+            MovimientoCtaCte.tipo != 'DEVOLUCION',
             MovimientoCtaCte.fecha.between(desde, hasta)
         )
         if f_sucursal: q_aj_cli = q_aj_cli.filter_by(sucursal_id=f_sucursal)
         for m in q_aj_cli.all():
+            nom_cli = m.cliente.razon_social if m.cliente else 'Cliente Borrado/SD'
             log_auditoria.append({
-                'fecha': m.fecha, 'usuario': 'ADMIN', # Estos movimientos manuales usualmente los hace el admin
+                'fecha': m.fecha, 
+                'usuario': 'ADMIN',
                 'sucursal': m.sucursal.nombre if m.sucursal else 'S/D',
-                'tipo': 'AJUSTE CTA (CLI)', 'referencia': 'MANUAL', 
-                'detalle': f"{m.cliente.razon_social}: {m.descripcion}", 'monto': m.monto, 'clase': 'dark'
+                'tipo': 'AJUSTE CTA (CLI)', 
+                'referencia': 'MANUAL', 
+                'detalle': f"{nom_cli}: {m.descripcion}", 
+                'monto': m.monto, 
+                'clase': 'dark'
             })
 
         # Ajustes en Proveedores (Movimientos que NO nacen de una Compra)
-        q_aj_prov = MovimientoCtaCteProveedor.query.options(joinedload(MovimientoCtaCteProveedor.proveedor), joinedload(MovimientoCtaCteProveedor.sucursal)).filter(
+        q_aj_prov = MovimientoCtaCteProveedor.query.options(
+            joinedload(MovimientoCtaCteProveedor.proveedor), 
+            joinedload(MovimientoCtaCteProveedor.sucursal)
+        ).filter(
             MovimientoCtaCteProveedor.compra_id == None, 
             MovimientoCtaCteProveedor.fecha.between(desde, hasta)
         )
         if f_sucursal: q_aj_prov = q_aj_prov.filter_by(sucursal_id=f_sucursal)
         for mp in q_aj_prov.all():
+            nom_prov = mp.proveedor.razon_social if mp.proveedor else 'Proveedor Borrado/SD'
             log_auditoria.append({
-                'fecha': mp.fecha, 'usuario': 'ADMIN',
+                'fecha': mp.fecha, 
+                'usuario': 'ADMIN',
                 'sucursal': mp.sucursal.nombre if mp.sucursal else 'S/D',
-                'tipo': 'AJUSTE CTA (PROV)', 'referencia': 'MANUAL', 
-                'detalle': f"{mp.proveedor.razon_social}: {mp.descripcion}", 'monto': mp.monto, 'clase': 'dark'
+                'tipo': 'AJUSTE CTA (PROV)', 
+                'referencia': 'MANUAL', 
+                'detalle': f"{nom_prov}: {mp.descripcion}", 
+                'monto': mp.monto, 
+                'clase': 'dark'
             })
 
-    # --- C. AUDITORÍA DE COMPRAS ---
+    # --- D. AUDITORÍA DE COMPRAS ---
     if not f_tipo or f_tipo == 'COMPRA':
-        q_c = Compra.query.filter(Compra.fecha.between(desde, hasta))
+        q_c = Compra.query.options(joinedload(Compra.proveedor)).filter(Compra.fecha.between(desde, hasta))
         if f_sucursal:
             q_c = q_c.join(DetalleCompra).join(Repuesto).filter(Repuesto.sucursal_id == f_sucursal)
         for c in q_c.distinct().all():
+            prov_nom = c.proveedor.razon_social if c.proveedor else 'Proveedor Desconocido'
             log_auditoria.append({
-                'fecha': c.fecha, 'usuario': 'SISTEMA', 'sucursal': 'DEPÓSITO',
-                'tipo': 'COMPRA', 'referencia': f"Fact. #{c.nro_factura}", 
-                'detalle': f"Prov: {c.proveedor.razon_social}", 'monto': c.total, 'clase': 'primary'
+                'fecha': c.fecha, 
+                'usuario': 'SISTEMA', 
+                'sucursal': 'DEPÓSITO',
+                'tipo': 'COMPRA', 
+                'referencia': f"Fact. #{c.nro_factura}", 
+                'detalle': f"Prov: {prov_nom} | Tipo: {c.tipo_comprobante or 'FACTURA'}", 
+                'monto': c.total, 
+                'clase': 'primary'
             })
 
-    # --- D. AUDITORÍA DE TESORERÍA (CON FIX DE NAMESPACE) ---
+    # --- E. AUDITORÍA DE TESORERÍA / CAJA ---
     if not f_tipo or f_tipo == 'CAJA':
-        q_m = MovimientoFinanciero.query.options(joinedload(MovimientoFinanciero.usuario), joinedload(MovimientoFinanciero.caja)).filter(MovimientoFinanciero.fecha.between(desde, hasta))
+        q_m = MovimientoFinanciero.query.options(
+            joinedload(MovimientoFinanciero.usuario), 
+            joinedload(MovimientoFinanciero.caja)
+        ).filter(
+            MovimientoFinanciero.fecha.between(desde, hasta),
+            MovimientoFinanciero.metodo_detalle != 'DEVOLUCION'  # Ya auditado en DEVOLUCION
+        )
         if f_sucursal: 
             q_m = q_m.join(Caja).filter(Caja.sucursal_id == f_sucursal)
         if f_usuario: 
@@ -2619,47 +2712,148 @@ def reporte_auditoria():
         for m in q_m.all():
             nombre_u = m.usuario.username if (hasattr(m, 'usuario') and m.usuario) else 'SISTEMA'
             log_auditoria.append({
-                'fecha': m.fecha, 'usuario': nombre_u, 
+                'fecha': m.fecha, 
+                'usuario': nombre_u, 
                 'sucursal': m.caja.nombre if m.caja else 'S/C', 
-                'tipo': m.tipo, 'referencia': m.metodo_detalle or 'MANUAL', 
-                'detalle': m.motivo, 'monto': m.monto, 'clase': 'warning' if m.tipo == 'EGRESO' else 'info'
+                'tipo': m.tipo, 
+                'referencia': m.metodo_detalle or 'MANUAL', 
+                'detalle': m.motivo, 
+                'monto': m.monto, 
+                'clase': 'warning' if m.tipo == 'EGRESO' else 'info'
             })
 
-    # --- E. AUDITORÍA DE PRECIOS ---
+    # --- F. AUDITORÍA DE CAMBIOS DE PRECIOS Y COSTOS ---
     if not f_tipo or f_tipo == 'PRECIO':
-        q_p = HistorialPrecio.query.options(joinedload(HistorialPrecio.usuario), joinedload(HistorialPrecio.repuesto)).filter(HistorialPrecio.fecha.between(desde, hasta))
+        q_p = HistorialPrecio.query.options(
+            joinedload(HistorialPrecio.usuario), 
+            joinedload(HistorialPrecio.repuesto)
+        ).filter(HistorialPrecio.fecha.between(desde, hasta))
         if f_usuario: q_p = q_p.filter(HistorialPrecio.usuario_id == f_usuario)
         for h in q_p.all():
+            rep_nombre = h.repuesto.nombre if h.repuesto else 'Repuesto Borrado'
+            rep_suc = h.repuesto.sucursal.nombre if (h.repuesto and h.repuesto.sucursal) else 'S/D'
+            
+            if f_sucursal and h.repuesto and h.repuesto.sucursal_id != f_sucursal:
+                continue
+
+            det_precio = f"{rep_nombre} [Precio: ${h.precio_anterior:,.2f} -> ${h.precio_nuevo:,.2f}]"
+            if h.costo_anterior != h.costo_nuevo:
+                det_precio += f" [Costo: ${h.costo_anterior:,.2f} -> ${h.costo_nuevo:,.2f}]"
+
             log_auditoria.append({
-                'fecha': h.fecha, 'usuario': h.usuario.username if h.usuario else 'SISTEMA', 
-                'sucursal': h.repuesto.sucursal.nombre if h.repuesto and h.repuesto.sucursal else 'S/D',
-                'tipo': 'PRECIO', 'referencia': 'VALOR', 
-                'detalle': f"{h.repuesto.nombre if h.repuesto else 'Borr.'} (${h.precio_anterior} -> ${h.precio_nuevo})", 
-                'monto': 0, 'clase': 'secondary'
+                'fecha': h.fecha, 
+                'usuario': h.usuario.username if h.usuario else 'SISTEMA', 
+                'sucursal': rep_suc,
+                'tipo': 'PRECIO', 
+                'referencia': 'MODIFICACIÓN', 
+                'detalle': det_precio, 
+                'monto': h.precio_nuevo, 
+                'clase': 'secondary'
             })
 
-    # --- F. AUDITORÍA DE TRASPASOS ---
+    # --- G. AUDITORÍA DE TRASPASOS ENTRE SUCURSALES ---
     if not f_tipo or f_tipo == 'TRASPASO':
-        q_t = Traspaso.query.options(joinedload(Traspaso.usuario)).filter(Traspaso.fecha.between(desde, hasta))
+        q_t = Traspaso.query.options(
+            joinedload(Traspaso.usuario),
+            joinedload(Traspaso.origen),
+            joinedload(Traspaso.destino)
+        ).filter(Traspaso.fecha.between(desde, hasta))
         if f_usuario: q_t = q_t.filter(Traspaso.usuario_id == f_usuario)
         for t in q_t.all():
+            if f_sucursal and (t.sucursal_origen_id != f_sucursal and t.sucursal_destino_id != f_sucursal):
+                continue
             log_auditoria.append({
-                'fecha': t.fecha, 'usuario': t.usuario.username if t.usuario else 'SISTEMA', 
+                'fecha': t.fecha, 
+                'usuario': t.usuario.username if t.usuario else 'SISTEMA', 
                 'sucursal': t.origen.nombre if t.origen else 'S/D',
-                'tipo': 'TRASPASO', 'referencia': f"ENVÍO #{t.id}", 
-                'detalle': f"Hacia: {t.destino.nombre if t.destino else 'S/D'}", 'monto': 0, 'clase': 'dark'
+                'tipo': 'TRASPASO', 
+                'referencia': f"ENVÍO #{t.id}", 
+                'detalle': f"Origen: {t.origen.nombre if t.origen else 'S/D'} -> Destino: {t.destino.nombre if t.destino else 'S/D'} ({t.observaciones or 'Sin obs'})", 
+                'monto': 0, 
+                'clase': 'dark'
             })
 
-    # Ordenar todo el log consolidado por fecha
+    # --- H. AUDITORÍA DE VALORES Y CHEQUES ---
+    if not f_tipo or f_tipo == 'CHEQUE':
+        # Consulta limpia sin joinedload erróneo
+        q_ch = Cheque.query.filter(Cheque.fecha_vencimiento.between(desde.date(), hasta.date()))
+        
+        for ch in q_ch.all():
+            # Si hay filtro de sucursal, verificar vía venta_asociada si existe
+            if f_sucursal and hasattr(ch, 'venta_asociada') and ch.venta_asociada:
+                if ch.venta_asociada.sucursal_id != f_sucursal:
+                    continue
+
+            # Buscar emisor o cliente de forma segura
+            cli_ch = ch.emisor or 'Tercero'
+            if hasattr(ch, 'cliente_rel') and ch.cliente_rel:
+                cli_ch = ch.cliente_rel.razon_social
+
+            tipo_ch = getattr(ch, 'tipo', 'FISICO') or 'FISICO'
+            num_ch = getattr(ch, 'numero', 'S/N')
+            banco_ch = getattr(ch, 'banco', 'S/B')
+            estado_ch = getattr(ch, 'estado', 'EN_CARTERA')
+
+            log_auditoria.append({
+                'fecha': datetime.combine(ch.fecha_vencimiento, datetime.min.time()),
+                'usuario': 'SISTEMA',
+                'sucursal': 'CARTERA',
+                'tipo': 'CHEQUE',
+                'referencia': f"{tipo_ch} #{num_ch}",
+                'detalle': f"Banco: {banco_ch} | Emisor: {cli_ch} | Estado: {estado_ch}",
+                'monto': ch.monto,
+                'clase': 'danger' if estado_ch == 'RECHAZADO' else ('warning' if estado_ch == 'EN_CARTERA' else 'success')
+            })
+            
+    # --- I. AUDITORÍA DE CIERRES Y ARQUEOS DE CAJA ---
+    if not f_tipo or f_tipo == 'CIERRE':
+        q_cierres = CierreCaja.query.options(
+            joinedload(CierreCaja.caja)
+        ).filter(CierreCaja.fecha_cierre.between(desde, hasta))
+
+        if f_usuario: 
+            q_cierres = q_cierres.filter(CierreCaja.usuario_id == f_usuario)
+        if f_sucursal: 
+            q_cierres = q_cierres.join(Caja).filter(Caja.sucursal_id == f_sucursal)
+
+        for cr in q_cierres.all():
+            # Obtener nombre del usuario de forma segura mediante su ID
+            nombre_cajero = 'CAJERO'
+            if cr.usuario_id:
+                u = Usuario.query.get(cr.usuario_id)
+                if u:
+                    nombre_cajero = u.username
+
+            dif_txt = f"+${cr.diferencia:,.2f}" if cr.diferencia > 0 else f"-${abs(cr.diferencia):,.2f}"
+            
+            log_auditoria.append({
+                'fecha': cr.fecha_cierre,
+                'usuario': nombre_cajero,
+                'sucursal': cr.caja.nombre if cr.caja else 'CAJA',
+                'tipo': 'CIERRE CAJA',
+                'referencia': f"ARQUEO #{cr.id}",
+                'detalle': f"Esperado: ${cr.saldo_esperado:,.2f} | Real: ${cr.saldo_real:,.2f} | Dif: {dif_txt} ({cr.observaciones or 'S/O'})",
+                'monto': cr.saldo_real,
+                'clase': 'success' if cr.diferencia == 0 else ('danger' if cr.diferencia < 0 else 'warning')
+            })
+            
+            
+    # 4. ORDENAMIENTO CRONOLÓGICO DESCENDENTE
     log_auditoria.sort(key=lambda x: x['fecha'], reverse=True)
 
     usuarios = Usuario.query.filter_by(activo=True).all()
     sucursales = Sucursal.query.filter_by(activo=True).all()
 
     return render_template('admin/reporte_auditoria.html', 
-                           logs=log_auditoria, usuarios=usuarios, sucursales=sucursales,
-                           desde=desde_str, hasta=hasta_str, f_sucursal=f_sucursal, 
-                           f_usuario=f_usuario, f_tipo=f_tipo)
+                           logs=log_auditoria, 
+                           usuarios=usuarios, 
+                           sucursales=sucursales,
+                           desde=desde_str, 
+                           hasta=hasta_str, 
+                           f_sucursal=f_sucursal, 
+                           f_usuario=f_usuario, 
+                           f_tipo=f_tipo)
+    
     
     
 @admin_bp.route('/sistema/backup')
@@ -3068,7 +3262,7 @@ def reporte_operaciones_detallado():
     
 @admin_bp.route('/devoluciones')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def modulo_devoluciones():
     q = request.args.get('q', '').strip()
     ventas = []
@@ -3085,7 +3279,7 @@ def modulo_devoluciones():
 
 @admin_bp.route('/devoluciones/procesar', methods=['POST'])
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def procesar_devolucion():
     data = request.get_json()
     venta_id = data.get('venta_id')

@@ -49,10 +49,23 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-md-2">
+            <!--<div class="col-md-2">
                 <button type="submit" class="btn btn-outline-pink btn-sm w-100 fw-bold">
                     <i class="bi bi-funnel-fill"></i> FILTRAR LOG
                 </button>
+                <!-- BOTÓN DE LIMPIAR FILTROS 
+                <a href="{{ url_for('admin.reporte_auditoria') }}" class="btn btn-sm btn-outline-light shadow-sm" title="Limpiar todos los filtros">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </a>
+            </div>-->
+            <!-- BOTONES FILTRAR Y LIMPIAR -->
+            <div class="col-md-2 col-6 d-flex gap-1">
+                <button type="submit" class="btn btn-outline-pink btn-sm w-100 fw-bold">
+                    <i class="bi bi-funnel-fill"></i> Filtrar
+                </button>
+                <a href="{{ url_for('admin.reporte_auditoria') }}" class="btn btn-sm btn-outline-light shadow-sm" title="Limpiar todos los filtros">
+                    <i class="bi bi-arrow-counterclockwise"></i>
+                </a>
             </div>
         </form>
     </div>

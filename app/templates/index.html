@@ -141,7 +141,7 @@
         <small class="text-muted">Inventario general de repuestos y autopartes</small>
     </div>
 
-    {% if current_user.rol in ['admin', 'superadmin'] %}
+    {% if current_user.rol in ['admin', 'superadmin', 'vendedor'] %}
     <div>
         <a href="{{ url_for('inventory.nuevo_repuesto') }}" class="btn btn-vacan shadow-sm btn-sm fw-bold text-uppercase">
             <i class="bi bi-plus-circle me-1"></i> Nuevo Repuesto
@@ -351,7 +351,7 @@
                             <div class="btn-group shadow-sm">
                                 <a href="{{ url_for('inventory.catalogos_proveedores', id=r.id) }}" class="btn btn-xs btn-info text-white" title="Comparar"><i class="bi bi-search"></i></a>
                                 <a href="{{ url_for('inventory.historial_precios', id=r.id) }}" class="btn btn-xs btn-dark" title="Historial"><i class="bi bi-clock"></i></a>
-                                {% if current_user.rol in ['admin', 'superadmin'] %}
+                                {% if current_user.rol in ['admin', 'superadmin','vendedor' ] %}
                                     <a href="{{ url_for('inventory.editar_repuesto', id=r.id) }}" class="btn btn-xs btn-primary" title="Editar"><i class="bi bi-pencil"></i></a>
                                 {% endif %}
                             </div>

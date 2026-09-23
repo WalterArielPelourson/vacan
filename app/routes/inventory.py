@@ -100,7 +100,7 @@ def index():
 @inventory_bp.route('/repuesto/nuevo', methods=['GET', 'POST'])
 @login_required
 def nuevo_repuesto():
-    if current_user.rol not in ['admin', 'superadmin']:
+    if current_user.rol not in ['admin', 'superadmin', 'vendedor']:
         flash('No tiene permisos para esta acción.', 'danger')
         return redirect(url_for('inventory.index'))
 
@@ -168,7 +168,7 @@ from app.models import Repuesto, ModeloAuto, HistorialPrecio, Sucursal, Proveedo
 @login_required
 def editar_repuesto(id):
     # Solo admin o superadmin pueden editar
-    if current_user.rol not in ['admin', 'superadmin']:
+    if current_user.rol not in ['admin', 'superadmin', 'vendedor']:
         flash('No tienes permiso para editar productos.', 'danger')
         return redirect(url_for('inventory.index'))
     

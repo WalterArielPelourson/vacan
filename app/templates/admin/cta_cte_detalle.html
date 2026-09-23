@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 
 {% block content %}
-<!-- ENCABEZADO DE CUENTA -->
+<!-- ENCABEZADO DE CUENTA 
 <div class="row mb-4">
     <div class="col-md-6">
         <a href="{{ url_for('admin.lista_cta_cte') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Volver a Listado</a>
@@ -13,6 +13,61 @@
             SALDO TOTAL: ${{ "{:,.2f}".format(saldo) }}
         </h3>
         <button class="btn btn-success fw-bold shadow px-4 py-2" data-bs-toggle="modal" data-bs-target="#modalPago">
+            <i class="bi bi-cash-coin"></i> REGISTRAR COBRANZA / CONCILIAR
+        </button>
+    </div>
+</div>-->
+
+<!-- ENCABEZADO CLIENTE: RAZÓN SOCIAL / NOMBRE, CUIT, TELÉFONO (WHATSAPP), DIRECCIÓN Y SALDO -->
+<div class="row mb-4 align-items-center">
+    <!-- COLUMNA IZQUIERDA: DATOS COMPLETOS DEL CLIENTE -->
+    <div class="col-md-7">
+        <a href="{{ url_for('admin.lista_cta_cte') }}" class="text-decoration-none text-muted small mb-2 d-inline-block">
+            <i class="bi bi-arrow-left"></i> Volver a Listado
+        </a>
+        
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <h2 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-person-fill text-pink me-2"></i>{{ cliente.razon_social }}
+            </h2>
+            <span class="badge bg-dark fs-6">ID: #{{ cliente.id }}</span>
+        </div>
+        
+        <!-- DATOS FISCALES, CONTACTO Y UBICACIÓN -->
+        <div class="d-flex flex-wrap align-items-center gap-3 mt-2">
+            <!-- CUIT / DNI -->
+            <span class="text-muted small">
+                <i class="bi bi-card-text text-pink me-1"></i><strong>CUIT/DNI:</strong> 
+                <span class="badge bg-light text-dark border fw-bold">{{ cliente.cuit or 'Sin CUIT' }}</span>
+            </span>
+
+            <!-- TELÉFONO CON BOTÓN DIRECTO A WHATSAPP -->
+            <span class="text-muted small">
+                <i class="bi bi-telephone-fill text-success me-1"></i><strong>Teléfono:</strong> 
+                {% if cliente.telefono %}
+                    <a href="https://wa.me/{{ cliente.telefono|replace(' ', '')|replace('-', '')|replace('+', '') }}" 
+                       target="_blank" class="text-decoration-none fw-bold text-success" title="Enviar WhatsApp / Llamar">
+                        {{ cliente.telefono }} <i class="bi bi-whatsapp ms-1"></i>
+                    </a>
+                {% else %}
+                    <span class="text-muted fst-italic">Sin teléfono</span>
+                {% endif %}
+            </span>
+
+            <!-- DIRECCIÓN 
+            <span class="text-muted small">
+                <i class="bi bi-geo-alt-fill text-danger me-1"></i><strong>Dirección:</strong> 
+                <span class="fw-bold text-dark">{{ cliente.direccion or 'Sin dirección registrada' }}</span>
+            </span>-->
+        </div>
+    </div>
+    
+    <!-- COLUMNA DERECHA: SALDO A COBRAR Y BOTÓN DE REGISTRAR PAGO/COBRO -->
+    <div class="col-md-5 text-md-end mt-3 mt-md-0">
+        <h3 class="fw-bold {{ 'text-danger' if saldo > 0 else 'text-success' }}">
+            SALDO TOTAL: ${{ "{:,.2f}".format(saldo) }}
+        </h3>
+         <button class="btn btn-success fw-bold shadow px-4 py-2" data-bs-toggle="modal" data-bs-target="#modalPago">
             <i class="bi bi-cash-coin"></i> REGISTRAR COBRANZA / CONCILIAR
         </button>
     </div>

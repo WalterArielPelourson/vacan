@@ -2,17 +2,55 @@
 
 {% block content %}
 <div class="row mb-4 align-items-center">
-    <div class="col-md-6">
-        <a href="{{ url_for('admin.lista_saldos_proveedores') }}" class="text-decoration-none text-muted small"><i class="bi bi-arrow-left"></i> Volver a Listado</a>
-        <h2 class="fw-bold text-dark mt-2">{{ proveedor.razon_social }}</h2>
-        <h5 class="text-muted">Ficha de Cuenta Corriente (Proveedor)</h5>
+    <!-- COLUMNA IZQUIERDA: DATOS DEL PROVEEDOR (RAZÓN SOCIAL, CUIT, TELÉFONO Y DIRECCIÓN) -->
+    <div class="col-md-7">
+        <a href="{{ url_for('admin.lista_saldos_proveedores') }}" class="text-decoration-none text-muted small mb-2 d-inline-block">
+            <i class="bi bi-arrow-left"></i> Volver a Listado
+        </a>
+        
+        <div class="d-flex align-items-center gap-2 mb-1">
+            <h2 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-truck text-pink me-2"></i>{{ proveedor.razon_social }}
+            </h2>
+            <span class="badge bg-dark fs-6">ID: #{{ proveedor.id }}</span>
+        </div>
+        
+        <!-- DATOS FISCALES Y DE CONTACTO -->
+        <div class="d-flex flex-wrap align-items-center gap-3 mt-2">
+            <!-- CUIT -->
+            <span class="text-muted small">
+                <i class="bi bi-card-text text-pink me-1"></i><strong>CUIT:</strong> 
+                <span class="badge bg-light text-dark border fw-bold">{{ proveedor.cuit or 'Sin CUIT' }}</span>
+            </span>
+
+            <!-- TELÉFONO CON ENLACE DIRECTO A WHATSAPP / LLAMADA -->
+            <span class="text-muted small">
+                <i class="bi bi-telephone-fill text-success me-1"></i><strong>Teléfono:</strong> 
+                {% if proveedor.telefono %}
+                    <a href="https://wa.me/{{ proveedor.telefono|replace(' ', '')|replace('-', '')|replace('+', '') }}" 
+                       target="_blank" class="text-decoration-none fw-bold text-success" title="Enviar WhatsApp / Llamar">
+                        {{ proveedor.telefono }} <i class="bi bi-whatsapp ms-1"></i>
+                    </a>
+                {% else %}
+                    <span class="text-muted fst-italic">Sin teléfono</span>
+                {% endif %}
+            </span>
+
+            <!-- DIRECCIÓN (REEMPLAZANDO EMAIL) -->
+            <span class="text-muted small">
+                <i class="bi bi-geo-alt-fill text-danger me-1"></i><strong>Dirección:</strong> 
+                <span class="fw-bold text-dark">{{ proveedor.direccion or 'Sin dirección registrada' }}</span>
+            </span>
+        </div>
     </div>
-    <div class="col-md-6 text-md-end">
-        <h3 class="fw-bold {{ 'text-danger' if saldo > 0 else 'text-success' }}">
+    
+    <!-- COLUMNA DERECHA: SALDO Y BOTÓN DE PAGO COMPUESTO -->
+    <div class="col-md-5 text-md-end mt-3 mt-md-0">
+        <h3 class="fw-bold {{ 'text-danger' if saldo > 0 else 'text-success' }} mb-2">
             SALDO A PAGAR: ${{ "{:,.2f}".format(saldo) }}
         </h3>
         <button class="btn btn-pink fw-bold shadow px-4 py-2" data-bs-toggle="modal" data-bs-target="#modalPagoProv">
-            <i class="bi bi-patch-plus-fill"></i> REGISTRAR PAGO COMPUESTO
+            <i class="bi bi-patch-plus-fill me-1"></i> REGISTRAR PAGO COMPUESTO
         </button>
     </div>
 </div>
@@ -93,6 +131,63 @@
                                 {% elif m.compra.total_pagado > 0 %}
                                     <br><small class="text-primary fw-bold text-uppercase" style="font-size: 10px;">Abonado: ${{ "{:,.2f}".format(m.compra.total_pagado) }}</small>
                                 {% endif %}
+
+                                <!-- BOTÓN DESPLEGABLE CON EL DETALLE DE REPUESTOS COMPRADOS -->
+                                {% if m.compra.detalles %}
+                                    <div class="mt-1">
+                                        <button class="btn btn-xs btn-outline-info fw-bold py-0 px-2 shadow-none" type="button" 
+                                                data-bs-toggle="collapse" data-bs-target="#detalleCompra{{ m.compra.id }}" 
+                                                aria-expanded="false" style="font-size: 0.72rem;">
+                                            <i class="bi bi-box-seam me-1"></i> Ver {{ m.compra.detalles|length }} producto(s)
+                                        </button>
+                                    </div>
+                                    
+                                    <!-- TABLA DESPLEGABLE CON LOS ÍTEMS DE LA FACTURA -->
+                                    <div class="collapse mt-2" id="detalleCompra{{ m.compra.id }}">
+                                        <div class="card card-body bg-light p-2 border text-dark shadow-sm">
+                                            <table class="table table-sm table-bordered mb-0 bg-white" style="font-size: 0.75rem;">
+                                                <thead class="table-secondary">
+                                                    <tr>
+                                                        <th>SKU / Cód.</th>
+                                                        <th>Descripción</th>
+                                                        <th class="text-center">Cant.</th>
+                                                        <th class="text-end">Costo Unit.</th>
+                                                        <th class="text-end">Subtotal</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    {% for d in m.compra.detalles %}
+                                                    <tr>
+                                                        <td><code>{{ d.repuesto.sku if d.repuesto else 'MANUAL' }}</code></td>
+                                                        <td>{{ d.nombre_item or (d.repuesto.nombre if d.repuesto else 'Ítem') }}</td>
+                                                        <td class="text-center fw-bold">{{ d.cantidad }}</td>
+                                                        <td class="text-end">${{ "{:,.2f}".format(d.costo_unitario or 0) }}</td>
+                                                        <td class="text-end fw-bold">${{ "{:,.2f}".format((d.cantidad or 0) * (d.costo_unitario or 0)) }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                                <tfoot class="table-light fw-bold">
+                                                    {% if m.compra.subtotal is defined and m.compra.subtotal %}
+                                                    <tr>
+                                                        <td colspan="4" class="text-end">Subtotal Ítems:</td>
+                                                        <td class="text-end">${{ "{:,.2f}".format(m.compra.subtotal) }}</td>
+                                                    </tr>
+                                                    {% endif %}
+                                                    {% if m.compra.iva_porcentaje %}
+                                                    <tr>
+                                                        <td colspan="4" class="text-end">IVA ({{ m.compra.iva_porcentaje }}%):</td>
+                                                        <td class="text-end">${{ "{:,.2f}".format((m.compra.subtotal or 0) * (m.compra.iva_porcentaje / 100)) }}</td>
+                                                    </tr>
+                                                    {% endif %}
+                                                    <tr>
+                                                        <td colspan="4" class="text-end text-dark">Total Factura:</td>
+                                                        <td class="text-end text-dark fs-6">${{ "{:,.2f}".format(m.compra.total or 0) }}</td>
+                                                    </tr>
+                                                </tfoot>
+                                            </table>
+                                        </div>
+                                    </div>
+                                {% endif %}
                             {% endif %}
                         </td>
                         <td class="text-end text-danger fw-bold">
@@ -117,6 +212,7 @@
         </div>
     </div>
 </div>
+
 
 <!-- ==========================================
      MODAL DE PAGO COMPUESTO (CARRITO DE PAGOS)
