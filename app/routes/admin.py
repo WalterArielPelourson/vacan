@@ -3511,3 +3511,52 @@ def reporte_rentabilidad_ventas():
                                'sucursal_id': f_sucursal,
                                'cliente_id': f_cliente
                            })
+    
+    
+    
+    
+@admin_bp.route('/proveedores/editar-rapido/<int:id>', methods=['POST'])
+@login_required
+@roles_required('admin', 'superadmin', 'vendedor')
+def editar_proveedor_rapido(id):
+    proveedor = Proveedor.query.get_or_404(id)
+    
+    try:
+        proveedor.razon_social = request.form.get('razon_social', proveedor.razon_social).strip().upper()
+        proveedor.cuit = request.form.get('cuit', proveedor.cuit).strip()
+        proveedor.telefono = request.form.get('telefono', proveedor.telefono).strip()
+        proveedor.direccion = request.form.get('direccion', proveedor.direccion).strip()
+        #proveedor.email = request.form.get('email', proveedor.email).strip()
+
+        db.session.commit()
+        flash(f'Datos del proveedor "{proveedor.razon_social}" actualizados con éxito.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al actualizar el proveedor: {str(e)}', 'danger')
+
+    # Redirige de regreso al detalle de este mismo proveedor
+    return redirect(url_for('admin.detalle_cta_cte_proveedor', id=id))
+
+
+
+@admin_bp.route('/cta-cte/editar-rapido/<int:id>', methods=['POST'])
+@login_required
+@roles_required('admin', 'superadmin', 'vendedor')
+def editar_cliente_rapido(id):
+    cliente = Cliente.query.get_or_404(id)
+    
+    try:
+        cliente.razon_social = request.form.get('razon_social', cliente.razon_social).strip().upper()
+        cliente.cuit = request.form.get('cuit', cliente.cuit).strip()
+        cliente.telefono = request.form.get('telefono', cliente.telefono).strip()
+        #cliente.direccion = request.form.get('direccion', cliente.direccion).strip()
+        #cliente.email = request.form.get('email', cliente.email).strip()
+
+        db.session.commit()
+        flash(f'Datos del cliente "{cliente.razon_social}" actualizados con éxito.', 'success')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error al actualizar los datos del cliente: {str(e)}', 'danger')
+
+    # Redirige de regreso a la misma ficha de detalle del cliente
+    return redirect(url_for('admin.detalle_cta_cte', cliente_id=id))

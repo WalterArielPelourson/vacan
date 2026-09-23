@@ -13,6 +13,10 @@
                 <i class="bi bi-truck text-pink me-2"></i>{{ proveedor.razon_social }}
             </h2>
             <span class="badge bg-dark fs-6">ID: #{{ proveedor.id }}</span>
+            <!-- BOTÓN EDITAR PROVEEDOR (ABRE MODAL) -->
+            <button type="button" class="btn btn-sm btn-outline-primary shadow-sm" data-bs-toggle="modal" data-bs-target="#modalEditarProveedor" title="Editar datos del proveedor">
+                <i class="bi bi-pencil-square me-1"></i> Editar Datos
+            </button>
         </div>
         
         <!-- DATOS FISCALES Y DE CONTACTO -->
@@ -324,6 +328,60 @@
                     <i class="bi bi-check-all"></i> CONFIRMAR PAGO Y CONCILIAR
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+<!-- MODAL PARA EDITAR DATOS DEL PROVEEDOR -->
+<div class="modal fade" id="modalEditarProveedor" tabindex="-1" aria-labelledby="modalEditarProveedorLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg text-dark">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold" id="modalEditarProveedorLabel">
+                    <i class="bi bi-pencil-square text-pink me-2"></i>Editar Datos del Proveedor
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('admin.editar_proveedor_rapido', id=proveedor.id) }}" method="POST">
+                <div class="modal-body p-4">
+                    <!-- RAZÓN SOCIAL -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase">Razón Social / Nombre *</label>
+                        <input type="text" name="razon_social" class="form-control" value="{{ proveedor.razon_social }}" required>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <!-- CUIT -->
+                        <div class="col-6">
+                            <label class="form-label small fw-bold text-uppercase">CUIT</label>
+                            <input type="text" name="cuit" class="form-control" value="{{ proveedor.cuit or '' }}" placeholder="Ej: 30-12345678-9">
+                        </div>
+                        <!-- TELÉFONO -->
+                        <div class="col-6">
+                            <label class="form-label small fw-bold text-uppercase">Teléfono / Celular</label>
+                            <input type="text" name="telefono" class="form-control" value="{{ proveedor.telefono or '' }}" placeholder="Ej: 3415551234">
+                        </div>
+                    </div>
+
+                    <!-- DIRECCIÓN -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase">Dirección</label>
+                        <input type="text" name="direccion" class="form-control" value="{{ proveedor.direccion or '' }}" placeholder="Calle, Número, Ciudad">
+                    </div>
+
+                    <!-- EMAIL (OPCIONAL) 
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase">Email</label>
+                        <input type="email" name="email" class="form-control" value="{{ proveedor.email or '' }}" placeholder="proveedor@email.com">
+                    </div>-->
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-pink btn-sm fw-bold px-3">
+                        <i class="bi bi-check-circle-fill me-1"></i> Guardar Cambios
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>

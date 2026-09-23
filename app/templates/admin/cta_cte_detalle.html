@@ -31,6 +31,10 @@
                 <i class="bi bi-person-fill text-pink me-2"></i>{{ cliente.razon_social }}
             </h2>
             <span class="badge bg-dark fs-6">ID: #{{ cliente.id }}</span>
+            <!-- BOTÓN EDITAR CLIENTE (ABRE MODAL) -->
+            <button type="button" class="btn btn-sm btn-outline-primary shadow-sm ms-1" data-bs-toggle="modal" data-bs-target="#modalEditarCliente" title="Editar datos del cliente">
+                <i class="bi bi-pencil-square me-1"></i> Editar Datos
+            </button>
         </div>
         
         <!-- DATOS FISCALES, CONTACTO Y UBICACIÓN -->
@@ -444,6 +448,62 @@
                     <i class="bi bi-check-all"></i> CONFIRMAR COBRANZA Y CONCILIAR
                 </button>
             </div>
+        </div>
+    </div>
+</div>
+
+
+
+<!-- MODAL PARA EDITAR DATOS DEL CLIENTE -->
+<div class="modal fade" id="modalEditarCliente" tabindex="-1" aria-labelledby="modalEditarClienteLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow-lg text-dark">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title fw-bold" id="modalEditarClienteLabel">
+                    <i class="bi bi-pencil-square text-pink me-2"></i>Editar Datos del Cliente
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form action="{{ url_for('admin.editar_cliente_rapido', id=cliente.id) }}" method="POST">
+                <div class="modal-body p-4">
+                    <!-- RAZÓN SOCIAL O NOMBRE -->
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase">Razón Social / Nombre *</label>
+                        <input type="text" name="razon_social" class="form-control text-uppercase" value="{{ cliente.razon_social }}" required>
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <!-- CUIT O DNI -->
+                        <div class="col-6">
+                            <label class="form-label small fw-bold text-uppercase">CUIT / DNI</label>
+                            <input type="text" name="cuit" class="form-control" value="{{ cliente.cuit or '' }}" placeholder="Ej: 20-33445566-9">
+                        </div>
+                        <!-- TELÉFONO -->
+                        <div class="col-6">
+                            <label class="form-label small fw-bold text-uppercase">Teléfono / WhatsApp</label>
+                            <input type="text" name="telefono" class="form-control" value="{{ cliente.telefono or '' }}" placeholder="Ej: 3415551234">
+                        </div>
+                    </div>
+
+                    <!-- DIRECCIÓN 
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase">Dirección</label>
+                        <input type="text" name="direccion" class="form-control" value="{{ cliente.direccion or '' }}" placeholder="Calle, Número, Localidad">
+                    </div>
+
+                     EMAIL (OPCIONAL) 
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold text-uppercase">Email</label>
+                        <input type="email" name="email" class="form-control" value="{{ cliente.email or '' }}" placeholder="cliente@correo.com">
+                    </div>-->
+                </div>
+                <div class="modal-footer bg-light">
+                    <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-pink btn-sm fw-bold px-3">
+                        <i class="bi bi-check-circle-fill me-1"></i> Guardar Cambios
+                    </button>
+                </div>
+            </form>
         </div>
     </div>
 </div>
