@@ -63,18 +63,27 @@
                 </thead>
                 <tbody id="tableMora">
                     {% for item in reporte %}
-                    <!-- Agregamos clase 'mora-row' y data-info para el filtro inteligente -->
+                    <!-- Agregamos clase 'mora-row' y data-info para el filtro inteligente protegido contra None -->
                     <tr class="mora-row {% if filtro == 'vencidas' %} table-danger {% else %} table-warning {% endif %}" 
-                        data-info="{{ item.cliente.razon_social|lower }} {{ item.cliente.cuit|replace('-', '') if item.cliente.cuit else '' }}"
+                        data-info="{{ (item.cliente.razon_social|lower if item.cliente else 'consumidor final') }} {{ (item.cliente.cuit|replace('-', '') if item.cliente and item.cliente.cuit else '') }}"
                         style="--bs-table-bg: transparent;">
                         <td>
-                            <strong class="text-dark">{{ item.cliente.razon_social }}</strong><br>
-                            <small class="text-muted">CUIT: {{ item.cliente.cuit }} | Tel: {{ item.cliente.telefono or 'S/D' }}</small>
+                            <strong class="text-dark">{{ item.cliente.razon_social if item.cliente else 'Consumidor Final / Sin Asignar' }}</strong><br>
+                            <small class="text-muted">
+                                CUIT: {{ item.cliente.cuit if item.cliente and item.cliente.cuit else 'S/C' }} | 
+                                Tel: {{ item.cliente.telefono if item.cliente and item.cliente.telefono else 'S/D' }}
+                            </small>
                         </td>
                         <td>
                             <span class="badge bg-dark">REMITO #{{ item.venta.id }}</span>
                         </td>
-                        <td>{{ item.venta.fecha.strftime('%d/%m/%Y') }}</td>
+                        <td>
+                            {% if item.venta.fecha %}
+                                {{ item.venta.fecha.strftime('%d/%m/%Y') if item.venta.fecha.strftime is defined else item.venta.fecha }}
+                            {% else %}
+                                S/F
+                            {% endif %}
+                        </td>
                         <td class="text-center">
                             {% if filtro == 'vencidas' %}
                                 <span class="text-danger fw-bold">
@@ -88,12 +97,16 @@
                                 </span>
                             {% endif %}
                         </td>
-                        <td class="text-end text-muted">${{ "{:,.2f}".format(item.venta.total) }}</td>
-                        <td class="text-end fw-bold text-dark fs-5">${{ "{:,.2f}".format(item.saldo) }}</td>
+                        <td class="text-end text-muted">${{ "{:,.2f}".format(item.venta.total or 0) }}</td>
+                        <td class="text-end fw-bold text-dark fs-5">${{ "{:,.2f}".format(item.saldo or 0) }}</td>
                         <td class="text-center">
-                            <a href="{{ url_for('admin.detalle_cta_cte', cliente_id=item.cliente.id) }}" class="btn btn-sm btn-dark fw-bold shadow-sm">
-                                <i class="bi bi-cash-coin"></i> COBRAR
-                            </a>
+                            {% if item.cliente %}
+                                <a href="{{ url_for('admin.detalle_cta_cte', cliente_id=item.cliente.id) }}" class="btn btn-sm btn-dark fw-bold shadow-sm">
+                                    <i class="bi bi-cash-coin"></i> COBRAR
+                                </a>
+                            {% else %}
+                                <span class="badge bg-secondary">Sin Cuenta</span>
+                            {% endif %}
                         </td>
                     </tr>
                     {% else %}
@@ -119,7 +132,7 @@ document.getElementById('moraSearch').addEventListener('input', function(e) {
     let visibleCount = 0;
 
     rows.forEach(row => {
-        const info = row.getAttribute('data-info');
+        const info = row.getAttribute('data-info') || '';
         // El registro debe coincidir con todas las palabras ingresadas (Fuzzy search)
         const match = words.every(word => info.includes(word));
 

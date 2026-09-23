@@ -944,55 +944,80 @@ def pago_compuesto_cliente(id):
 
 @admin_bp.route('/reportes/morosidad')
 @login_required
-@roles_required('admin', 'superadmin')
+@roles_required('admin', 'superadmin', 'vendedor')
 def reporte_morosidad():
-    # 1. Parámetros de filtro y fecha actual
-    filtro = request.args.get('filtro', 'vencidas') # 'vencidas' o 'proximas'
-    hoy = get_argentina_time().date()
-    
-    # 2. Buscamos todas las ventas que NO estén totalmente pagadas
-    # Filtramos por saldo pendiente (total - total_pagado > 0)
-    ventas_pendientes = Venta.query.filter(Venta.total > Venta.total_pagado).all()
-    
-    # --- APLICACIÓN DEL BLINDAJE ---
-#    if current_user.rol == 'admin':
-#        # El Admin solo ve facturas de SU sucursal
-#        query_base = query_base.filter_by(sucursal_id=current_user.sucursal_id)
-    # Si es Superadmin, el query_base sigue igual (ve todo)
-    # -------------------------------
-    
-    
-    reporte = []
-    total_deuda_filtro = 0
-
-    for v in ventas_pendientes:
-        dias_pasados = (hoy - v.fecha.date()).days
-        saldo = round(v.total - v.total_pagado, 2)
+    try:
+        # 1. Parámetros de filtro y fecha actual
+        filtro = request.args.get('filtro', 'vencidas') # 'vencidas' o 'proximas'
+        hoy = get_argentina_time().date()
         
-        # Categorización
-        es_vencida = dias_pasados > 30
+        # 2. Consulta base con filtro opcional por sucursal para admin y vendedor
+        query_v = Venta.query.options(joinedload(Venta.cliente))
         
-        # Aplicamos el filtro de la vista
-        if (filtro == 'vencidas' and es_vencida) or (filtro == 'proximas' and not es_vencida):
-            reporte.append({
-                'venta': v,
-                'cliente': v.cliente,
-                'dias_pasados': dias_pasados,
-                'dias_excedidos': dias_pasados - 30 if es_vencida else 0,
-                'dias_restantes': 30 - dias_pasados if not es_vencida else 0,
-                'saldo': saldo
-            })
-            total_deuda_filtro += saldo
+        if current_user.rol in ['admin', 'vendedor']:
+            query_v = query_v.filter(Venta.sucursal_id == current_user.sucursal_id)
 
-    # 3. Ordenamos por Nombre de Cliente y luego por Días de forma descendente
-    reporte.sort(key=lambda x: (x['cliente'].razon_social, -x['dias_pasados']))
+        ventas_todas = query_v.all()
+        
+        reporte = []
+        total_deuda_filtro = 0.0
 
-    return render_template('admin/reporte_morosidad.html', 
-                           reporte=reporte, 
-                           filtro=filtro, 
-                           total=total_deuda_filtro,
-                           hoy=hoy)    
+        for v in ventas_todas:
+            # 🛡️ PROTECCIÓN 1: Evitar None en total y total_pagado
+            tot = float(v.total or 0.0)
+            pag = float(v.total_pagado or 0.0)
+            saldo = round(tot - pag, 2)
 
+            # Si ya está saldada o no tiene saldo, ignorar
+            if saldo <= 0.01:
+                continue
+
+            # 🛡️ PROTECCIÓN 2: Manejo de fechas seguro
+            if not v.fecha:
+                continue
+
+            if hasattr(v.fecha, 'date'):
+                fecha_venta = v.fecha.date()
+            else:
+                fecha_venta = v.fecha
+
+            dias_pasados = (hoy - fecha_venta).days
+            
+            # Categorización a 30 días
+            es_vencida = dias_pasados > 30
+            
+            # 🛡️ PROTECCIÓN 3: Si no tiene cliente o es None
+            nombre_cliente = v.cliente.razon_social if v.cliente else 'Consumidor Final / Sin Cliente'
+
+            # Aplicamos el filtro de la vista
+            if (filtro == 'vencidas' and es_vencida) or (filtro == 'proximas' and not es_vencida):
+                reporte.append({
+                    'venta': v,
+                    'cliente': v.cliente,
+                    'nombre_cliente': nombre_cliente, # Para ordenar sin error
+                    'dias_pasados': dias_pasados,
+                    'dias_excedidos': dias_pasados - 30 if es_vencida else 0,
+                    'dias_restantes': 30 - dias_pasados if not es_vencida else 0,
+                    'saldo': saldo
+                })
+                total_deuda_filtro += saldo
+
+        # 🛡️ PROTECCIÓN 4: Ordenar usando 'nombre_cliente' (nunca es None)
+        reporte.sort(key=lambda x: (x['nombre_cliente'], -x['dias_pasados']))
+
+        return render_template('admin/reporte_morosidad.html', 
+                               reporte=reporte, 
+                               filtro=filtro, 
+                               total=total_deuda_filtro,
+                               hoy=hoy)
+
+    except Exception as e:
+        import traceback
+        print("ERROR CRÍTICO EN REPORTE MOROSIDAD:", traceback.format_exc())
+        flash(f"Error al generar reporte de morosidad: {str(e)}", "danger")
+        return redirect(url_for('inventory.index'))
+    
+    
 @admin_bp.route('/cta-cte/cobrar/<int:cliente_id>', methods=['POST'])
 @login_required
 @roles_required('admin', 'superadmin')
