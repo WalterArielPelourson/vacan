@@ -855,92 +855,152 @@ def registrar_pago(cliente_id):
     return redirect(url_for('admin.detalle_cta_cte', cliente_id=cliente_id))
 
 
+from datetime import datetime
+from flask import request, jsonify
+from flask_login import login_required, current_user
+# Asegúrate de tener importados: db, Cliente, Venta, Caja, Cheque, MovimientoFinanciero, MovimientoCtaCteCliente
+
 @admin_bp.route('/cta-cte/pago-compuesto/<int:id>', methods=['POST'])
 @login_required
 @roles_required('admin', 'superadmin', 'vendedor')
 def pago_compuesto_cliente(id):
     cliente = Cliente.query.get_or_404(id)
-    data = request.get_json()
-    items_cobro = data.get('pagos') # La plata que entra (efectivo, cheques, etc)
-    
-    # --- PUNTO 2: LÓGICA DE PAGOS PARCIALES (CONCILIACIÓN) ---
-    # Recibimos una lista de: {"venta_id": 5, "monto_aplicado": 1500.50}
-    conciliaciones = data.get('conciliaciones', []) 
+    data = request.get_json() or {}
+    items_cobro = data.get('pagos', [])
+    conciliaciones = data.get('conciliaciones', [])
     
     total_cobrado = 0
+    detalles_resumen = []
 
     try:
-        # 1. Procesamos cada medio de pago que entró a la bolsa
+        # -------------------------------------------------------------
+        # 1. PROCESAR MEDIOS DE COBRO
+        # -------------------------------------------------------------
         for p in items_cobro:
-            monto_item = float(p['monto'])
+            monto_item = float(p.get('monto', 0))
+            if monto_item <= 0:
+                continue
+
             total_cobrado += monto_item
+            medio = str(p.get('medio', '')).upper()
             caja_id = p.get('caja_id')
-            medio = p['medio']
 
-            # Ingreso a Caja/Banco
-            caja = Caja.query.get(caja_id)
-            if caja:
-                caja.saldo_actual += monto_item
-                mov_f = MovimientoFinanciero(
-                    caja_id=caja.id, monto=monto_item, tipo='INGRESO',
-                    motivo=f"Cobranza Cliente: {cliente.razon_social} ({medio})",
-                    metodo_detalle=medio, usuario_id=current_user.id
-                )
-                db.session.add(mov_f)
-
-            # Si es un Cheque, lo cargamos a la cartera
-            if medio == 'CHEQUE':
-                datos_ch = p.get('cheque_data')
-                nuevo_ch = Cheque(
-                    banco=datos_ch['banco'].upper(),
-                    numero=datos_ch['numero'],
-                    emisor=datos_ch['emisor'].upper(),
-                    monto=monto_item,
-                    fecha_vencimiento=datetime.strptime(datos_ch['vencimiento'], '%Y-%m-%d').date(),
-                    tipo=datos_ch['tipo'],
-                    cliente_id=id,
-                    estado='EN_CARTERA'
-                )
-                db.session.add(nuevo_ch)
-
-        # --- 2. APLICAR PAGOS PARCIALES A COMPROBANTES ---
-        if conciliaciones:
-            for conc in conciliaciones:
-                venta_obj = Venta.query.get(conc['venta_id'])
-                monto_a_imputar = float(conc['monto_aplicado'])
+            # --- CASO A: RETENCIONES SUFRIDAS ---
+            if medio == 'RETENCION':
+                datos_ret = p.get('retencion_data', {})
+                tipo_ret = datos_ret.get('tipo', 'RETENCION')
+                nro_cert = datos_ret.get('numero', 'S/N')
                 
+                # Detalle para el recibo (no impacta caja ni MovimientoFinanciero)
+                detalles_resumen.append(f"RETENCION {tipo_ret} (Cert: #{nro_cert}): ${monto_item:,.2f}")
+
+            # --- CASO B: CHEQUES DE TERCEROS (CARTERA) ---
+            elif 'CHEQUE' in medio:
+                datos_ch = p.get('cheque_data', {})
+                
+                # Preparación de atributos base del Cheque
+                ch_kwargs = {
+                    'banco': datos_ch.get('banco', '').upper(),
+                    'numero': str(datos_ch.get('numero', '')),
+                    'emisor': datos_ch.get('emisor', cliente.razon_social).upper(),
+                    'monto': monto_item,
+                    'fecha_vencimiento': datetime.strptime(datos_ch.get('vencimiento'), '%Y-%m-%d').date(),
+                    'tipo': datos_ch.get('tipo', 'FISICO'),
+                    'cliente_id': id,
+                    'estado': 'EN_CARTERA'
+                }
+
+                # Vinculación segura de atributos adicionales si existen en tu modelo
+                if hasattr(Cheque, 'caja_id') and caja_id:
+                    ch_kwargs['caja_id'] = caja_id
+                if hasattr(Cheque, 'origen'):
+                    ch_kwargs['origen'] = 'TERCERO'
+                if hasattr(Cheque, 'tipo_origen'):
+                    ch_kwargs['tipo_origen'] = 'TERCERO'
+                if hasattr(Cheque, 'es_propio'):
+                    ch_kwargs['es_propio'] = False
+                if hasattr(Cheque, 'activo'):
+                    ch_kwargs['activo'] = True
+                if hasattr(Cheque, 'sucursal_id') and hasattr(current_user, 'sucursal_id'):
+                    ch_kwargs['sucursal_id'] = current_user.sucursal_id
+
+                nuevo_ch = Cheque(**ch_kwargs)
+                db.session.add(nuevo_ch)
+                detalles_resumen.append(f"CHEQUE {nuevo_ch.banco} N°{nuevo_ch.numero}: ${monto_item:,.2f}")
+
+                # Si el cheque ingresa a una caja/cartera seleccionada
+                caja = Caja.query.get(caja_id) if caja_id else None
+                if caja:
+                    caja.saldo_actual += monto_item
+                    mov_f = MovimientoFinanciero(
+                        caja_id=caja.id,
+                        monto=monto_item,
+                        tipo='INGRESO',
+                        motivo=f"Cobranza Cliente: {cliente.razon_social} (Cheque {nuevo_ch.numero})",
+                        metodo_detalle='CHEQUE',
+                        usuario_id=current_user.id
+                    )
+                    db.session.add(mov_f)
+
+            # --- CASO C: EFECTIVO, TRANSFERENCIA, DÉBITO, ETC. ---
+            else:
+                caja = Caja.query.get(caja_id) if caja_id else None
+                if caja:
+                    caja.saldo_actual += monto_item
+                    mov_f = MovimientoFinanciero(
+                        caja_id=caja.id,
+                        monto=monto_item,
+                        tipo='INGRESO',
+                        motivo=f"Cobranza Cliente: {cliente.razon_social} ({medio})",
+                        metodo_detalle=medio,
+                        usuario_id=current_user.id
+                    )
+                    db.session.add(mov_f)
+                detalles_resumen.append(f"{medio}: ${monto_item:,.2f}")
+
+        # -------------------------------------------------------------
+        # 2. CONCILIACIÓN / APLICACIÓN A FACTURAS PENDIENTES
+        # -------------------------------------------------------------
+        for conc in conciliaciones:
+            venta_id = conc.get('venta_id')
+            monto_aplicado = float(conc.get('monto_aplicado', 0))
+
+            if venta_id and monto_aplicado > 0:
+                venta_obj = Venta.query.get(venta_id)
                 if venta_obj:
-                    # Sumamos el monto al total ya pagado de esa factura/remito
-                    # Si antes era 0 y paga 500, total_pagado ahora es 500
-                    venta_obj.total_pagado += monto_a_imputar
+                    venta_obj.total_pagado = round((venta_obj.total_pagado or 0) + monto_aplicado, 2)
                     
-                    # Si el saldo llega a 0 (o menos por redondeo), marcamos como pagada
-                    if (venta_obj.total - venta_obj.total_pagado) <= 0:
-                        venta_obj.esta_pagada = True
-        # --------------------------------------------------
+                    saldo_restante = round(venta_obj.total - venta_obj.total_pagado, 2)
+                    if saldo_restante <= 0:
+                        venta_obj.estado = 'PAGADA'
+                    else:
+                        venta_obj.estado = 'PARCIAL'
 
-        # 3. Registrar el movimiento de PAGO en la Cta Cte del Cliente
-        desc_pago = f"Cobranza Compuesta ({len(items_cobro)} medios)"
-        if conciliaciones:
-            desc_pago += f" - Aplicado parcial a {len(conciliaciones)} remitos"
+        # -------------------------------------------------------------
+        # 3. REGISTRO EN CUENTA CORRIENTE DEL CLIENTE
+        # -------------------------------------------------------------
+        if total_cobrado > 0:
+            desc_pago = "Cobranza recibida: " + " | ".join(detalles_resumen)
+            
+            mov_c = MovimientoCtaCte(
+                cliente_id=cliente.id,
+                monto=-total_cobrado,  # Resta la deuda del cliente
+                tipo='PAGO',
+                sucursal_id=current_user.sucursal_id,
+                descripcion=desc_pago
+            )
+            db.session.add(mov_c)
 
-        mov_c = MovimientoCtaCte(
-            cliente_id=id,
-            monto=-total_cobrado, # Valor negativo resta la deuda general
-            tipo='PAGO',
-            sucursal_id=current_user.sucursal_id,
-            descripcion=desc_pago
-        )
-        db.session.add(mov_c)
-        
         db.session.commit()
-        return jsonify({"status": "ok"})
+        return jsonify({"status": "ok", "message": "Cobranza registrada exitosamente."})
 
     except Exception as e:
         db.session.rollback()
-        print(f"Error en cobranza parcial: {str(e)}")
-        return jsonify({"status": "error", "message": str(e)}), 500   
-
+        import traceback
+        print("Error en cobranza parcial/compuesta:", traceback.format_exc())
+        return jsonify({"status": "error", "message": str(e)}), 500
+    
+    
 
 @admin_bp.route('/reportes/morosidad')
 @login_required

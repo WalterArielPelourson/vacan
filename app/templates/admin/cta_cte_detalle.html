@@ -338,7 +338,7 @@
 </div>
 
 <!-- ==========================================
-     MODAL COBRANZA COMPUESTA CON PAGO PARCIAL
+     MODAL COBRANZA COMPUESTA CON PAGO PARCIAL Y RETENCIONES
      ========================================== -->
 <div class="modal fade" id="modalPago" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-xl modal-dialog-centered">
@@ -352,7 +352,8 @@
                     <!-- COLUMNA IZQUIERDA: CARGA DE VALORES Y CONCILIACIÓN -->
                     <div class="col-md-5 border-end">
                         <h6 class="fw-bold text-success mb-3 text-uppercase">1. Valores Recibidos</h6>
-                        <div class="mb-3">
+                        
+                        <div class="mb-3" id="grupo_caja_cli">
                             <label class="small fw-bold">Destino de Fondos</label>
                             <select id="sel_caja_cli" class="form-select border-dark">
                                 {% for caja in cajas %}
@@ -362,17 +363,20 @@
                                 {% endfor %}
                             </select>
                         </div>
+
                         <div class="mb-3">
                             <label class="small fw-bold">Medio de Cobro</label>
-                            <select id="sel_medio_cli" class="form-select border-dark" onchange="toggleFormCheque(this.value)">
+                            <select id="sel_medio_cli" class="form-select border-dark" onchange="cambiarMedioCobro(this.value)">
                                 <option value="EFECTIVO">Efectivo</option>
                                 <option value="TRANSFERENCIA">Transferencia / Virtual</option>
                                 <option value="TARJETA_DEBITO">Tarjeta de Débito</option>
                                 <option value="TARJETA_CREDITO">Tarjeta de Crédito</option>
                                 <option value="CHEQUE">Cheque</option>
+                                <option value="RETENCION">Certificado de Retención (IIBB / Ganancias)</option>
                             </select>
                         </div>
 
+                        <!-- FORMULARIO CHEQUE -->
                         <div id="form_cheque_cli" class="d-none p-3 bg-light border border-success rounded mb-3">
                             <h6 class="fw-bold text-success small mb-2">Datos del Cheque</h6>
                             <input type="text" id="ch_banco" class="form-control form-control-sm mb-1" placeholder="Banco">
@@ -384,6 +388,20 @@
                                 <option value="FISICO">Cheque Físico</option>
                                 <option value="ECHEQ">E-Cheq</option>
                             </select>
+                        </div>
+
+                        <!-- FORMULARIO RETENCIÓN SUFRIDA (NUEVO) -->
+                        <div id="form_retencion_cli" class="d-none p-3 bg-light border border-warning rounded mb-3">
+                            <h6 class="fw-bold text-dark small mb-2"><i class="bi bi-file-earmark-check text-warning me-1"></i> Datos de la Retención</h6>
+                            <label class="x-small fw-bold">Tipo de Retención:</label>
+                            <select id="ret_tipo" class="form-select form-select-sm mb-2">
+                                <option value="IIBB">Ingresos Brutos (IIBB)</option>
+                                <option value="GANANCIAS">Ganancias</option>
+                                <option value="IVA">Retención de IVA</option>
+                                <option value="SUSS">Seguridad Social (SUSS)</option>
+                            </select>
+                            <label class="x-small fw-bold">N° Certificado / Constancia:</label>
+                            <input type="text" id="ret_numero" class="form-control form-control-sm mb-1" placeholder="Ej: 0001-00012345">
                         </div>
 
                         <div class="mb-3">
@@ -427,7 +445,7 @@
                         <h6 class="fw-bold text-muted mb-3 text-uppercase">3. Resumen de la Operación</h6>
                         <div class="table-responsive" style="min-height: 250px;">
                             <table class="table table-sm align-middle">
-                                <thead class="table-light"><tr class="small"><th>Caja Destino</th><th>Medio</th><th class="text-end">Monto</th><th></th></tr></thead>
+                                <thead class="table-light"><tr class="small"><th>Caja / Destino</th><th>Medio</th><th class="text-end">Monto</th><th></th></tr></thead>
                                 <tbody id="tbody_cobros"></tbody>
                             </table>
                         </div>
@@ -451,6 +469,7 @@
         </div>
     </div>
 </div>
+
 
 
 
@@ -528,6 +547,27 @@ function toggleFormCheque(val) {
     val === 'CHEQUE' ? div.classList.remove('d-none') : div.classList.add('d-none');
 }
 
+// Control conjunto de Cheques y Retenciones
+function cambiarMedioCobro(medio) {
+    const formCheque = document.getElementById('form_cheque_cli');
+    const formRetencion = document.getElementById('form_retencion_cli');
+    const grupoCaja = document.getElementById('grupo_caja_cli');
+
+    if (medio === 'CHEQUE') {
+        if (formCheque) formCheque.classList.remove('d-none');
+        if (formRetencion) formRetencion.classList.add('d-none');
+        if (grupoCaja) grupoCaja.classList.remove('d-none');
+    } else if (medio === 'RETENCION') {
+        if (formRetencion) formRetencion.classList.remove('d-none');
+        if (formCheque) formCheque.classList.add('d-none');
+        if (grupoCaja) grupoCaja.classList.add('d-none'); // Es crédito fiscal, no entra a caja física
+    } else {
+        if (formCheque) formCheque.classList.add('d-none');
+        if (formRetencion) formRetencion.classList.add('d-none');
+        if (grupoCaja) grupoCaja.classList.remove('d-none');
+    }
+}
+
 function agregarMedioACobranza() {
     const caja = document.getElementById('sel_caja_cli');
     const medio = document.getElementById('sel_medio_cli').value;
@@ -535,8 +575,8 @@ function agregarMedioACobranza() {
     if (isNaN(monto) || monto <= 0) { alert("Monto inválido"); return; }
 
     let item = {
-        caja_id: caja.value,
-        caja_nombre: caja.options[caja.selectedIndex].getAttribute('data-nombre'),
+        caja_id: (medio === 'RETENCION') ? null : caja.value,
+        caja_nombre: (medio === 'RETENCION') ? 'CRÉDITO FISCAL' : caja.options[caja.selectedIndex].getAttribute('data-nombre'),
         medio: medio,
         monto: monto
     };
@@ -546,13 +586,30 @@ function agregarMedioACobranza() {
         const numero = document.getElementById('ch_numero').value;
         const venc = document.getElementById('ch_vencimiento').value;
         if (!banco || !numero || !venc) { alert("Complete datos del cheque"); return; }
-        item.cheque_data = { banco, numero, emisor: document.getElementById('ch_emisor').value || "{{ cliente.razon_social }}", vencimiento: venc, tipo: document.getElementById('ch_tipo').value };
-        item.detalle = "CH " + banco;
-    } else { item.detalle = medio; }
+        item.cheque_data = { 
+            banco, 
+            numero, 
+            emisor: document.getElementById('ch_emisor').value || "{{ cliente.razon_social }}", 
+            vencimiento: venc, 
+            tipo: document.getElementById('ch_tipo').value 
+        };
+        item.detalle = "CH " + banco + " #" + numero;
+    } else if (medio === 'RETENCION') {
+        const tipoRet = document.getElementById('ret_tipo').value;
+        const numeroRet = document.getElementById('ret_numero').value.trim() || 'S/N';
+        item.retencion_data = {
+            tipo: tipoRet,
+            numero: numeroRet
+        };
+        item.detalle = "RET. " + tipoRet + " (Cert: #" + numeroRet + ")";
+    } else { 
+        item.detalle = medio; 
+    }
 
     bolsaCobros.push(item);
     dibujarBolsa();
     document.getElementById('inp_monto_cli').value = "";
+    if (document.getElementById('ret_numero')) document.getElementById('ret_numero').value = "";
 }
 
 function dibujarBolsa() {
