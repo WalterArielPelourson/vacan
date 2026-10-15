@@ -1,0 +1,363 @@
+{% extends "base.html" %}
+
+{% block title %}Inteligencia Predictiva y ML - Vacan Radiadores{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+    <!-- ENCABEZADO CON SIMULADOR WHAT-IF Y FILTRO DE SUCURSAL -->
+    <div class="card border-0 shadow-sm mb-4 bg-gradient p-3 text-dark" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <h3 class="fw-bold mb-1 text-dark">
+                    <i class="bi bi-cpu text-primary me-2"></i>Centro de Inteligencia Predictiva & Machine Learning
+                </h3>
+                <p class="text-muted small mb-0">
+                    Modelado predictivo de ventas futuras, anticipación de quiebres de inventario y optimización de capital de trabajo.
+                </p>
+            </div>
+
+            <!-- FORMULARIO DE FILTROS Y SIMULACIÓN EN VIVO -->
+            <form method="GET" action="{{ url_for('inventory.reporte_predictivo_inteligencia') }}" class="d-flex flex-wrap align-items-center gap-2">
+                
+                <!-- Selector de Sucursal -->
+                <div>
+                    <label class="form-label small fw-bold mb-0">Sucursal:</label>
+                    <select name="sucursal_id" class="form-select form-select-sm fw-semibold">
+                        <option value="">Todas las Sucursales</option>
+                        {% for suc in sucursales %}
+                            <option value="{{ suc.id }}" {% if sucursal_id_sel == suc.id %}selected{% endif %}>
+                                {{ suc.nombre }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Escenario de Mercado -->
+                <div>
+                    <label class="form-label small fw-bold mb-0">Escenario de Mercado:</label>
+                    <select name="escenario" class="form-select form-select-sm fw-semibold">
+                        <option value="moderado" {% if escenario == 'moderado' %}selected{% endif %}>🟢 Tendencia Normal (Moderado)</option>
+                        <option value="temporada_alta" {% if escenario == 'temporada_alta' %}selected{% endif %}>🔥 Temporada Alta / Picos (+25% Demanda)</option>
+                        <option value="conservador" {% if escenario == 'conservador' %}selected{% endif %}>🛡️ Escenario Cauto (-15% Demanda)</option>
+                    </select>
+                </div>
+
+                <!-- Factor de Inflación / Costos de Proveedor -->
+                <div>
+                    <label class="form-label small fw-bold mb-0">Inflación Prov. (%):</label>
+                    <input type="number" step="0.5" name="factor_inflacion" class="form-control form-control-sm" 
+                           value="{{ factor_inflacion }}" style="width: 85px;" placeholder="Ej: 10">
+                </div>
+
+                <div class="pt-3 d-flex gap-1">
+                    <button type="submit" class="btn btn-primary btn-sm fw-bold">
+                        <i class="bi bi-play-circle me-1"></i> Simular
+                    </button>
+                    {% if sucursal_id_sel or escenario != 'moderado' or factor_inflacion != 0.0 %}
+                    <a href="{{ url_for('inventory.reporte_predictivo_inteligencia') }}" class="btn btn-outline-secondary btn-sm" title="Restablecer filtros">
+                        <i class="bi bi-arrow-counterclockwise"></i>
+                    </a>
+                    {% endif %}
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- TARJETAS DE PROYECCIONES FUTURAS (PREDICTIVO A 30, 60 Y 90 DÍAS) -->
+    <div class="row g-3 mb-4">
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm border-start border-primary border-4 p-3 bg-white h-100">
+                <div class="small text-muted fw-bold text-uppercase">Facturación Prevista (30 Días)</div>
+                <h3 class="fw-bold text-primary mb-1">${{ "{:,.2f}".format(total_proyectado_30d) }}</h3>
+                <small class="text-success"><i class="bi bi-graph-up-arrow me-1"></i>Estimación con modelo de regresión</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm border-start border-info border-4 p-3 bg-white h-100">
+                <div class="small text-muted fw-bold text-uppercase">Facturación Prevista (60 Días)</div>
+                <h3 class="fw-bold text-info mb-1">${{ "{:,.2f}".format(total_proyectado_60d) }}</h3>
+                <small class="text-muted">Proyección acumulada bimestral</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm border-start border-danger border-4 p-3 bg-white h-100">
+                <div class="small text-muted fw-bold text-uppercase">Repuestos en Riesgo de Quiebre</div>
+                <h3 class="fw-bold text-danger mb-1">{{ repuestos_criticos_quiebre }} items</h3>
+                <small class="text-danger fw-semibold"><i class="bi bi-exclamation-octagon me-1"></i>Autonomía menor a 15 días</small>
+            </div>
+        </div>
+
+        <div class="col-12 col-md-3">
+            <div class="card border-0 shadow-sm border-start border-warning border-4 p-3 bg-white h-100">
+                <div class="small text-muted fw-bold text-uppercase">Capital Inmovilizado (Hueso)</div>
+                <h3 class="fw-bold text-dark mb-1">${{ "{:,.2f}".format(capital_inmovilizado_total) }}</h3>
+                <small class="text-warning-emphasis fw-semibold">{{ repuestos_inmovilizados }} productos sin ventas hace 45d</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- SECCIÓN DE GRÁFICOS PREDICTIVOS CON CHART.JS -->
+    <div class="row g-3 mb-4">
+        <!-- Gráfico 1: Curva de Forecasting (Histórico vs Proyección con Línea Punteada) -->
+        <div class="col-12 col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3 border-0 d-flex justify-content-between align-items-center">
+                    <div>
+                        <h6 class="fw-bold mb-0 text-dark">
+                            <i class="bi bi-graph-up text-primary me-2"></i>Curva Predictiva de Ventas (Histórico vs Próximos 90 Días)
+                        </h6>
+                        <small class="text-muted">Línea continua: ventas reales | Línea punteada: proyección matemática futura</small>
+                    </div>
+                    <span class="badge bg-primary-subtle text-primary border border-primary px-3 py-1">Modelo Predictivo Activo</span>
+                </div>
+                <div class="card-body" style="position: relative; height: 310px;">
+                    <canvas id="chartForecast"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Gráfico 2: Matriz de Riesgo de Inventario -->
+        <div class="col-12 col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white py-3 border-0">
+                    <h6 class="fw-bold mb-0 text-dark">
+                        <i class="bi bi-pie-chart text-danger me-2"></i>Matriz de Riesgo de Stock
+                    </h6>
+                    <small class="text-muted">Distribución de autonomía de inventario</small>
+                </div>
+                <div class="card-body d-flex align-items-center justify-content-center" style="position: relative; height: 310px;">
+                    <canvas id="chartRiesgos"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SEMÁFORO DE ACCIÓN INMEDIATA: TOP REPUESTOS EN RIESGO DE AGOTARSE -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white py-3 border-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+                <h5 class="fw-bold mb-0 text-dark">
+                    <i class="bi bi-shield-exclamation text-danger me-2"></i>Semáforo de Anticipación: Repuestos Próximos a Quiebre
+                </h5>
+                <small class="text-muted">
+                    El algoritmo evalúa la velocidad real de consumo diaria para predecir cuántos días de vida le quedan al stock antes de perder ventas.
+                </small>
+            </div>
+            <a href="{{ url_for('inventory.reporte_pedidos_proveedores', solo_comprar='1', sucursal_id=sucursal_id_sel or '') }}" class="btn btn-outline-primary btn-sm fw-bold">
+                <i class="bi bi-cart-plus me-1"></i> Ir al Generador de Pedidos
+            </a>
+        </div>
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light small text-uppercase">
+                        <tr>
+                            <th class="ps-3">Código</th>
+                            <th>Repuesto</th>
+                            <th class="text-center">Stock Actual</th>
+                            <th class="text-center">Ritmo Diario</th>
+                            <th class="text-center">Autonomía (Días de Vida)</th>
+                            <th class="text-center">Nivel de Riesgo</th>
+                            <th class="text-center bg-primary-subtle text-primary">Sugerencia (45 Días)</th>
+                            <th class="text-end pe-3">Inversión Estimada ($)</th>
+                        </tr>
+                    </thead>
+                    <tbody class="small">
+                        {% for r in repuestos_alerta %}
+                        <tr>
+                            <td class="ps-3 fw-bold text-secondary">{{ r.codigo }}</td>
+                            <td>
+                                <div class="fw-bold text-dark">{{ r.nombre }}</div>
+                            </td>
+                            <td class="text-center fw-bold fs-6">
+                                {% if r.stock <= 0 %}
+                                    <span class="badge bg-danger">0 (Agotado)</span>
+                                {% else %}
+                                    <span class="badge bg-dark-subtle text-dark">{{ r.stock }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-center">
+                                {{ r.ritmo_diario }} un./día
+                            </td>
+                            <!-- Autonomía en días -->
+                            <td class="text-center">
+                                {% if r.dias_autonomia == 0 %}
+                                    <span class="badge bg-danger fs-6 px-2 py-1">0 Días (Quiebre)</span>
+                                {% elif r.dias_autonomia <= 15 %}
+                                    <span class="badge bg-danger-subtle text-danger border border-danger fw-bold fs-6 px-2 py-1">
+                                        {{ r.dias_autonomia }} Días restantes
+                                    </span>
+                                {% elif r.dias_autonomia <= 30 %}
+                                    <span class="badge bg-warning text-dark fs-6 px-2 py-1">
+                                        {{ r.dias_autonomia }} Días restantes
+                                    </span>
+                                {% else %}
+                                    <span class="badge bg-secondary text-white">{{ r.dias_autonomia }} Días</span>
+                                {% endif %}
+                            </td>
+                            <!-- Nivel de Riesgo Badge -->
+                            <td class="text-center">
+                                {% if r.riesgo == 'CRITICO' %}
+                                    <span class="badge bg-danger">CRÍTICO</span>
+                                {% elif r.riesgo == 'ALTO' %}
+                                    <span class="badge bg-warning text-dark">RIESGO ALTO</span>
+                                {% elif r.riesgo == 'MEDIO' %}
+                                    <span class="badge bg-info text-dark">MODERADO</span>
+                                {% elif r.riesgo == 'INMOVILIZADO' %}
+                                    <span class="badge bg-secondary">HUESO / PARADO</span>
+                                {% else %}
+                                    <span class="badge bg-success">ÓPTIMO</span>
+                                {% endif %}
+                            </td>
+                            <!-- Sugerencia para 45 días -->
+                            <td class="text-center bg-primary-subtle fw-bold text-primary fs-6">
+                                + {{ r.sugerencia_45d }}
+                            </td>
+                            <!-- Inversión Estimada -->
+                            <td class="text-end pe-3 fw-bold text-dark">
+                                ${{ "{:,.2f}".format(r.inversion_necesaria) }}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center py-4 text-muted">
+                                <i class="bi bi-info-circle fs-3 d-block mb-2"></i>
+                                No se encontraron repuestos analizados con los filtros seleccionados.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- PLAN DE ACCIÓN ESTRATÉGICO SUGERIDO POR EL SISTEMA -->
+    <div class="row g-3">
+        <div class="col-12 col-md-6">
+            <div class="card border-0 shadow-sm p-3 h-100 border-start border-success border-4">
+                <h6 class="fw-bold text-success mb-2">
+                    <i class="bi bi-check-circle-fill me-2"></i>Acciones Recomendadas para Proteger el Negocio:
+                </h6>
+                <ul class="small text-muted mb-0 ps-3">
+                    <li class="mb-2"><strong>Emitir orden prioritaria:</strong> Reponer los {{ repuestos_criticos_quiebre }} repuestos con menos de 15 días de autonomía para evitar perder ventas en mostrador y taller.</li>
+                    <li class="mb-2"><strong>Ajuste de lista de precios:</strong> Si tus proveedores aumentan costos un {{ factor_inflacion }}%, actualiza de inmediato el margen para que la inflación no absorba tu ganancia bruta.</li>
+                    <li><strong>Plan de Cobranzas:</strong> Existen ${{ "{:,.2f}".format(deuda_total_clientes) }} en cuentas corrientes. Recuperar el 70% representará ${{ "{:,.2f}".format(cobranza_estimada_30d) }} de liquidez directa para pagar repuestos sin endeudarte.</li>
+                </ul>
+            </div>
+        </div>
+        <div class="col-12 col-md-6">
+            <div class="card border-0 shadow-sm p-3 h-100 border-start border-warning border-4">
+                <h6 class="fw-bold text-warning-emphasis mb-2">
+                    <i class="bi bi-lightbulb-fill me-2"></i>Estrategia para Capital Inmovilizado:
+                </h6>
+                <p class="small text-muted mb-2">
+                    Tienes un estimado de <strong>${{ "{:,.2f}".format(capital_inmovilizado_total) }}</strong> en repuestos que no registraron ninguna salida en los últimos 45 días.
+                </p>
+                <ul class="small text-muted mb-0 ps-3">
+                    <li class="mb-1">Crea combos promocionales o descuentos por pago en efectivo en radiadores y repuestos de baja rotación.</li>
+                    <li>Congela compras de los artículos marcados como "Hueso / Parado" para dirigir todo el presupuesto a los de alta rotación.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- CHART.JS DESDE CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    document.addEventListener("DOMContentLoaded", function () {
+        const dataForecast = {{ grafico_forecast_json | safe }};
+        const dataRiesgos = {{ grafico_riesgos_json | safe }};
+
+        // 1. Gráfico de Forecasting (Histórico vs Proyección Punteada)
+        const ctxForecast = document.getElementById('chartForecast').getContext('2d');
+        new Chart(ctxForecast, {
+            type: 'line',
+            data: {
+                labels: dataForecast.labels,
+                datasets: [
+                    {
+                        label: 'Ventas Reales Históricas ($)',
+                        data: dataForecast.historico,
+                        borderColor: '#0d6efd',
+                        backgroundColor: 'rgba(13, 110, 253, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        borderWidth: 3,
+                        pointRadius: 4
+                    },
+                    {
+                        label: 'Proyección Predictiva ML ($)',
+                        data: dataForecast.prediccion,
+                        borderColor: '#20c997',
+                        borderDash: [6, 6], // Línea punteada para el futuro
+                        backgroundColor: 'rgba(32, 201, 151, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        borderWidth: 3,
+                        pointRadius: 5,
+                        pointBackgroundColor: '#20c997'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        ticks: {
+                            callback: function(value) {
+                                return '$' + value.toLocaleString('es-AR');
+                            }
+                        }
+                    }
+                },
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return context.dataset.label + ': $' + context.raw.toLocaleString('es-AR', {minimumFractionDigits: 2});
+                            }
+                        }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: { boxWidth: 14 }
+                    }
+                }
+            }
+        });
+
+        // 2. Gráfico de Riesgos de Inventario (Dona)
+        const ctxRiesgos = document.getElementById('chartRiesgos').getContext('2d');
+        new Chart(ctxRiesgos, {
+            type: 'doughnut',
+            data: {
+                labels: dataRiesgos.labels,
+                datasets: [{
+                    data: dataRiesgos.data,
+                    backgroundColor: dataRiesgos.colors,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { boxWidth: 12, font: { size: 11 } }
+                    }
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

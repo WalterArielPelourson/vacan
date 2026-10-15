@@ -1,47 +1,153 @@
 {% extends 'base.html' %}
-{% block content %}
-<h2 class="fw-bold mb-4"><i class="bi bi-file-earmark-text"></i> Presupuestos <span class="text-pink">Pendientes</span></h2>
 
-<div class="card shadow border-0">
-    <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0">
-            <!-- En tu tabla de presupuestos -->
-            <a href="{{ url_for('inventory.pos', recuperar_id=p.id) }}" class="btn btn-sm btn-warning">
-                <i class="fas fa-edit"></i> Cargar y Facturar
-            </a>
-            <thead class="table-dark">
-                <tr>
-                    <th>Fecha</th>
-                    <th>Cliente</th>
-                    <th>Detalle</th>
-                    <th>Total</th>
-                    <th class="text-end px-4">Acciones</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for p in presupuestos %}
-                <tr>
-                    <td>{{ p.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
-                    <td>{{ p.cliente.razon_social }}</td>
-                    <td>
-                        {% for d in p.detalles %}
-                            <small class="d-block">{{ d.cantidad }}x {{ d.repuesto.nombre }}</small>
+{% block content %}
+<div class="container-fluid py-4">
+    <!-- Encabezado -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="mb-1 text-dark fw-bold">
+                <i class="bi bi-file-earmark-text text-warning"></i> Presupuestos Pendientes
+            </h3>
+            <p class="text-muted mb-0 small">Cotizaciones guardadas que no descuentan stock ni impactan caja.</p>
+        </div>
+        <a href="{{ url_for('inventory.pos') }}" class="btn btn-primary">
+            <i class="bi bi-plus-circle"></i> Nuevo en POS
+        </a>
+    </div>
+
+    <!-- Tabla de Presupuestos -->
+    <div class="card shadow-sm border-0">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th class="ps-3" style="width: 80px;"># ID</th>
+                            <th style="width: 140px;">Fecha</th>
+                            <th style="width: 220px;">Cliente</th>
+                            <th style="width: 120px;">Vendedor</th>
+                            <!-- COLUMNA DETALLE PRODUCTOS / REPUESTOS -->
+                            <th style="min-width: 280px;">Ítems Presupuestados (Código y Descripción)</th>
+                            <th class="text-end" style="width: 140px;">Total Estimado</th>
+                            <th class="text-center" style="width: 200px;">Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in presupuestos %}
+                        <tr>
+                            <td class="ps-3 fw-bold text-muted">#{{ p.id }}</td>
+                            <td>{{ p.fecha.strftime('%d/%m/%Y %H:%M') if p.fecha else 'S/D' }}</td>
+                            
+                            <!-- COLUMNA CLIENTE: Muestra Razón Social y CUIT -->
+                            <td>
+                                {% if p.cliente %}
+                                    <span class="fw-bold text-dark">
+                                        <i class="bi bi-person-fill text-primary"></i> 
+                                        {{ p.cliente.razon_social if p.cliente.razon_social else p.cliente.nombre }}
+                                    </span>
+                                    {% if p.cliente.cuit %}
+                                        <small class="text-muted d-block ps-4">CUIT: {{ p.cliente.cuit }}</small>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="text-muted fst-italic">
+                                        <i class="bi bi-person"></i> Consumidor Final
+                                    </span>
+                                {% endif %}
+                            </td>
+
+                            <td>
+                                <span class="badge bg-light text-dark border">
+                                    {{ p.usuario.username if p.usuario else 'Sistema' }}
+                                </span>
+                            </td>
+
+                            <!-- COLUMNA ÍTEMS: Código, Cantidad y Nombre del Repuesto -->
+                            <td>
+                                <div style="max-height: 110px; overflow-y: auto;">
+                                    {% if p.detalles and p.detalles|length > 0 %}
+                                        <ul class="list-unstyled mb-0 small">
+                                            {% for d in p.detalles %}
+                                            <li class="py-1 border-bottom border-light text-truncate" style="max-width: 380px;">
+                                                <!-- Cantidad -->
+                                                <span class="badge bg-secondary text-white me-1">{{ d.cantidad }}x</span>
+                                                
+                                                <!-- Código / SKU del repuesto si existe -->
+                                                {% if d.repuesto and (d.repuesto.sku or d.repuesto.codigo) %}
+                                                    <span class="badge bg-light text-dark border me-1 font-monospace">
+                                                        {{ d.repuesto.sku if d.repuesto.sku else d.repuesto.codigo }}
+                                                    </span>
+                                                {% endif %}
+                                                
+                                                <!-- Nombre o Descripción del ítem -->
+                                                <span class="fw-semibold text-dark">
+                                                    {{ d.nombre_item if d.nombre_item else (d.repuesto.nombre if d.repuesto else 'Ítem') }}
+                                                </span>
+                                            </li>
+                                            {% endfor %}
+                                        </ul>
+                                    {% else %}
+                                        <span class="text-muted fst-italic small">Sin ítems</span>
+                                    {% endif %}
+                                </div>
+                            </td>
+
+                            <td class="text-end fw-bold font-monospace fs-6 text-success">
+                                ${{ "{:,.2f}".format(p.total) }}
+                            </td>
+
+                            <td class="text-center">
+                                <div class="btn-group btn-group-sm">
+                                    <!-- Ver / Imprimir 
+                                    <a href="{{ url_for('inventory.ver_presupuesto', id=p.id) }}" 
+                                       class="btn btn-outline-secondary" 
+                                       title="Ver comprobante para imprimir">
+                                        <i class="bi bi-eye"></i>
+                                    </a>-->
+                                    
+                                    <a href="{{ url_for('inventory.imprimir_presupuesto', id=p.id) }}" 
+                                    target="_blank" 
+                                    class="btn btn-sm btn-outline-primary" 
+                                    title="Imprimir Presupuesto">
+                                        <i class="bi bi-printer"></i> Imprimir
+                                    </a>
+
+                                    <!-- Editar en POS (Recupera cliente y productos) -->
+                                    <a href="{{ url_for('inventory.pos', recuperar_id=p.id) }}" 
+                                       class="btn btn-outline-warning text-dark" 
+                                       title="Editar presupuesto en el POS">
+                                        <i class="bi bi-pencil-square"></i>
+                                    </a>
+
+                                    <!-- Convertir directo en Venta -->
+                                    <a href="{{ url_for('inventory.convertir_a_remito', id=p.id) }}" 
+                                       class="btn btn-success" 
+                                       onclick="return confirm('¿Confirmas convertir este presupuesto en venta y descontar stock?')" 
+                                       title="Facturar y Descontar Stock">
+                                        <i class="bi bi-cart-check"></i>
+                                    </a>
+
+                                    <!-- Eliminar / Descartar -->
+                                    <a href="{{ url_for('inventory.eliminar_presupuesto', id=p.id) }}" 
+                                       class="btn btn-outline-danger" 
+                                       onclick="return confirm('¿Deseas descartar este presupuesto?')" 
+                                       title="Eliminar">
+                                        <i class="bi bi-trash"></i>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center py-5 text-muted">
+                                <i class="bi bi-inbox fs-1 d-block mb-2 text-secondary"></i>
+                                No hay presupuestos pendientes en este momento.
+                            </td>
+                        </tr>
                         {% endfor %}
-                    </td>
-                    <td class="fw-bold">${{ "{:,.2f}".format(p.total) }}</td>
-                    <td class="text-end px-4">
-                        <div class="btn-group">
-                            <a href="{{ url_for('inventory.convertir_a_remito', id=p.id) }}" class="btn btn-sm btn-success fw-bold">CONVERTIR A VENTA</a>
-                            <a href="#" class="btn btn-sm btn-outline-primary">EDITAR</a>
-                            <a href="{{ url_for('inventory.eliminar_presupuesto', id=p.id) }}" class="btn btn-sm btn-outline-danger" onclick="return confirm('¿Descartar presupuesto?')">BORRAR</a>
-                        </div>
-                    </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="5" class="text-center py-5">No hay presupuestos pendientes.</td></tr>
-                {% endfor %}
-            </tbody>
-        </table>
+                    </tbody>
+                </table>
+            </div>
+        </div>
     </div>
 </div>
 {% endblock %}

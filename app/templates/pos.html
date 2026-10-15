@@ -245,8 +245,8 @@
 let itemsVenta = [];
 let bolsaPagos = [];
 let totalFinal = 0;
-
 let timeout = null;
+window.presupuestoOrigenId = null; // Almacena el ID del presupuesto que se está editando
 
 function buscarEnServidor(q) {
     const lista = document.getElementById('lista_sugerencias');
@@ -322,7 +322,7 @@ function buscarClientes(q) {
 function seleccionarClienteParaVenta(id, nombre, cuit) {
     document.getElementById('cliente_id').value = id;
     document.getElementById('disp_nombre').innerText = nombre;
-    document.getElementById('disp_cuit').innerText = "CUIT/DNI: " + cuit;
+    document.getElementById('disp_cuit').innerText = cuit ? ("CUIT/DNI: " + cuit) : "";
     document.getElementById('cliente_seleccionado_display').classList.remove('d-none');
     document.getElementById('buscar_cliente_input').parentElement.classList.add('d-none');
     document.getElementById('sugerencias_clientes').classList.add('d-none');
@@ -557,27 +557,107 @@ function obtenerTotalPagado() {
 }
 
 function actualizarEstadoPago() {
-    const pagado = obtenerTotalPagado();
-    const restante = totalFinal - pagado;
+    const tipoComp = document.getElementById('tipo_comprobante')?.value;
     const label = document.getElementById('label_restante');
     const btn = document.getElementById('btn_finalizar');
 
-    label.innerText = `$ ${restante.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+    // --- CASO ESPECIAL: ES PRESUPUESTO (NO EXIGE PAGOS) ---
+    if (tipoComp === 'PRESUPUESTO') {
+        if (label) {
+            label.className = "text-warning fw-bold h5";
+            label.innerText = window.presupuestoOrigenId 
+                ? `MODO EDICIÓN (PRESUPUESTO #${window.presupuestoOrigenId})` 
+                : "PRESUPUESTO (SIN COBRO)";
+        }
+        if (btn) {
+            // Si estamos editando, avisamos que actualizará el presupuesto existente
+            btn.innerHTML = window.presupuestoOrigenId 
+                ? `<i class="bi bi-pencil-square me-1"></i> ACTUALIZAR PRESUPUESTO #${window.presupuestoOrigenId}` 
+                : '<i class="bi bi-file-earmark-text me-1"></i> GUARDAR PRESUPUESTO';
+            btn.className = "btn btn-warning btn-lg w-100 fw-bold";
+            btn.classList.remove('disabled');
+        }
+        return;
+    }
 
-    if (Math.abs(restante) < 0.05 && totalFinal > 0) {
-        label.className = "text-success fw-bold h5";
-        label.innerText = "LISTO PARA FINALIZAR";
-        btn.classList.remove('disabled');
-    } else {
-        label.className = "text-danger fw-bold";
-        btn.classList.add('disabled');
+    // --- CASO VENTA NORMAL (REMITO / FACTURA) ---
+    if (btn) {
+        btn.innerHTML = window.presupuestoOrigenId 
+            ? `<i class="bi bi-check-circle me-1"></i> FACTURAR PRESUPUESTO #${window.presupuestoOrigenId}` 
+            : 'FINALIZAR VENTA';
+        btn.className = "btn btn-success btn-lg w-100 fw-bold";
+    }
+
+    const pagado = obtenerTotalPagado();
+    const restante = totalFinal - pagado;
+
+    if (label) {
+        label.innerText = `$ ${restante.toLocaleString('es-AR', {minimumFractionDigits: 2})}`;
+
+        if (Math.abs(restante) < 0.05 && totalFinal > 0) {
+            label.className = "text-success fw-bold h5";
+            label.innerText = "LISTO PARA FINALIZAR";
+            if (btn) btn.classList.remove('disabled');
+        } else {
+            label.className = "text-danger fw-bold";
+            if (btn) btn.classList.add('disabled');
+        }
     }
 }
 
 async function enviarVentaVacan() {
     const clienteId = document.getElementById('cliente_id').value;
+    const tipoComp = document.getElementById('tipo_comprobante').value;
 
-    // VALIDACIÓN PREVIA ANTES DEL ENVÍO AL SERVIDOR
+    // =========================================================================
+    // 📌 CASO A: ES PRESUPUESTO (No valida pagos y guarda / actualiza directo)
+    // =========================================================================
+    if (tipoComp === 'PRESUPUESTO') {
+        if (!itemsVenta || itemsVenta.length === 0) {
+            alert("⚠️ Agregue al menos un producto al carrito para generar el presupuesto.");
+            return;
+        }
+
+        const payloadPresupuesto = {
+            presupuesto_id: window.presupuestoOrigenId || null,
+            presupuesto_id_origen: window.presupuestoOrigenId || null,
+            cliente_id: clienteId || null,
+            destino: 'PRESUPUESTO',
+            tipo_comprobante: 'PRESUPUESTO',
+            items: itemsVenta,
+            pago: {
+                total_final: typeof totalFinal !== 'undefined' ? totalFinal : 0
+            }
+        };
+
+        try {
+            const response = await fetch("/pos/procesar", {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payloadPresupuesto)
+            });
+
+            const res = await response.json();
+            if (response.ok && (res.status === 'ok' || res.status === 'success')) {
+                const idFinal = res.presupuesto_id || window.presupuestoOrigenId;
+                alert(res.mensaje || res.message || `¡Presupuesto N° ${idFinal} guardado con éxito!`);
+                if (res.redirect_url) {
+                    window.location.href = res.redirect_url;
+                } else {
+                    window.location.href = `/presupuesto/${idFinal}`;
+                }
+            } else {
+                alert("Error al procesar presupuesto: " + (res.message || res.error || "Error desconocido"));
+            }
+        } catch (error) {
+            alert("Error de conexión al procesar presupuesto: " + error);
+        }
+        return; // Detiene la función aquí para no ejecutar la venta normal
+    }
+
+    // =========================================================================
+    // 📌 CASO B: VENTA REAL (Remito / Factura con control de pagos)
+    // =========================================================================
     const tieneCtaCte = bolsaPagos.some(p => p.medio === 'CTA_CTE');
     if (tieneCtaCte && (!clienteId || clienteId.trim() === "" || clienteId === "0")) {
         alert("⚠️ No se puede finalizar: La venta incluye un saldo a Cuenta Corriente y no hay ningún Cliente seleccionado.");
@@ -586,8 +666,11 @@ async function enviarVentaVacan() {
     }
 
     const payload = {
+        presupuesto_id: window.presupuestoOrigenId || null,
+        presupuesto_id_origen: window.presupuestoOrigenId || null,
         cliente_id: clienteId || null,
-        tipo_comprobante: document.getElementById('tipo_comprobante').value,
+        tipo_comprobante: tipoComp,
+        destino: tipoComp,
         iva_porcentaje: document.getElementById('iva_porcentaje').value,
         plazo_pago: document.getElementById('plazo_pago').value,
         recargo_porcentaje: document.getElementById('recargo_p').value,
@@ -613,22 +696,70 @@ async function enviarVentaVacan() {
     }
 }
 
-// Al cargar la página del POS
+// Al cargar la página del POS: Recuperar presupuesto si viene desde la lista
 document.addEventListener('DOMContentLoaded', function() {
-    const presupuestoId = "{{ recuperar_id }}";
-    if (presupuestoId && presupuestoId !== 'None') {
-        fetch(`/repuestos/api/presupuesto/${presupuestoId}`)
-            .then(res => res.json())
-            .then(data => {
-                document.getElementById('cliente_id').value = data.cliente_id;
-                
-                data.items.forEach(item => {
-                    agregarAlCarrito(item.id, item.nombre, item.precio, item.cantidad);
+    // 1. Datos inyectados directamente por Flask
+    const presoRecuperado = {{ presupuesto_recuperado | tojson if presupuesto_recuperado else 'null' }};
+
+    if (presoRecuperado) {
+        console.log("Recuperando presupuesto en POS:", presoRecuperado);
+
+        // Guardamos el ID del presupuesto original en memoria global
+        window.presupuestoOrigenId = presoRecuperado.id;
+
+        // Seleccionar Tipo de Comprobante PRESUPUESTO
+        const selectTipo = document.getElementById('tipo_comprobante');
+        if (selectTipo) {
+            selectTipo.value = 'PRESUPUESTO';
+        }
+
+        // Cargar Cliente en la interfaz
+        if (presoRecuperado.cliente_id) {
+            seleccionarClienteParaVenta(
+                presoRecuperado.cliente_id, 
+                presoRecuperado.cliente_nombre || 'Cliente', 
+                presoRecuperado.cuit || ''
+            );
+        }
+
+        // Cargar Ítems al array itemsVenta
+        if (presoRecuperado.items && presoRecuperado.items.length > 0) {
+            itemsVenta = [];
+            presoRecuperado.items.forEach(it => {
+                itemsVenta.push({
+                    id: it.id,
+                    nombre: it.nombre,
+                    precio: parseFloat(it.precio),
+                    cantidad: parseInt(it.cantidad)
                 });
-                
-                window.presupuestoOrigenId = data.id;
-                alert("Presupuesto cargado. Puede modificarlo o finalizar la venta.");
             });
+            // Dibujar la tabla con los ítems y recalcular totales
+            dibujarTabla();
+        }
+
+        // Ocultar sección de pagos si existe
+        const contenedorPagos = document.getElementById('seccion_pagos') || document.getElementById('card_pagos');
+        if (contenedorPagos) {
+            contenedorPagos.style.display = 'none';
+        }
+        
+        actualizarEstadoPago();
+    }
+
+    // Listener para reaccionar al cambio de Tipo de Comprobante
+    const selectTipoComp = document.getElementById('tipo_comprobante');
+    if (selectTipoComp) {
+        selectTipoComp.addEventListener('change', function() {
+            const contenedorPagos = document.getElementById('seccion_pagos') || document.getElementById('card_pagos');
+            if (contenedorPagos) {
+                if (this.value === 'PRESUPUESTO') {
+                    contenedorPagos.style.display = 'none';
+                } else {
+                    contenedorPagos.style.display = '';
+                }
+            }
+            actualizarEstadoPago();
+        });
     }
 });
 </script>

@@ -1,0 +1,126 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2><i class="bi bi-cart-check"></i> Facturación de Presupuesto #{{ "%05d"|format(presupuesto.id) }}</h2>
+            <small class="text-muted">Determina la forma de pago y emite la venta final</small>
+        </div>
+        <a href="{{ url_for('admin.lista_presupuestos') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-x-circle"></i> Cancelar
+        </a>
+    </div>
+
+    <div class="row">
+        <!-- Resumen del Presupuesto -->
+        <div class="col-md-5 mb-3">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white">
+                    <strong>Resumen del Comprobante</strong>
+                </div>
+                <div class="card-body">
+                    <p class="mb-1"><strong>Cliente:</strong> {{ presupuesto.cliente.razon_social if presupuesto.cliente else 'Consumidor Final' }}</p>
+                    <p class="mb-1"><strong>Fecha emisión:</strong> {{ presupuesto.fecha.strftime('%d/%m/%Y %H:%M') }}</p>
+                    <p class="mb-3"><strong>Sucursal:</strong> {{ presupuesto.sucursal.nombre if presupuesto.sucursal else '-' }}</p>
+
+                    <h6 class="fw-bold border-bottom pb-2">Ítems a descontar de stock:</h6>
+                    <ul class="list-group list-group-flush mb-3">
+                        {% for d in presupuesto.detalles %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                            <div>
+                                <span>{{ d.nombre_item }}</span>
+                                <small class="text-muted d-block">{{ d.cantidad }} un. x ${{ "{:,.2f}".format(d.precio_pactado) }}</small>
+                            </div>
+                            <span class="fw-bold">${{ "{:,.2f}".format(d.cantidad * d.precio_pactado) }}</span>
+                        </li>
+                        {% endfor %}
+                    </ul>
+
+                    <div class="alert alert-info d-flex justify-content-between align-items-center mb-0">
+                        <span class="fs-5 fw-bold">TOTAL A COBRAR:</span>
+                        <span class="fs-3 fw-bold text-success">${{ "{:,.2f}".format(presupuesto.total) }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Opciones de Cobro tipo POS -->
+        <div class="col-md-7 mb-3">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <strong>Forma de Cobro / Pago</strong>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Caja Receptora</label>
+                        <select id="caja_id" class="form-select">
+                            {% for c in cajas %}
+                            <option value="{{ c.id }}">{{ c.nombre }} (Saldo: ${{ "{:,.2f}".format(c.saldo or 0) }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Método de Pago</label>
+                        <select id="metodo_pago" class="form-select" onchange="cambiarMetodo(this.value)">
+                            <option value="EFECTIVO">Efectivo</option>
+                            <option value="TRANSFERENCIA">Transferencia / Débito</option>
+                            <option value="TARJETA_CREDITO">Tarjeta de Crédito</option>
+                            <option value="CTA_CTE">Cuenta Corriente (a Deuda)</option>
+                        </select>
+                    </div>
+
+                    <div id="aviso_cta_cte" class="alert alert-warning d-none">
+                        <i class="bi bi-exclamation-triangle"></i> La venta se registrará a la Cuenta Corriente de <strong>{{ presupuesto.cliente.razon_social if presupuesto.cliente else 'este cliente' }}</strong>.
+                    </div>
+
+                    <div class="mt-4 d-grid gap-2">
+                        <button type="button" class="btn btn-success btn-lg" onclick="confirmarVenta()">
+                            <i class="bi bi-check2-circle"></i> Confirmar y Emitir Venta
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function cambiarMetodo(metodo) {
+    const aviso = document.getElementById('aviso_cta_cte');
+    if (metodo === 'CTA_CTE') {
+        aviso.classList.remove('d-none');
+    } else {
+        aviso.classList.add('d-none');
+    }
+}
+
+function confirmarVenta() {
+    if (!confirm('¿Confirmar presupuesto y emitir la venta final? Se descontará el stock correspondiente.')) {
+        return;
+    }
+
+    const payload = {
+        caja_id: document.getElementById('caja_id').value,
+        metodo_pago: document.getElementById('metodo_pago').value
+    };
+
+    fetch("{{ url_for('admin.confirmar_presupuesto_pos', id=presupuesto.id) }}", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            alert(data.message || 'Venta realizada con éxito');
+            window.location.href = "{{ url_for('admin.lista_presupuestos') }}";
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(err => alert('Error de red: ' + err));
+}
+</script>
+{% endblock %}

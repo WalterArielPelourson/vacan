@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container my-4">
+    <!-- Botones de Acción (no salen en la impresión) -->
+    <div class="d-flex justify-content-between align-items-center mb-4 d-print-none">
+        <a href="{{ url_for('admin.lista_presupuestos') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Volver a la Lista
+        </a>
+        <div class="d-flex gap-2">
+            {% set wsp_texto = "Hola! Te compartimos el Presupuesto #" ~ "%05d"|format(presupuesto.id) ~ " por un total de $" ~ "{:,.2f}".format(presupuesto.total) %}
+            <a href="https://wa.me/{{ (presupuesto.cliente.telefono or '') | replace('+', '') | replace(' ', '') }}?text={{ wsp_texto | urlencode }}" 
+               target="_blank" 
+               class="btn btn-success">
+                <i class="bi bi-whatsapp"></i> Compartir por WhatsApp
+            </a>
+            <button onclick="window.print()" class="btn btn-primary">
+                <i class="bi bi-printer"></i> Imprimir / Guardar PDF
+            </button>
+            {% if presupuesto.estado == 'PENDIENTE' %}
+            <a href="{{ url_for('admin.confirmar_presupuesto_pos', id=presupuesto.id) }}" class="btn btn-outline-success">
+                <i class="bi bi-cart-check"></i> Pasar a Facturación
+            </a>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Comprobante formal -->
+    <div class="card shadow border p-4 bg-white" id="impresion_presupuesto">
+        <div class="row align-items-center pb-3 border-bottom">
+            <div class="col-6">
+                <h2 class="fw-bold mb-1">PRESUPUESTO</h2>
+                <h4 class="text-primary mb-0">N° #{{ "%05d"|format(presupuesto.id) }}</h4>
+            </div>
+            <div class="col-6 text-end">
+                <h5 class="mb-0 fw-bold">{{ current_user.sucursal.nombre if current_user.sucursal else 'EMPRESA' }}</h5>
+                <small class="text-muted">Fecha: {{ presupuesto.fecha.strftime('%d/%m/%Y %H:%M') }}</small><br>
+                <span class="badge {{ 'bg-warning text-dark' if presupuesto.estado == 'PENDIENTE' else 'bg-success' }}">
+                    ESTADO: {{ presupuesto.estado }}
+                </span>
+            </div>
+        </div>
+
+        <div class="row mt-3 mb-4">
+            <div class="col-6">
+                <span class="text-muted text-uppercase small fw-bold">Datos del Cliente</span>
+                <div class="fs-5 fw-bold">{{ presupuesto.cliente.razon_social if presupuesto.cliente else 'Consumidor Final' }}</div>
+                {% if presupuesto.cliente %}
+                <div><strong>CUIT/DNI:</strong> {{ presupuesto.cliente.cuit or '-' }}</div>
+                <div><strong>Teléfono:</strong> {{ presupuesto.cliente.telefono or '-' }}</div>
+                <div><strong>Dirección:</strong> {{ presupuesto.cliente.direccion or '-' }}</div>
+                {% endif %}
+            </div>
+            <div class="col-6 text-end">
+                <span class="text-muted text-uppercase small fw-bold">Emitido por</span>
+                <div><strong>Vendedor:</strong> {{ presupuesto.usuario.nombre if presupuesto.usuario else '-' }}</div>
+                <div><strong>Sucursal:</strong> {{ presupuesto.sucursal.nombre if presupuesto.sucursal else '-' }}</div>
+            </div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Ítem / Descripción</th>
+                        <th class="text-center" style="width: 15%;">Cantidad</th>
+                        <th class="text-end" style="width: 20%;">Precio Unitario</th>
+                        <th class="text-end" style="width: 20%;">Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in presupuesto.detalles %}
+                    <tr>
+                        <td>
+                            <strong>{{ d.nombre_item }}</strong>
+                            {% if d.repuesto and d.repuesto.codigo %}
+                            <br><small class="text-muted">Cód: {{ d.repuesto.codigo }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">{{ d.cantidad }}</td>
+                        <td class="text-end">${{ "{:,.2f}".format(d.precio_pactado) }}</td>
+                        <td class="text-end fw-bold">${{ "{:,.2f}".format(d.cantidad * d.precio_pactado) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="table-light">
+                        <th colspan="3" class="text-end fs-5">TOTAL PRESUPUESTADO:</th>
+                        <th class="text-end fs-4 text-primary">${{ "{:,.2f}".format(presupuesto.total) }}</th>
+                    </tr>
+                </tfoot>
+            </table>
+        </div>
+
+        <div class="mt-4 pt-3 border-top text-muted small">
+            <p class="mb-1"><strong>Condiciones:</strong> Presupuesto válido por 7 días hábiles. Los precios están sujetos a variación sin previo aviso.</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

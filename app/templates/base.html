@@ -92,12 +92,18 @@
         {% if current_user.is_authenticated %}
         <!-- ACCESOS RÁPIDOS SUPERIORES -->
         <div class="d-none d-md-flex ms-auto me-4">
-            <a href="{{ url_for('inventory.index') }}" class="quick-link quick-link-money">
-                <i class="bi bi-box-seam"></i> STOCK
-            </a>
+                      
 
             <a href="{{ url_for('inventory.pos') }}" class="quick-link quick-link-money">
                 <i class="bi bi-cart-check-fill"></i> VENDER
+            </a>
+
+            <a href="{{ url_for('inventory.lista_presupuestos') }}" class="btn btn-outline-primary">
+                <i class="bi bi-file-earmark-text"></i> Presupuestos
+            </a>
+
+            <a href="{{ url_for('inventory.index') }}" class="quick-link quick-link-money">
+                <i class="bi bi-box-seam"></i> STOCK
             </a>
                        
             {% if current_user.rol in ['admin', 'superadmin', 'vendedor' ] %}
@@ -230,6 +236,15 @@
                 <a href="{{ url_for('admin.reporte_deudas_prov') }}" class="sidebar-link">
                     <i class="bi bi-calendar-check"></i> Pagar a Proveedores
                 </a>
+
+                <a href="{{ url_for('inventory.reporte_pedidos_proveedores') }}" class="sidebar-link">
+                    <i class="bi bi-cart-plus"></i> Pedidos a Proveedores
+                </a>
+
+                <a href="{{ url_for('inventory.reporte_predictivo_inteligencia') }}" class="sidebar-link">
+                    <i class="bi bi-cpu"></i> Inteligencia Predictiva (ML)
+                </a>
+
 
                
                 <a href="{{ url_for('admin.reporte_operaciones_detallado') }}" class="sidebar-link">

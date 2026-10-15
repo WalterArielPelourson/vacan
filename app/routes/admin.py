@@ -4,7 +4,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash,
 from flask_login import login_required, current_user
 from datetime import datetime, date 
 # Busca esta línea al principio del archivo y agrégale Caja y MovimientoFinanciero
-from app.models import db, Empresa, Sucursal, Usuario, Venta, Cliente, Proveedor, MovimientoCtaCte, Caja, MovimientoFinanciero, Cheque,  CategoriaMovimiento, CierreCaja, Compra, DetalleCompra, MovimientoCtaCteProveedor, Repuesto, HistorialPrecio, get_argentina_time, Traspaso, DetalleTraspaso, DetalleVenta, PagoVenta
+from app.models import db, Empresa, Sucursal, Usuario, Venta, Cliente, Proveedor, MovimientoCtaCte, Caja, MovimientoFinanciero, Cheque,  CategoriaMovimiento, CierreCaja, Compra, DetalleCompra, MovimientoCtaCteProveedor, Repuesto, HistorialPrecio, get_argentina_time, Traspaso, DetalleTraspaso, DetalleVenta, PagoVenta, Presupuesto, DetallePresupuesto
 from werkzeug.security import generate_password_hash
 from sqlalchemy import func, or_, and_, extract, text
 import requests
@@ -589,6 +589,80 @@ def detalle_cta_cte_proveedor(id):
                            f_sucursal=f_sucursal,
                            cheques_en_cartera=cheques_en_cartera) 
     
+#@admin_bp.route('/cta-cte')
+#@login_required
+#@roles_required('admin', 'superadmin', 'vendedor')
+#def lista_cta_cte():
+#    saldos = []
+#    total_global_sucursal = 0
+
+    # 1. Filtro de Clientes: Solo traer clientes que operaron en MI sucursal
+    #if current_user.rol == 'admin':
+    #if current_user.rol in ['admin', 'vendedor']:
+    #    clientes = Cliente.query.join(MovimientoCtaCte).filter(
+    #        MovimientoCtaCte.sucursal_id == current_user.sucursal_id
+    #    ).distinct().all()
+    #else:
+    #    clientes = Cliente.query.all()
+
+    #for c in clientes:
+    #    # 2. Filtro de Saldo: Sumar solo lo que pertenece a esta sucursal
+    #    query_m = MovimientoCtaCte.query.filter_by(cliente_id=c.id)
+    #    if current_user.rol == 'admin':
+    #        query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
+    #    
+    #    saldo_individual = db.session.query(func.sum(MovimientoCtaCte.monto)).filter(
+    #        MovimientoCtaCte.id.in_([m.id for m in query_m.all()])
+    #    ).scalar() or 0
+    #    
+    #    # 3. Solo mostrar si hay deuda en esta sucursal
+    #    #if saldo_individual != 0:
+    #    saldos.append({
+    #        'id': c.id,
+    #        'razon_social': c.razon_social,
+    #        'cuit': c.cuit,
+    #        'saldo': saldo_individual
+    #        })
+    #    if saldo_individual >= 0:
+    #        total_global_sucursal += saldo_individual
+
+    #return render_template('admin/cta_cte_lista.html', 
+    #                       saldos=saldos, 
+    #                       total_global=total_global_sucursal)
+    # 1. Filtro de Clientes: Solo traer clientes que operaron en MI sucursal (Admin y Vendedor)
+#    if current_user.rol in ['admin', 'vendedor']:
+#        clientes = Cliente.query.join(MovimientoCtaCte).filter(
+#            MovimientoCtaCte.sucursal_id == current_user.sucursal_id
+#        ).distinct().all()
+#    else:
+#        clientes = Cliente.query.all()
+
+#    for c in clientes:
+#        # 2. Filtro de Saldo: Sumar solo lo que pertenece a esta sucursal (Admin y Vendedor)
+#        query_m = MovimientoCtaCte.query.filter_by(cliente_id=c.id)
+#        if current_user.rol in ['admin', 'vendedor']:
+#            query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
+        
+#        saldo_individual = db.session.query(func.sum(MovimientoCtaCte.monto)).filter(
+#            MovimientoCtaCte.id.in_([m.id for m in query_m.all()])
+#        ).scalar() or 0
+#        
+        # 3. Solo mostrar si hay deuda en esta sucursal
+        #if saldo_individual != 0:
+#        saldos.append({
+#            'id': c.id,
+#            'razon_social': c.razon_social,
+#            'cuit': c.cuit,
+#            'saldo': saldo_individual
+#        })
+#        if saldo_individual >= 0:
+#            total_global_sucursal += saldo_individual
+
+#    return render_template('admin/cta_cte_lista.html', 
+#                           saldos=saldos, 
+#                           total_global=total_global_sucursal)
+
+
 @admin_bp.route('/cta-cte')
 @login_required
 @roles_required('admin', 'superadmin', 'vendedor')
@@ -596,39 +670,56 @@ def lista_cta_cte():
     saldos = []
     total_global_sucursal = 0
 
-    # 1. Filtro de Clientes: Solo traer clientes que operaron en MI sucursal
-    if current_user.rol == 'admin':
+    # 1. Filtro de Clientes: Traer los clientes que operaron en la sucursal del Admin/Vendedor
+    # (o todos si es Superadmin)
+    if current_user.rol in ['admin', 'vendedor']:
         clientes = Cliente.query.join(MovimientoCtaCte).filter(
             MovimientoCtaCte.sucursal_id == current_user.sucursal_id
-        ).distinct().all()
+        ).distinct().order_by(Cliente.razon_social).all()
     else:
-        clientes = Cliente.query.all()
+        clientes = Cliente.query.order_by(Cliente.razon_social).all()
 
     for c in clientes:
-        # 2. Filtro de Saldo: Sumar solo lo que pertenece a esta sucursal
+        # 2. Filtro de Saldo: Sumar solo los movimientos que pertenecen a esta sucursal (Admin y Vendedor)
         query_m = MovimientoCtaCte.query.filter_by(cliente_id=c.id)
-        if current_user.rol == 'admin':
+        if current_user.rol in ['admin', 'vendedor']:
             query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
         
+        # Cálculo del saldo del cliente en esta sucursal
         saldo_individual = db.session.query(func.sum(MovimientoCtaCte.monto)).filter(
             MovimientoCtaCte.id.in_([m.id for m in query_m.all()])
         ).scalar() or 0
         
-        # 3. Solo mostrar si hay deuda en esta sucursal
-        #if saldo_individual != 0:
+        saldo_individual = round(float(saldo_individual), 2)
+
+        # 3. Determinamos si tiene saldo o no y su estado
+        tiene_saldo = (saldo_individual != 0)
+        
+        if saldo_individual > 0:
+            estado_saldo = 'DEUDOR'       # Con deuda pendiente
+        elif saldo_individual < 0:
+            estado_saldo = 'A FAVOR'      # Saldo a favor del cliente
+        else:
+            estado_saldo = 'AL DIA'       # Saldo $0.00 (sin deuda)
+
+        # 4. Agregamos a la lista tengan o no saldo
         saldos.append({
             'id': c.id,
             'razon_social': c.razon_social,
             'cuit': c.cuit,
-            'saldo': saldo_individual
-            })
-        if saldo_individual >= 0:
+            'saldo': saldo_individual,
+            'tiene_saldo': tiene_saldo,
+            'estado': estado_saldo
+        })
+
+        # Sumamos al totalizador general de la sucursal
+        if saldo_individual > 0:
             total_global_sucursal += saldo_individual
 
     return render_template('admin/cta_cte_lista.html', 
                            saldos=saldos, 
                            total_global=total_global_sucursal)
-
+   
 #@admin_bp.route('/cta-cte/<int:cliente_id>')
 #@login_required
 #def detalle_cta_cte(cliente_id):
@@ -680,7 +771,8 @@ def detalle_cta_cte(cliente_id):
     # 1. Filtro Estricto de Movimientos por Sucursal
     query_m = MovimientoCtaCte.query.filter_by(cliente_id=cliente_id)
     
-    if current_user.rol == 'admin':
+    #if current_user.rol == 'admin':
+    if current_user.rol in ['admin', 'vendedor']:
         # El Admin NO ve ventas ni cobros de otros locales
         query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
         f_sucursal = current_user.sucursal_id # Sincronizamos el ID para la lógica de cajas
@@ -3645,3 +3737,6 @@ def editar_cliente_rapido(id):
 
     # Redirige de regreso a la misma ficha de detalle del cliente
     return redirect(url_for('admin.detalle_cta_cte', cliente_id=id))
+
+
+

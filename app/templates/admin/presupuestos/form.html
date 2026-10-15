@@ -1,0 +1,242 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid mt-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h2><i class="bi bi-file-earmark-plus"></i> {{ 'Editar Presupuesto #' ~ "%05d"|format(presupuesto.id) if presupuesto else 'Nuevo Presupuesto' }}</h2>
+            <small class="text-muted">Carga los ítems y precios pactados sin descontar stock</small>
+        </div>
+        <a href="{{ url_for('admin.lista_presupuestos') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Volver a la Lista
+        </a>
+    </div>
+
+    <div class="row">
+        <!-- Columna de Datos de Cabecera -->
+        <div class="col-md-4 mb-3">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white">
+                    <strong>1. Datos del Cliente</strong>
+                </div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label fw-bold">Cliente</label>
+                        <select id="cliente_id" class="form-select select2">
+                            <option value="">-- Consumidor Final (Sin asignar) --</option>
+                            {% for c in clientes %}
+                            <option value="{{ c.id }}" {% if presupuesto and presupuesto.cliente_id == c.id %}selected{% endif %}>
+                                {{ c.razon_social or c.nombre }} ({{ c.cuit or 'S/C' }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <hr>
+                    <div class="text-center p-3 bg-light rounded">
+                        <span class="text-muted text-uppercase fw-bold">Total del Presupuesto</span>
+                        <h2 class="text-primary mt-2 mb-0" id="display_total">$0.00</h2>
+                    </div>
+
+                    <div class="mt-4 d-grid gap-2">
+                        <button type="button" class="btn btn-success btn-lg" onclick="guardarPresupuesto()">
+                            <i class="bi bi-check-circle"></i> {{ 'Actualizar Presupuesto' if presupuesto else 'Guardar Presupuesto' }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Columna de Ítems / Productos -->
+        <div class="col-md-8 mb-3">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                    <strong>2. Detalle de Ítems / Repuestos</strong>
+                    <button type="button" class="btn btn-sm btn-light" onclick="agregarFila()">
+                        <i class="bi bi-plus-lg"></i> Agregar Ítem
+                    </button>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-bordered align-middle mb-0" id="tabla_items">
+                            <thead class="table-light">
+                                <tr>
+                                    <th style="width: 40%;">Ítem / Repuesto</th>
+                                    <th style="width: 15%;" class="text-center">Cantidad</th>
+                                    <th style="width: 20%;" class="text-end">Precio Pactado ($)</th>
+                                    <th style="width: 20%;" class="text-end">Subtotal ($)</th>
+                                    <th style="width: 5%;" class="text-center"></th>
+                                </tr>
+                            </thead>
+                            <tbody id="items_body">
+                                <!-- Filas dinámicas -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="card-footer bg-white text-end">
+                    <button type="button" class="btn btn-outline-primary btn-sm" onclick="agregarFila()">
+                        <i class="bi bi-plus-circle"></i> Agregar otra fila
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// Catálogo de repuestos para autocompletar
+const repuestosDisponibles = [
+    {% for r in repuestos %}
+    {
+        id: {{ r.id }},
+        codigo: "{{ r.codigo or '' }}",
+        nombre: "{{ r.nombre | replace('\"', '\\\"') }}",
+        precio: {{ r.precio_venta or 0 }}
+    },
+    {% endfor %}
+];
+
+// Datos existentes al editar
+let itemsCargados = [
+    {% if presupuesto and presupuesto.detalles %}
+        {% for d in presupuesto.detalles %}
+        {
+            repuesto_id: {{ d.repuesto_id or 'null' }},
+            nombre_item: "{{ d.nombre_item | replace('\"', '\\\"') }}",
+            cantidad: {{ d.cantidad }},
+            precio_pactado: {{ d.precio_pactado }}
+        },
+        {% endfor %}
+    {% endif %}
+];
+
+function crearFilaHTML(item = null) {
+    const repId = item ? item.repuesto_id : '';
+    const nombre = item ? item.nombre_item : '';
+    const cant = item ? item.cantidad : 1;
+    const precio = item ? item.precio_pactado : 0;
+    const subtotal = cant * precio;
+
+    let repOptions = `<option value="">-- Ítem manual / personalizado --</option>`;
+    repuestosDisponibles.forEach(r => {
+        const sel = (repId && repId == r.id) ? 'selected' : '';
+        repOptions += `<option value="${r.id}" data-precio="${r.precio}" data-nombre="${r.nombre}" ${sel}>${r.codigo ? '['+r.codigo+'] ' : ''}${r.nombre} ($${r.precio})</option>`;
+    });
+
+    return `
+    <tr class="item-row">
+        <td>
+            <select class="form-select form-select-sm mb-1 repuesto-select" onchange="alCambiarRepuesto(this)">
+                ${repOptions}
+            </select>
+            <input type="text" class="form-control form-control-sm nombre-item" placeholder="Nombre descriptivo del ítem" value="${nombre}">
+        </td>
+        <td>
+            <input type="number" class="form-control form-control-sm text-center cantidad-input" min="1" value="${cant}" oninput="recalcularTotales()">
+        </td>
+        <td>
+            <input type="number" step="0.01" class="form-control form-control-sm text-end precio-input" min="0" value="${precio.toFixed(2)}" oninput="recalcularTotales()">
+        </td>
+        <td class="text-end fw-bold text-success subtotal-display">
+            $${subtotal.toFixed(2)}
+        </td>
+        <td class="text-center">
+            <button type="button" class="btn btn-sm btn-outline-danger" onclick="eliminarFila(this)">
+                <i class="bi bi-trash"></i>
+            </button>
+        </td>
+    </tr>
+    `;
+}
+
+function agregarFila(item = null) {
+    document.getElementById('items_body').insertAdjacentHTML('beforeend', crearFilaHTML(item));
+    recalcularTotales();
+}
+
+function eliminarFila(btn) {
+    btn.closest('tr').remove();
+    recalcularTotales();
+}
+
+function alCambiarRepuesto(selectElem) {
+    const opt = selectElem.options[selectElem.selectedIndex];
+    const row = selectElem.closest('tr');
+    if (opt.value) {
+        row.querySelector('.nombre-item').value = opt.getAttribute('data-nombre');
+        row.querySelector('.precio-input').value = parseFloat(opt.getAttribute('data-precio') || 0).toFixed(2);
+    }
+    recalcularTotales();
+}
+
+function recalcularTotales() {
+    let granTotal = 0;
+    const filas = document.querySelectorAll('.item-row');
+    filas.forEach(row => {
+        const cant = parseFloat(row.querySelector('.cantidad-input').value) || 0;
+        const precio = parseFloat(row.querySelector('.precio-input').value) || 0;
+        const sub = cant * precio;
+        row.querySelector('.subtotal-display').innerText = '$' + sub.toFixed(2);
+        granTotal += sub;
+    });
+    document.getElementById('display_total').innerText = '$' + granTotal.toFixed(2);
+}
+
+function guardarPresupuesto() {
+    const clienteId = document.getElementById('cliente_id').value || null;
+    const filas = document.querySelectorAll('.item-row');
+    const items = [];
+
+    filas.forEach(row => {
+        const repId = row.querySelector('.repuesto-select').value || null;
+        const nombre = row.querySelector('.nombre-item').value.trim();
+        const cant = parseInt(row.querySelector('.cantidad-input').value) || 0;
+        const precio = parseFloat(row.querySelector('.precio-input').value) || 0;
+
+        if (nombre && cant > 0) {
+            items.push({
+                repuesto_id: repId,
+                nombre_item: nombre,
+                cantidad: cant,
+                precio_pactado: precio
+            });
+        }
+    });
+
+    if (items.length === 0) {
+        alert('Debes agregar al menos un ítem con nombre y cantidad válida.');
+        return;
+    }
+
+    const payload = {
+        cliente_id: clienteId,
+        items: items
+    };
+
+    fetch(window.location.href, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            window.location.href = data.redirect || "{{ url_for('admin.lista_presupuestos') }}";
+        } else {
+            alert('Error: ' + data.message);
+        }
+    })
+    .catch(err => alert('Error de conexión al guardar: ' + err));
+}
+
+// Cargar filas iniciales
+document.addEventListener("DOMContentLoaded", function() {
+    if (itemsCargados.length > 0) {
+        itemsCargados.forEach(item => agregarFila(item));
+    } else {
+        agregarFila(); // Una fila vacía por defecto
+    }
+});
+</script>
+{% endblock %}

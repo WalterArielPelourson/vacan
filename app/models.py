@@ -366,6 +366,29 @@ class MovimientoCtaCte(db.Model):
     cliente = db.relationship('Cliente', back_populates='movimientos_cta')
 
 # --- PRESUPUESTOS ---
+#class Presupuesto(db.Model):
+#    id = db.Column(db.Integer, primary_key=True)
+#    fecha = db.Column(db.DateTime, default=get_argentina_time)
+#    total = db.Column(db.Float, nullable=False)
+#    estado = db.Column(db.String(20), default='PENDIENTE')
+#    cliente_id = db.Column(db.Integer, db.ForeignKey('cliente.id'))
+#    usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'))
+#    sucursal_id = db.Column(db.Integer, db.ForeignKey('sucursal.id'))
+    
+#    detalles = db.relationship('DetallePresupuesto', back_populates='presupuesto', cascade="all, delete-orphan")
+
+#class DetallePresupuesto(db.Model):
+#    id = db.Column(db.Integer, primary_key=True)
+#    presupuesto_id = db.Column(db.Integer, db.ForeignKey('presupuesto.id'), nullable=False)
+#    repuesto_id = db.Column(db.Integer, db.ForeignKey('repuesto.id'), nullable=True)
+#    nombre_item = db.Column(db.String(200))
+#    cantidad = db.Column(db.Integer, nullable=False)
+#    precio_pactado = db.Column(db.Float, nullable=False)
+    
+#    presupuesto = db.relationship('Presupuesto', back_populates='detalles')
+#    repuesto = db.relationship('Repuesto')
+    
+    
 class Presupuesto(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     fecha = db.Column(db.DateTime, default=get_argentina_time)
@@ -375,21 +398,25 @@ class Presupuesto(db.Model):
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'))
     sucursal_id = db.Column(db.Integer, db.ForeignKey('sucursal.id'))
     
+    # Relaciones
+    cliente = db.relationship('Cliente')
+    usuario = db.relationship('Usuario')
+    sucursal = db.relationship('Sucursal')
     detalles = db.relationship('DetallePresupuesto', back_populates='presupuesto', cascade="all, delete-orphan")
-
 class DetallePresupuesto(db.Model):
+    __tablename__ = 'detalle_presupuesto'
+
     id = db.Column(db.Integer, primary_key=True)
     presupuesto_id = db.Column(db.Integer, db.ForeignKey('presupuesto.id'), nullable=False)
     repuesto_id = db.Column(db.Integer, db.ForeignKey('repuesto.id'), nullable=True)
     nombre_item = db.Column(db.String(200))
-    cantidad = db.Column(db.Integer, nullable=False)
-    precio_pactado = db.Column(db.Float, nullable=False)
+    cantidad = db.Column(db.Integer, nullable=False, default=1)
+    precio_pactado = db.Column(db.Float, nullable=False, default=0.0)
     
+    # Relaciones
     presupuesto = db.relationship('Presupuesto', back_populates='detalles')
     repuesto = db.relationship('Repuesto')
-    
-    
-    
+       
     
 # --- MÓDULO DE TRASPASOS ---
 class Traspaso(db.Model):

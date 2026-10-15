@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Orden de Pedido - Vacan Radiadores</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            color: #212529;
+            background-color: #fff;
+            padding: 20px;
+        }
+        .logo-print {
+            max-height: 55px;
+            width: auto;
+            object-fit: contain;
+        }
+        .table-print th {
+            background-color: #f1f3f5 !important;
+            color: #000;
+            border-bottom: 2px solid #333;
+            font-size: 13px;
+        }
+        .table-print td {
+            font-size: 13px;
+            vertical-align: middle;
+            border-bottom: 1px solid #dee2e6;
+        }
+        @media print {
+            .no-print {
+                display: none !important;
+            }
+            body {
+                padding: 0;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Botones de Acción (Ocultos al imprimir) -->
+    <div class="no-print d-flex justify-content-between align-items-center mb-4 p-2 bg-light border rounded">
+        <div>
+            <strong>Vista Previa de Impresión:</strong> Solo se incluyen los repuestos seleccionados.
+        </div>
+        <div>
+            <button class="btn btn-primary btn-sm me-2" onclick="window.print()">
+                Imprimir Comprobante
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="window.close()">
+                Cerrar Ventana
+            </button>
+        </div>
+    </div>
+
+    <!-- ENCABEZADO CON LOGO Y VACAN RADIADORES -->
+    <div class="row align-items-center border-bottom pb-3 mb-3">
+        <div class="col-8">
+            <div class="d-flex align-items-center mb-1">
+                <img src="{{ url_for('static', filename='img/Logo.jpg') }}" class="logo-print me-3" alt="Logo">
+                <div>
+                    <h3 class="fw-bold mb-0 text-dark">VACAN RADIADORES</h3>
+                    <small class="text-muted">Venta y Reparación de Radiadores - Repuestos en General</small>
+                </div>
+            </div>
+        </div>
+        <div class="col-4 text-end">
+            <h4 class="fw-bold text-primary mb-1">ORDEN DE PEDIDO</h4>
+            <div class="small"><strong>Fecha:</strong> {{ fecha_pedido }}</div>
+            <div class="small"><strong>Proveedor:</strong> {{ proveedor_nombre }}</div>
+        </div>
+    </div>
+
+    <!-- TABLA DE ARTÍCULOS A PEDIR (SOLO LOS SELECCIONADOS) -->
+    <table class="table table-sm table-print mb-4">
+        <thead>
+            <tr>
+                <th style="width: 50px;" class="text-center">#</th>
+                <th style="width: 140px;">Código</th>
+                <th>Descripción del Repuesto</th>
+                <th class="text-center" style="width: 120px;">Cantidad Solicitada</th>
+                <th class="text-end" style="width: 130px;">Precio Unit. Est.</th>
+                <th class="text-end" style="width: 140px;">Subtotal Est.</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for it in items %}
+            <tr>
+                <td class="text-center text-muted">{{ loop.index }}</td>
+                <td class="fw-bold">{{ it.codigo }}</td>
+                <td>{{ it.nombre }}</td>
+                <td class="text-center fw-bold fs-6">{{ it.cantidad }}</td>
+                <td class="text-end">${{ "{:,.2f}".format(it.costo) }}</td>
+                <td class="text-end fw-semibold">${{ "{:,.2f}".format(it.subtotal) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="fw-bold fs-6 border-top border-dark">
+                <td colspan="3" class="text-end">TOTALES:</td>
+                <td class="text-center text-primary fs-5">{{ total_unidades }} un.</td>
+                <td></td>
+                <td class="text-end text-success fs-5">${{ "{:,.2f}".format(total_monto) }}</td>
+            </tr>
+        </tfoot>
+    </table>
+
+    <!-- PIE DE COMPROBANTE -->
+    <div class="row mt-5 pt-4">
+        <div class="col-6">
+            <div class="small text-muted mb-4">Observaciones:</div>
+            <div class="border-bottom pb-3" style="min-height: 40px;"></div>
+        </div>
+        <div class="col-6 text-center">
+            <div style="border-top: 1px solid #333; width: 60%; margin: 40px auto 5px auto;"></div>
+            <div class="small fw-bold">Firma / Aprobación</div>
+            <div class="small text-muted">Vacan Radiadores</div>
+        </div>
+    </div>
+
+    <script>
+        // Disparar diálogo de impresión automáticamente al abrir
+        window.onload = function() {
+            setTimeout(function() {
+                window.print();
+            }, 350);
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,532 @@
+{% extends "base.html" %}
+
+{% block title %}Reposición y Pedidos a Proveedores - Vacan Radiadores{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-3">
+
+    <!-- Encabezado con Botones de Acción -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+        <div>
+            <h3 class="fw-bold mb-0 text-dark">
+                <i class="bi bi-box-seam me-2 text-primary"></i>Reposición y Pedidos a Proveedores
+            </h3>
+            <small class="text-muted">
+                Período: {{ fecha_desde }} al {{ fecha_hasta }} | Comparativa: {{ fecha_desde_ant }} al {{ fecha_hasta_ant }}
+            </small>
+        </div>
+        <div class="d-flex flex-wrap gap-2">
+            <!-- Botón Exportar a Excel -->
+            <button type="button" class="btn btn-outline-success fw-semibold" onclick="enviarAccionPedido('excel')">
+                <i class="bi bi-file-earmark-excel me-1"></i> Exportar a Excel
+            </button>
+            <!-- Botón Imprimir Pedido -->
+            <button type="button" class="btn btn-primary fw-semibold" onclick="enviarAccionPedido('imprimir')">
+                <i class="bi bi-printer me-1"></i> Imprimir Pedido
+            </button>
+            <!-- Botón Copiar WhatsApp -->
+            <button type="button" class="btn btn-outline-dark fw-semibold" onclick="copiarPedidoWhatsApp()">
+                <i class="bi bi-whatsapp me-1 text-success"></i> Copiar WhatsApp
+            </button>
+        </div>
+    </div>
+
+    <!-- TARJETAS DE KPIS EN VIVO (Se recalculan solas si editas cantidades o desmarcas) -->
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm bg-danger text-white p-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-uppercase opacity-75 fw-bold">Sin Stock (Quiebre)</div>
+                        <h3 class="fw-bold mb-0">{{ conteo_sin_stock }}</h3>
+                    </div>
+                    <i class="bi bi-exclamation-octagon fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm bg-warning text-dark p-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-uppercase opacity-75 fw-bold">Stock Bajo Mínimo</div>
+                        <h3 class="fw-bold mb-0">{{ conteo_bajo_minimo }}</h3>
+                    </div>
+                    <i class="bi bi-exclamation-triangle fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm bg-primary text-white p-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-uppercase opacity-75 fw-bold">Unidades Seleccionadas</div>
+                        <h3 class="fw-bold mb-0" id="kpiUnidades">0</h3>
+                    </div>
+                    <i class="bi bi-cart-check fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm bg-success text-white p-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="small text-uppercase opacity-75 fw-bold">Inversión Pedido ($)</div>
+                        <h3 class="fw-bold mb-0" id="kpiInversion">$0.00</h3>
+                    </div>
+                    <i class="bi bi-cash-stack fs-1 opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PANEL DE FILTROS -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <form method="GET" action="{{ url_for('inventory.reporte_pedidos_proveedores') }}" class="row g-2 align-items-end">
+                
+                <div class="col-12 col-md-3">
+                    <label class="form-label small fw-bold mb-1">Buscar Repuesto</label>
+                    <input type="text" name="buscar" class="form-control form-control-sm" 
+                           placeholder="Código, SKU o descripción..." value="{{ buscar_sel }}">
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1">Estado de Stock</label>
+                    <select name="estado_stock" class="form-select form-select-sm">
+                        <option value="todos" {% if estado_stock_sel == 'todos' %}selected{% endif %}>Todos los estados</option>
+                        <option value="sin_stock" {% if estado_stock_sel == 'sin_stock' %}selected{% endif %}>Sin Stock (0 o Negativo)</option>
+                        <option value="bajo_minimo" {% if estado_stock_sel == 'bajo_minimo' %}selected{% endif %}>Bajo o igual al Mínimo</option>
+                        <option value="con_stock" {% if estado_stock_sel == 'con_stock' %}selected{% endif %}>Con Stock (> 0)</option>
+                    </select>
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1" title="Si se define, sobreescribe el cálculo de reposición">
+                        Stock Mínimo Deseado
+                    </label>
+                    <input type="number" min="0" name="stock_minimo_filtro" class="form-control form-control-sm" 
+                           placeholder="Ej: 5 (Opcional)" value="{{ stock_minimo_filtro_sel }}">
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1">Proveedor</label>
+                    <select name="proveedor_id" id="filtroProveedor" class="form-select form-select-sm">
+                        <option value="">Todos los proveedores</option>
+                        {% for prov in proveedores %}
+                            {% set prov_nom = prov.razon_social if prov.razon_social is defined else (prov.nombre if prov.nombre is defined else prov.nombre_fantasia) %}
+                            <option value="{{ prov.id }}" {% if proveedor_id_sel == prov.id %}selected{% endif %}>
+                                {{ prov_nom }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                {% if sucursales %}
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1">Sucursal</label>
+                    <select name="sucursal_id" class="form-select form-select-sm">
+                        <option value="">Todas las sucursales</option>
+                        {% for suc in sucursales %}
+                            <option value="{{ suc.id }}" {% if sucursal_id_sel == suc.id %}selected{% endif %}>
+                                {{ suc.nombre }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1">Fecha Desde</label>
+                    <input type="date" name="fecha_desde" class="form-control form-control-sm" value="{{ fecha_desde }}">
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1">Fecha Hasta</label>
+                    <input type="date" name="fecha_hasta" class="form-control form-control-sm" value="{{ fecha_hasta }}">
+                </div>
+
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold mb-1">Ordenar Por</label>
+                    <select name="ordenar_por" class="form-select form-select-sm">
+                        <option value="sugerencia_desc" {% if ordenar_por_sel == 'sugerencia_desc' %}selected{% endif %}>Mayor cantidad sugerida</option>
+                        <option value="stock_asc" {% if ordenar_por_sel == 'stock_asc' %}selected{% endif %}>Menor stock actual (Quiebres)</option>
+                        <option value="costo_desc" {% if ordenar_por_sel == 'costo_desc' %}selected{% endif %}>Mayor inversión ($)</option>
+                        <option value="ventas_desc" {% if ordenar_por_sel == 'ventas_desc' %}selected{% endif %}>Más vendidos en el período</option>
+                        <option value="nombre_asc" {% if ordenar_por_sel == 'nombre_asc' %}selected{% endif %}>Nombre (A-Z)</option>
+                    </select>
+                </div>
+
+                <div class="col-12 col-md-3 d-flex align-items-center mb-1">
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" name="solo_comprar" value="1" id="chkSoloComprar"
+                               {% if solo_comprar_sel %}checked{% endif %}>
+                        <label class="form-check-label small fw-semibold" for="chkSoloComprar">
+                            Solo items con compra sugerida (> 0)
+                        </label>
+                    </div>
+                </div>
+
+                <div class="col-12 col-md-2 ms-auto d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold">
+                        <i class="bi bi-filter me-1"></i> Filtrar
+                    </button>
+                    <a href="{{ url_for('inventory.reporte_pedidos_proveedores') }}" class="btn btn-outline-secondary btn-sm" title="Limpiar filtros">
+                        <i class="bi bi-arrow-counterclockwise"></i>
+                    </a>
+                </div>
+
+            </form>
+        </div>
+    </div>
+
+    <!-- SECCIÓN DE GRÁFICOS -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-4">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white fw-bold py-2 border-0">
+                    <i class="bi bi-pie-chart text-primary me-2"></i>Estado del Inventario
+                </div>
+                <div class="card-body d-flex align-items-center justify-content-center" style="position: relative; height: 240px;">
+                    <canvas id="chartEstados"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-8">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-header bg-white fw-bold py-2 border-0 d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-bar-chart-steps text-danger me-2"></i>Top Repuestos con Mayor Necesidad de Reposición</span>
+                    <small class="text-muted fw-normal">Stock vs Sugerencia</small>
+                </div>
+                <div class="card-body" style="position: relative; height: 240px;">
+                    <canvas id="chartTopUrgentes"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLA DE RESULTADOS CON CHECKBOX Y CANTIDAD EDITABLE -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white py-2 d-flex justify-content-between align-items-center">
+            <span class="fw-bold text-dark small text-uppercase">
+                <i class="bi bi-card-checklist me-1 text-primary"></i> Listado de Repuestos para Orden de Compra
+            </span>
+            <div class="d-flex align-items-center gap-2">
+                <button type="button" class="btn btn-sm btn-outline-primary" onclick="seleccionarTodos(true)">
+                    Marcar Todos
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="seleccionarTodos(false)">
+                    Desmarcar Todos
+                </button>
+            </div>
+        </div>
+
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" id="tablaReporte">
+                    <thead class="table-light small text-uppercase">
+                        <tr>
+                            <th class="ps-3 text-center" style="width: 45px;">
+                                <input class="form-check-input" type="checkbox" id="checkMaster" checked title="Seleccionar/Deseleccionar todos">
+                            </th>
+                            <th>Código</th>
+                            <th>Repuesto / Descripción</th>
+                            <th class="text-center">Stock Actual</th>
+                            <th class="text-center">Stock Mínimo</th>
+                            <th class="text-center">Ventas 30d</th>
+                            <th class="text-center">Temporada Ant.</th>
+                            <th class="text-center">Estacionalidad</th>
+                            <th class="text-center bg-primary-subtle text-primary fw-bold" style="width: 140px;">
+                                Cantidad a Pedir
+                            </th>
+                            <th class="text-end">Costo Unit.</th>
+                            <th class="text-end pe-3">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody class="small">
+                        {% for item in items %}
+                        <tr class="fila-repuesto" 
+                            data-id="{{ item.repuesto_id }}" 
+                            data-codigo="{{ item.codigo_display }}" 
+                            data-nombre="{{ item.nombre_display }}"
+                            data-costo="{{ item.costo_unitario }}">
+                            
+                            <!-- Checkbox Selector -->
+                            <td class="ps-3 text-center">
+                                <input class="form-check-input check-item" type="checkbox" 
+                                       {% if item.sugerencia_compra > 0 %}checked{% endif %}
+                                       onchange="recalcularTotalesEnVivo()">
+                            </td>
+
+                            <td class="fw-semibold text-secondary">{{ item.codigo_display }}</td>
+                            <td>
+                                <div class="fw-bold text-dark">{{ item.nombre_display }}</div>
+                                {% if item.repuesto.rubro is defined and item.repuesto.rubro %}
+                                    <span class="badge bg-light text-muted border">{{ item.repuesto.rubro.nombre }}</span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Stock Actual -->
+                            <td class="text-center">
+                                {% if item.stock_actual <= 0 %}
+                                    <span class="badge bg-danger fs-6 px-2 py-1">0</span>
+                                {% elif item.stock_actual <= item.stock_minimo %}
+                                    <span class="badge bg-warning text-dark fs-6 px-2 py-1">{{ item.stock_actual }}</span>
+                                {% else %}
+                                    <span class="badge bg-success-subtle text-success fs-6 px-2 py-1">{{ item.stock_actual }}</span>
+                                {% endif %}
+                            </td>
+
+                            <!-- Stock Mínimo -->
+                            <td class="text-center text-muted fw-semibold">{{ item.stock_minimo }}</td>
+
+                            <!-- Ventas -->
+                            <td class="text-center fw-bold">{{ item.ventas_periodo }}</td>
+                            <td class="text-center text-muted">{{ item.ventas_año_ant }}</td>
+
+                            <!-- Estacionalidad -->
+                            <td class="text-center">
+                                <span class="badge bg-{{ item.estacionalidad_color }}">
+                                    {{ item.estacionalidad_badge }}
+                                </span>
+                            </td>
+
+                            <!-- Cantidad a Pedir EDITABLE -->
+                            <td class="text-center bg-primary-subtle">
+                                <div class="input-group input-group-sm">
+                                    <input type="number" min="0" step="1" 
+                                           class="form-control form-control-sm text-center fw-bold text-primary input-cantidad"
+                                           value="{{ item.sugerencia_compra }}"
+                                           oninput="alCambiarCantidad(this)">
+                                </div>
+                                <div class="text-muted" style="font-size: 0.70rem;">Sug: {{ item.sugerencia_compra }}</div>
+                            </td>
+
+                            <!-- Costo Unitario -->
+                            <td class="text-end text-muted">
+                                ${{ "{:,.2f}".format(item.costo_unitario) }}
+                            </td>
+
+                            <!-- Subtotal Dinámico -->
+                            <td class="text-end pe-3 fw-bold text-dark td-subtotal">
+                                ${{ "{:,.2f}".format(item.subtotal_inversion) }}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="11" class="text-center py-4 text-muted">
+                                <i class="bi bi-info-circle fs-3 d-block mb-2"></i>
+                                No se encontraron repuestos con los filtros seleccionados.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- FORMULARIO OCULTO PARA ENVIAR ÍTEMS SELECCIONADOS A IMPRESIÓN O EXCEL -->
+<form id="formAccionOculto" method="POST" target="_blank" style="display: none;">
+    <input type="hidden" name="items_seleccionados_json" id="inputItemsJson">
+    <input type="hidden" name="proveedor_nombre" id="inputProveedorNombre">
+    <input type="hidden" name="fecha_pedido" value="{{ hoy }}">
+</form>
+
+<!-- CHART.JS DESDE CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    // 1. Inicialización de Gráficos
+    document.addEventListener("DOMContentLoaded", function () {
+        const datosEstados = {{ grafico_estados_json | safe }};
+        const datosTop = {{ grafico_top_json | safe }};
+
+        // Gráfico Dona
+        const ctxEstados = document.getElementById('chartEstados').getContext('2d');
+        new Chart(ctxEstados, {
+            type: 'doughnut',
+            data: {
+                labels: datosEstados.labels,
+                datasets: [{
+                    data: datosEstados.data,
+                    backgroundColor: datosEstados.colors,
+                    borderWidth: 2
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+                }
+            }
+        });
+
+        // Gráfico Barras
+        const ctxTop = document.getElementById('chartTopUrgentes').getContext('2d');
+        new Chart(ctxTop, {
+            type: 'bar',
+            data: {
+                labels: datosTop.labels,
+                datasets: [
+                    { label: 'Stock Actual', data: datosTop.stock, backgroundColor: '#dc3545', borderRadius: 4 },
+                    { label: 'Sugerencia', data: datosTop.pedir, backgroundColor: '#0d6efd', borderRadius: 4 }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { ticks: { font: { size: 10 } } },
+                    y: { beginAtZero: true }
+                },
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } }
+            }
+        });
+
+        // Calcular KPIs iniciales de acuerdo a lo seleccionado
+        recalcularTotalesEnVivo();
+
+        // Control del Checkbox Maestro
+        document.getElementById('checkMaster').addEventListener('change', function () {
+            seleccionarTodos(this.checked);
+        });
+    });
+
+    // 2. Manejo de Selección y Edición en Vivo
+    function seleccionarTodos(estado) {
+        document.querySelectorAll('.check-item').forEach(chk => {
+            chk.checked = estado;
+        });
+        document.getElementById('checkMaster').checked = estado;
+        recalcularTotalesEnVivo();
+    }
+
+    function alCambiarCantidad(inputElem) {
+        const fila = inputElem.closest('tr');
+        const check = fila.querySelector('.check-item');
+        let cant = parseInt(inputElem.value) || 0;
+        if (cant < 0) { cant = 0; inputElem.value = 0; }
+        
+        // Si el usuario coloca cantidad mayor a 0, tildar automáticamente el checkbox
+        if (cant > 0) {
+            check.checked = true;
+        }
+
+        // Recalcular subtotal de la fila
+        const costo = parseFloat(fila.getAttribute('data-costo')) || 0.0;
+        const subtotal = cant * costo;
+        fila.querySelector('.td-subtotal').textContent = '$' + subtotal.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+        recalcularTotalesEnVivo();
+    }
+
+    function recalcularTotalesEnVivo() {
+        let totalUnidades = 0;
+        let totalDinero = 0.0;
+
+        document.querySelectorAll('.fila-repuesto').forEach(fila => {
+            const check = fila.querySelector('.check-item');
+            if (check && check.checked) {
+                const cant = parseInt(fila.querySelector('.input-cantidad').value) || 0;
+                const costo = parseFloat(fila.getAttribute('data-costo')) || 0.0;
+                totalUnidades += cant;
+                totalDinero += (cant * costo);
+            }
+        });
+
+        document.getElementById('kpiUnidades').textContent = totalUnidades;
+        document.getElementById('kpiInversion').textContent = '$' + totalDinero.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    // 3. Obtener Ítems Seleccionados con cantidades mayores a 0
+    function obtenerItemsSeleccionados() {
+        const items = [];
+        document.querySelectorAll('.fila-repuesto').forEach(fila => {
+            const check = fila.querySelector('.check-item');
+            if (check && check.checked) {
+                const cant = parseInt(fila.querySelector('.input-cantidad').value) || 0;
+                if (cant > 0) {
+                    const costo = parseFloat(fila.getAttribute('data-costo')) || 0.0;
+                    items.push({
+                        id: fila.getAttribute('data-id'),
+                        codigo: fila.getAttribute('data-codigo'),
+                        nombre: fila.getAttribute('data-nombre'),
+                        cantidad: cant,
+                        costo: costo,
+                        subtotal: (cant * costo)
+                    });
+                }
+            }
+        });
+        return items;
+    }
+
+    // 4. Enviar a Imprimir o a Excel
+    function enviarAccionPedido(tipo) {
+        const items = obtenerItemsSeleccionados();
+        if (items.length === 0) {
+            alert("Debes seleccionar al menos un repuesto con cantidad mayor a 0 para generar el pedido.");
+            return;
+        }
+
+        const form = document.getElementById('formAccionOculto');
+        const selectProv = document.getElementById('filtroProveedor');
+        let nombreProv = "Proveedor General";
+        if (selectProv && selectProv.selectedIndex > 0) {
+            nombreProv = selectProv.options[selectProv.selectedIndex].text.trim();
+        }
+
+        document.getElementById('inputItemsJson').value = JSON.stringify(items);
+        document.getElementById('inputProveedorNombre').value = nombreProv;
+
+        if (tipo === 'imprimir') {
+            form.action = "{{ url_for('inventory.imprimir_orden_pedido') }}";
+            form.submit();
+        } else if (tipo === 'excel') {
+            form.action = "{{ url_for('inventory.exportar_pedido_excel') }}";
+            form.submit();
+        }
+    }
+
+    // 5. Copiar al Portapapeles (WhatsApp)
+    function copiarPedidoWhatsApp() {
+        const items = obtenerItemsSeleccionados();
+        if (items.length === 0) {
+            alert("No hay artículos seleccionados con cantidad mayor a 0.");
+            return;
+        }
+
+        const selectProv = document.getElementById('filtroProveedor');
+        let nombreProv = "";
+        if (selectProv && selectProv.selectedIndex > 0) {
+            nombreProv = " - " + selectProv.options[selectProv.selectedIndex].text.trim();
+        }
+
+        let lineas = [];
+        lineas.push("📋 *ORDEN DE PEDIDO - VACAN RADIADORES*" + (nombreProv ? " (" + nombreProv + ")" : ""));
+        lineas.push("Fecha: " + new Date().toLocaleDateString('es-AR'));
+        lineas.push("---------------------------------------");
+
+        let totalU = 0;
+        items.forEach(it => {
+            totalU += it.cantidad;
+            lineas.push(`• *[${it.codigo}]* ${it.nombre} -> *Cant: ${it.cantidad}*`);
+        });
+
+        lineas.push("---------------------------------------");
+        lineas.push(`*Total Unidades:* ${totalU}`);
+        lineas.push("Favor de confirmar disponibilidad y presupuesto. ¡Muchas gracias!");
+
+        const texto = lineas.join("\n");
+        navigator.clipboard.writeText(texto).then(() => {
+            alert("¡Pedido copiado al portapapeles! Ya puedes pegarlo directamente en WhatsApp o por correo.");
+        }).catch(err => {
+            console.error("Error al copiar: ", err);
+        });
+    }
+</script>
+{% endblock %}

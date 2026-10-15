@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    {% set doc = venta if venta is defined and venta else presupuesto %}
+    {% set es_presupuesto = (doc == presupuesto) or (venta is not defined) or (doc.estado is defined and doc.estado in ['PENDIENTE', 'CONVERTIDO', 'ANULADO', 'COTIZADO']) %}
+    <title>{{ 'Presupuesto' if es_presupuesto else 'Remito' }} Vacan #{{ doc.id }}</title>
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { 
+            background: #f4f6f9; 
+            font-family: Arial, Helvetica, sans-serif; 
+            font-size: 13px;
+            color: #212529;
+        }
+        /* Tamaño A4 estricto */
+        .remito-container { 
+            width: 210mm; 
+            min-height: 297mm; 
+            padding: 15mm; 
+            margin: 20px auto; 
+            background: #fff;
+            border: 1px solid #ccc; 
+            position: relative;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }
+        .logo-print { height: 50px; object-fit: contain; }
+        
+        /* Recuadro central de letra de comprobante */
+        .tipo-comp-box {
+            position: absolute;
+            left: 50%;
+            top: 15mm;
+            transform: translateX(-50%);
+            border: 2px solid #000;
+            background: #fff;
+            width: 50px;
+            height: 50px;
+            text-align: center;
+            z-index: 10;
+        }
+        .tipo-comp-box span { font-size: 32px; font-weight: bold; line-height: 44px; display: block; }
+        .tipo-comp-box small { font-size: 9px; display: block; margin-top: -6px; font-weight: bold; }
+        
+        .header-box {
+            border: 1px solid #000;
+            padding: 12px;
+            min-height: 140px;
+        }
+        
+        .table-items th {
+            background-color: #212529 !important;
+            color: #fff !important;
+            font-size: 11px;
+            text-transform: uppercase;
+            padding: 6px 8px;
+        }
+        .table-items td {
+            padding: 6px 8px;
+            vertical-align: middle;
+        }
+
+        .totales-table td {
+            padding: 4px 8px;
+        }
+        
+        @media print {
+            body { background: #fff !important; margin: 0; padding: 0; }
+            .remito-container { 
+                width: 100% !important; 
+                margin: 0 !important; 
+                border: none !important; 
+                padding: 5mm !important; 
+                box-shadow: none !important; 
+            }
+            .no-print { display: none !important; }
+            @page { size: A4; margin: 10mm; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- BOTONES DE ACCIÓN (NO SALEN EN LA IMPRESIÓN) -->
+    <div class="container text-center my-3 no-print">
+        <button onclick="window.print()" class="btn btn-primary px-4 py-2 fw-bold shadow-sm">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-printer me-2" viewBox="0 0 16 16">
+              <path d="M2.5 8a.5.5 0 1 0 0-1 .5.5 0 0 0 0 1z"/>
+              <path d="M5 1a2 2 0 0 0-2 2v2H2a2 2 0 0 0-2 2v3a2 2 0 0 0 2 2h1v1a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-1h1a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-1V3a2 2 0 0 0-2-2H5zM4 3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2H4V3zm1 5a2 2 0 0 0-2 2v1H2a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v-1a2 2 0 0 0-2-2H5zm7 2v3a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1z"/>
+            </svg>
+            Imprimir Comprobante
+        </button>
+        <button onclick="window.close()" class="btn btn-outline-secondary px-4 py-2 ms-2">
+            Cerrar
+        </button>
+    </div>
+
+    <div class="remito-container">
+        <!-- LETRA DEL COMPROBANTE -->
+        <div class="tipo-comp-box">
+            <span>{{ 'P' if es_presupuesto else (doc.tipo_comprobante[0] if doc.tipo_comprobante else 'R') }}</span>
+            <small>{{ 'PRESUP.' if es_presupuesto else 'NO FISCAL' }}</small>
+        </div>
+
+        <!-- ENCABEZADO -->
+        <div class="row g-0 mb-3">
+            <!-- EMISOR -->
+            <div class="col-6 pe-3">
+                <div class="header-box">
+                    <div class="d-flex align-items-center mb-2">
+                        <img src="{{ url_for('static', filename='img/Logo.jpg') }}" class="logo-print me-3" alt="Logo">
+                        <h4 class="fw-bold mb-2 text-dark">VACAN RADIADORES</h4>
+                    </div>
+                    
+                    <p class="mb-1 fw-bold text-secondary">
+                        {{ doc.sucursal.nombre if doc.sucursal else 'Casa Central' }}
+                    </p>
+                    <p class="mb-1 small">
+                        <strong>Dirección:</strong> {{ doc.sucursal.direccion if doc.sucursal and doc.sucursal.direccion else 'Ruta Nacional / Local Comercial' }}
+                    </p>
+                    <p class="mb-1 small">
+                        <strong>Teléfono:</strong> {{ doc.sucursal.telefono if doc.sucursal and doc.sucursal.telefono else '-' }}
+                    </p>
+                    <p class="mb-0 small text-muted">IVA Responsable Inscripto</p>
+                </div>
+                
+            </div>
+
+            <!-- DATOS DEL COMPROBANTE -->
+            <div class="col-6 ps-3">
+                <div class="header-box">
+                    <h5 class="fw-bold text-uppercase mb-2 text-end text-dark">
+                        {{ 'PRESUPUESTO / COTIZACIÓN' if es_presupuesto else ('REMITO DE ENTREGA' if doc.tipo_comprobante == 'REMITO' else doc.tipo_comprobante) }}
+                    </h5>
+                    <p class="mb-1 text-end">
+                        <strong>N° Comprobante:</strong> 
+                        <span class="font-monospace fs-6 fw-bold">
+                            {{ "{:04d}-{:08d}".format(doc.sucursal_id if doc.sucursal_id else 1, doc.id) }}
+                        </span>
+                    </p>
+                    <p class="mb-1 text-end">
+                        <strong>Fecha de Emisión:</strong> {{ doc.fecha.strftime('%d/%m/%Y %H:%M') if doc.fecha else '-' }}
+                    </p>
+                    <p class="mb-1 text-end">
+                        <strong>Vendedor:</strong> {{ doc.usuario.nombre if doc.usuario and doc.usuario.nombre else (doc.usuario.username if doc.usuario else 'Sistema') }}
+                    </p>
+                    {% if es_presupuesto %}
+                    <p class="mb-0 text-end">
+                        <span class="badge bg-warning text-dark border">ESTADO: {{ doc.estado }}</span>
+                    </p>
+                    {% else %}
+                    <p class="mb-0 text-end">
+                        <strong>Cond. Venta:</strong> {{ doc.metodo_pago if doc.metodo_pago else 'CONTADO' }}
+                    </p>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- DATOS DEL CLIENTE -->
+        <div class="border border-dark p-2 mb-3 bg-light rounded-1">
+            <div class="row">
+                <div class="col-7">
+                    <p class="mb-1">
+                        <strong>Cliente:</strong> 
+                        <span class="fw-bold fs-6">
+                            {{ (doc.cliente.nombre ~ ' ' ~ (doc.cliente.apellido or '')) if doc.cliente else 'Consumidor Final' }}
+                        </span>
+                    </p>
+                    <p class="mb-0 small">
+                        <strong>Dirección:</strong> {{ doc.cliente.direccion if doc.cliente and doc.cliente.direccion else '-' }}
+                    </p>
+                </div>
+                <div class="col-5 text-end">
+                    <p class="mb-1 small">
+                        <strong>CUIT / DNI:</strong> {{ doc.cliente.cuit if doc.cliente and doc.cliente.cuit else (doc.cliente.dni if doc.cliente and doc.cliente.dni else 'S/D') }}
+                    </p>
+                    <p class="mb-0 small">
+                        <strong>Condición IVA:</strong> {{ doc.cliente.condicion_iva if doc.cliente and doc.cliente.condicion_iva else 'Consumidor Final' }}
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- TABLA DE DETALLES / ÍTEMS -->
+        <table class="table table-bordered table-striped table-items mb-3">
+            <thead>
+                <tr>
+                    <th class="text-center" style="width: 50px;">Cant.</th>
+                    <th class="text-center" style="width: 120px;">Código / SKU</th>
+                    <th>Descripción del Producto / Repuesto</th>
+                    <th class="text-end" style="width: 120px;">Precio Unit.</th>
+                    <th class="text-end" style="width: 120px;">Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% set ns = namespace(subtotal_bruto=0.0) %}
+                
+                {% for item in doc.detalles %}
+                    {# Lee precio_pactado para Presupuestos, o precio_unitario para Ventas #}
+                    {% set precio = (item.precio_pactado if item.precio_pactado is defined and item.precio_pactado is not none else (item.precio_unitario if item.precio_unitario is defined and item.precio_unitario is not none else 0.0)) | float %}
+                    {% set sub_linea = (item.cantidad * precio) | float %}
+                    {% set ns.subtotal_bruto = ns.subtotal_bruto + sub_linea %}
+                    <tr>
+                        <td class="text-center font-monospace fw-bold">{{ item.cantidad }}</td>
+                        <td class="text-center font-monospace text-muted small">
+                            {{ item.repuesto.sku if item.repuesto and item.repuesto.sku else (item.repuesto.codigo if item.repuesto and item.repuesto.codigo else 'MANUAL') }}
+                        </td>
+                        <td>
+                            <span class="fw-bold">{{ item.nombre_item }}</span>
+                        </td>
+                        <td class="text-end font-monospace">${{ "{:,.2f}".format(precio) }}</td>
+                        <td class="text-end font-monospace fw-bold">${{ "{:,.2f}".format(sub_linea) }}</td>
+                    </tr>
+                {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-3">No hay ítems registrados en este comprobante.</td>
+                    </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+
+        <!-- RESUMEN DE TOTALES Y AJUSTES -->
+        <div class="row justify-content-end mb-4">
+            <div class="col-6">
+                {% set diff = (doc.total - ns.subtotal_bruto) | round(2) %}
+                
+                <table class="table table-bordered table-sm totales-table mb-0">
+                    <tbody>
+                        <!-- SUBTOTAL BRUTO DE LOS ÍTEMS -->
+                        <tr>
+                            <td class="text-end fw-semibold">Subtotal:</td>
+                            <td class="text-end font-monospace" style="width: 140px;">
+                                ${{ "{:,.2f}".format(ns.subtotal_bruto) }}
+                            </td>
+                        </tr>
+
+                        <!-- RECARGO O DESCUENTO DETECTADO -->
+                        {% if es_presupuesto %}
+                            {# En presupuestos, deduce el recargo o descuento comparando el total con el subtotal #}
+                            {% if diff > 0.05 %}
+                                {% set pct_rec = ((diff / ns.subtotal_bruto) * 100) | round(1) if ns.subtotal_bruto > 0 else 0 %}
+                                <tr class="table-warning">
+                                    <td class="text-end text-danger fw-semibold">
+                                        Recargo (+{{ "{:g}".format(pct_rec) }}%):
+                                    </td>
+                                    <td class="text-end font-monospace text-danger">
+                                        +${{ "{:,.2f}".format(diff) }}
+                                    </td>
+                                </tr>
+                            {% elif diff < -0.05 %}
+                                {% set monto_desc = diff | abs %}
+                                {% set pct_desc = ((monto_desc / ns.subtotal_bruto) * 100) | round(1) if ns.subtotal_bruto > 0 else 0 %}
+                                <tr class="table-success">
+                                    <td class="text-end text-success fw-semibold">
+                                        Descuento (-{{ "{:g}".format(pct_desc) }}%):
+                                    </td>
+                                    <td class="text-end font-monospace text-success">
+                                        -${{ "{:,.2f}".format(monto_desc) }}
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        {% else %}
+                            {# En Ventas, lee recargo_global y descuento_global directamente de la base de datos #}
+                            {% set rec_p = (doc.recargo_global if doc.recargo_global is defined and doc.recargo_global is not none else 0.0) | float %}
+                            {% set desc_p = (doc.descuento_global if doc.descuento_global is defined and doc.descuento_global is not none else 0.0) | float %}
+                            
+                            {% if rec_p > 0 %}
+                                {% set m_rec = ns.subtotal_bruto * (rec_p / 100) %}
+                                <tr class="table-warning">
+                                    <td class="text-end text-danger fw-semibold">Recargo (+{{ "{:g}".format(rec_p) }}%):</td>
+                                    <td class="text-end font-monospace text-danger">+${{ "{:,.2f}".format(m_rec) }}</td>
+                                </tr>
+                            {% endif %}
+                            
+                            {% if desc_p > 0 %}
+                                {% set m_desc = (ns.subtotal_bruto * (1 + (rec_p / 100))) * (desc_p / 100) %}
+                                <tr class="table-success">
+                                    <td class="text-end text-success fw-semibold">Descuento (-{{ "{:g}".format(desc_p) }}%):</td>
+                                    <td class="text-end font-monospace text-success">-${{ "{:,.2f}".format(m_desc) }}</td>
+                                </tr>
+                            {% endif %}
+                        {% endif %}
+
+                        <!-- TOTAL FINAL -->
+                        <tr class="table-dark text-white">
+                            <td class="text-end fw-bold fs-6">TOTAL:</td>
+                            <td class="text-end font-monospace fw-bold fs-6">
+                                ${{ "{:,.2f}".format(doc.total) }}
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- LEYENDAS Y CONDICIONES -->
+        {% if es_presupuesto %}
+        <div class="alert alert-secondary py-2 px-3 small border mb-4">
+            <strong>Condiciones de la Cotización:</strong>
+            <ul class="mb-0 ps-3">
+                
+                <li>Este documento no reserva mercadería ni congela stock hasta su confirmación y facturación.</li>
+                <li>Validez de la oferta: 7 días corridos a partir de la fecha de emisión.</li>
+            </ul>
+        </div>
+        {% endif %}
+
+        <!-- FIRMAS -->
+        <div class="row text-center mt-5 pt-4">
+            <div class="col-6">
+                <div class="border-top border-dark mx-4 pt-1">
+                    <p class="mb-0 fw-bold">{{ doc.usuario.nombre if doc.usuario and doc.usuario.nombre else 'Firma Vendedor' }}</p>
+                    <small class="text-muted">Por Vacan Radiadores</small>
+                </div>
+            </div>
+            <div class="col-6">
+                <div class="border-top border-dark mx-4 pt-1">
+                    <p class="mb-0 fw-bold">{{ 'Conformidad Cliente' if es_presupuesto else 'Recibí Conforme' }}</p>
+                    <small class="text-muted">Firma y Aclaración</small>
+                </div>
+            </div>
+        </div>
+
+        <!-- PIE DE PÁGINA -->
+        <div class="text-center mt-4 pt-2 border-top">
+            <small class="text-muted">
+                {{ 'DOCUMENTO NO VÁLIDO COMO FACTURA - COTIZACIÓN ESTIMATIVA' if es_presupuesto else 'ORIGINAL PARA EL CLIENTE - REMITO DE ENTREGA' }}
+            </small>
+        </div>
+    </div>
+
+</body>
+</html>

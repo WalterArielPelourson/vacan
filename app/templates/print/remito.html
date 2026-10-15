@@ -2,25 +2,30 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Remito Vacan #{{ venta.id }}</title>
+    {% set doc = venta if venta is defined and venta else presupuesto %}
+    {% set es_presupuesto = (doc == presupuesto) or (venta is not defined) or (doc.estado is defined and doc.estado in ['PENDIENTE', 'CONVERTIDO', 'ANULADO', 'COTIZADO']) %}
+    <title>{{ 'Presupuesto' if es_presupuesto else 'Remito' }} Vacan #{{ doc.id }}</title>
     <!-- Bootstrap 5 CSS -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { 
-            background: #fff; 
-            font-family: Arial, sans-serif; 
-            font-size: 14px;
+            background: #f4f6f9; 
+            font-family: Arial, Helvetica, sans-serif; 
+            font-size: 13px;
+            color: #212529;
         }
-        /* Tamaño A4 */
+        /* Tamaño A4 estricto */
         .remito-container { 
             width: 210mm; 
             min-height: 297mm; 
             padding: 15mm; 
-            margin: auto; 
+            margin: 20px auto; 
+            background: #fff;
             border: 1px solid #ccc; 
             position: relative;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         }
-        .logo-print { height: 70px; }
+        .logo-print { height: 70px; object-fit: contain; }
         
         /* Recuadro central de letra de comprobante */
         .tipo-comp-box {
@@ -31,118 +36,158 @@
             border: 2px solid #000;
             background: #fff;
             width: 50px;
-            height: 50px;
+            height: 52px;
             text-align: center;
             z-index: 10;
         }
-        .tipo-comp-box span { font-size: 35px; font-weight: bold; line-height: 45px; }
+        .tipo-comp-box span { font-size: 32px; font-weight: bold; line-height: 40px; display: block; }
+        .tipo-comp-box small { font-size: 9px; font-weight: bold; display: block; margin-top: -6px; }
         
-        .header-line { border-bottom: 2px solid #000; margin-bottom: 20px; padding-bottom: 10px; }
-        .table-items { min-height: 400px; }
-        .footer-firmas { margin-top: 50px; }
+        .header-line { border-bottom: 2px solid #000; margin-bottom: 18px; padding-bottom: 12px; }
+        
+        .table-items { min-height: 330px; }
+        .table-totales td { padding: 4px 10px; font-size: 13px; }
+
+        .footer-firmas { margin-top: 45px; }
         
         @media print {
-            .no-print { display: none; }
-            .remito-container { border: none; padding: 0; margin: 0; }
-            body { margin: 0; }
+            .no-print { display: none !important; }
+            .remito-container { 
+                border: none; 
+                padding: 10mm; 
+                margin: 0; 
+                box-shadow: none; 
+                width: 100%;
+                min-height: 100%;
+            }
+            body { background: #fff; margin: 0; }
         }
     </style>
 </head>
 <body>
-    <!-- Controles de impresión -->
-    <div class="no-print text-center py-3 bg-dark text-white">
-        <h5 class="mb-2">Vista Previa de Remito de Entrega</h5>
-        <button onclick="window.print()" class="btn btn-primary fw-bold px-4">IMPRIMIR EN A4</button>
-        <button onclick="window.close()" class="btn btn-outline-light ms-2">CERRAR</button>
+    <!-- Controles de impresión en pantalla -->
+    <div class="no-print text-center py-3 bg-dark text-white shadow-sm">
+        <h5 class="mb-2 fw-bold">
+            Vista Previa de {{ 'Presupuesto / Cotización' if es_presupuesto else 'Remito de Entrega' }}
+        </h5>
+        <button onclick="window.print()" class="btn btn-primary fw-bold px-4 me-2">
+            <i class="bi bi-printer"></i> IMPRIMIR EN A4
+        </button>
+        <button onclick="window.close()" class="btn btn-outline-light px-3">CERRAR</button>
     </div>
 
     <div class="remito-container">
-        <!-- CUADRO TIPO COMPROBANTE -->
+        <!-- CUADRO TIPO COMPROBANTE CENTRAL -->
         <div class="tipo-comp-box">
-            <span>R</span>
+            <span>{{ 'X' if es_presupuesto else 'R' }}</span>
+            <small>{{ 'PRESO' if es_presupuesto else 'REMITO' }}</small>
         </div>
 
         <!-- ENCABEZADO -->
         <div class="row header-line">
-            <!-- Izquierda: Vacan Info -->
+            <!-- Izquierda: Datos Vacan / Sucursal -->
             <div class="col-5">
-                <img src="{{ url_for('static', filename='img/Logo.jpg') }}" class="logo-print mb-2">
-                <h4 class="fw-bold mb-0">VACAN RADIADORES</h4>
-                <p class="small mb-0">
-                    De: {{ venta.sucursal.nombre }}<br>
-                    {{ venta.sucursal.direccion }}<br>
-                    {{ venta.sucursal.localidad }}, {{ venta.sucursal.provincia }}<br>
-                    <strong>CUIT: {{ venta.sucursal.cuit }}</strong>
+                <img src="{{ url_for('static', filename='img/Logo.jpg') }}" class="logo-print mb-2" alt="Logo">
+                <h4 class="fw-bold mb-0 text-dark">VACAN RADIADORES</h4>
+                <p class="small mb-0 text-muted">
+                    {% if doc.sucursal %}
+                        <strong>Sucursal:</strong> {{ doc.sucursal.nombre }}<br>
+                        {{ doc.sucursal.direccion or 'Dirección comercial' }}<br>
+                        {{ doc.sucursal.localidad or '' }}, {{ doc.sucursal.provincia or '' }}<br>
+                        <strong>CUIT:</strong> {{ doc.sucursal.cuit or '30-XXXXXXXX-X' }}
+                    {% else %}
+                        Casa Central - Ventas y Servicios<br>
+                        <strong>CUIT:</strong> 30-XXXXXXXX-X
+                    {% endif %}
                 </p>
             </div>
             
-            <!-- Centro: Espacio para el recuadro de la letra -->
+            <!-- Centro: Espacio reservado para el recuadro 'R' / 'X' -->
             <div class="col-2"></div>
 
-            <!-- Derecha: Datos Remito -->
+            <!-- Derecha: Datos del Comprobante -->
             <div class="col-5 text-end">
-                <h2 class="fw-bold mb-0">REMITO</h2>
-                <p class="mb-0">Documento no válido como factura</p>
-                <h4 class="mt-2">N° 0001 - {{ "%08d" % venta.id }}</h4>
-                <p class="fw-bold">Fecha: {{ venta.fecha.strftime('%d/%m/%Y') }}</p>
+                <h2 class="fw-bold mb-0 text-dark">{{ 'PRESUPUESTO' if es_presupuesto else 'REMITO' }}</h2>
+                <p class="text-danger fw-bold small mb-1">DOCUMENTO NO VÁLIDO COMO FACTURA</p>
+                <h4 class="fw-bold text-dark mt-1">N° 0001 - {{ "%08d" % doc.id }}</h4>
+                <p class="mb-1"><strong>Fecha de Emisión:</strong> {{ doc.fecha.strftime('%d/%m/%Y') if doc.fecha else 'S/D' }}</p>
+                
+                {% if es_presupuesto %}
+                    <p class="small text-muted mb-0"><strong>Validez de oferta:</strong> 7 días hábiles</p>
+                    {% if doc.estado %}
+                        <p class="small mb-0"><strong>Estado:</strong> <span class="badge bg-secondary">{{ doc.estado }}</span></p>
+                    {% endif %}
+                {% else %}
+                    <p class="small text-muted mb-0">
+                        <strong>Condición:</strong> {{ ('Crédito ' ~ doc.plazo_pago ~ ' días') if (doc.plazo_pago and doc.plazo_pago > 0) else 'Contado / Inmediato' }}
+                    </p>
+                {% endif %}
             </div>
         </div>
 
         <!-- DATOS DEL CLIENTE -->
-        <div class="row bg-light p-3 border mb-4">
-            <div class="col-7">
-                <p class="mb-1"><strong>SEÑOR(ES):</strong> {{ venta.cliente.razon_social }}</p>
-                <p class="mb-1"><strong>DOMICILIO:</strong> {{ venta.cliente.direccion or 'S/D' }}</p>
-                <p class="mb-1"><strong>LOCALIDAD:</strong> {{ venta.cliente.localidad or '-' }} ({{ venta.cliente.provincia or '-' }})</p>
+        <div class="row bg-light p-3 border mb-3 rounded-1">
+            <div class="col-7 border-end">
+                <p class="mb-1"><strong>SEÑOR(ES):</strong> 
+                    <span class="text-dark fw-bold">
+                        {{ doc.cliente.razon_social if (doc.cliente and doc.cliente.razon_social) else (doc.cliente.nombre if doc.cliente else 'Consumidor Final') }}
+                    </span>
+                </p>
+                <p class="mb-1"><strong>DOMICILIO:</strong> {{ doc.cliente.direccion if (doc.cliente and doc.cliente.direccion) else 'S/D' }}</p>
+                <p class="mb-0"><strong>LOCALIDAD:</strong> {{ doc.cliente.localidad if (doc.cliente and doc.cliente.localidad) else '-' }} ({{ doc.cliente.provincia if (doc.cliente and doc.cliente.provincia) else '-' }})</p>
             </div>
-            <div class="col-5">
-                <p class="mb-1"><strong>CUIT/DNI:</strong> {{ venta.cliente.cuit or 'S/D' }}</p>
-                <p class="mb-1"><strong>IVA:</strong> {{ venta.cliente.condicion_iva }}</p>
-                <p class="mb-1"><strong>TELÉFONO:</strong> {{ venta.cliente.telefono or '-' }}</p>
+            <div class="col-5 ps-3">
+                <p class="mb-1"><strong>CUIT / DNI:</strong> {{ doc.cliente.cuit if (doc.cliente and doc.cliente.cuit) else (doc.cliente.dni if (doc.cliente and doc.cliente.dni) else 'S/D') }}</p>
+                <p class="mb-1"><strong>COND. IVA:</strong> {{ doc.cliente.condicion_iva if (doc.cliente and doc.cliente.condicion_iva) else 'Consumidor Final' }}</p>
+                <p class="mb-0"><strong>TELÉFONO:</strong> {{ doc.cliente.telefono if (doc.cliente and doc.cliente.telefono) else '-' }}</p>
             </div>
         </div>
 
-        <!-- TABLA DE PRODUCTOS -->
         <!-- TABLA DE PRODUCTOS VALORIZADA -->
         <div class="table-items">
-            <table class="table table-bordered border-dark align-middle">
+            <table class="table table-bordered border-dark align-middle mb-0">
                 <thead class="table-secondary border-dark text-center">
                     <tr>
-                        <th width="10%">CANT.</th>
-                        <th width="50%">DESCRIPCIÓN DE LA MERCADERÍA</th>
+                        <th width="8%">CANT.</th>
+                        <th width="52%">DESCRIPCIÓN DE LA MERCADERÍA / SERVICIO</th>
                         <th width="20%">PRECIO UNIT.</th>
                         <th width="20%">SUBTOTAL</th>
                     </tr>
                 </thead>
                 <tbody>
-                    
-                   {% for d in venta.detalles %}
+                    {% set detalles_lista = doc.detalles if doc.detalles is defined else [] %}
+                    {% set ns = namespace(subtotal_bruto=0) %}
+
+                    {% for d in detalles_lista %}
+                        {# Detectamos precio unitario sea de venta (precio_unitario) o de presupuesto (precio_pactado) #}
+                        {% set p_unit = d.precio_unitario if d.precio_unitario is defined else (d.precio_pactado if d.precio_pactado is defined else 0.0) %}
+                        {% set sub_linea = p_unit * d.cantidad %}
+                        {% set ns.subtotal_bruto = ns.subtotal_bruto + sub_linea %}
                     <tr>
-                        <td class="text-center">{{ d.cantidad }}</td>
+                        <td class="text-center fw-bold">{{ d.cantidad }}</td>
                         <td>
-                            <!-- LÓGICA ANTIFALLO: Si nombre_item es nulo, busca el nombre del repuesto -->
                             <strong>
-                                {{ d.nombre_item or (d.repuesto.nombre if d.repuesto else 'Item Manual / Servicio') }}
+                                {{ d.nombre_item or (d.repuesto.nombre if d.repuesto else 'Ítem Manual / Servicio') }}
                             </strong>
-                            
-                            {% if d.repuesto %}
-                                <br><small class="text-muted">SKU: {{ d.repuesto.sku }}</small>
+                            {% if d.repuesto and d.repuesto.sku %}
+                                <br><small class="text-muted">CÓD/SKU: <strong>{{ d.repuesto.sku }}</strong></small>
+                            {% elif d.repuesto and d.repuesto.codigo %}
+                                <br><small class="text-muted">CÓD: <strong>{{ d.repuesto.codigo }}</strong></small>
                             {% else %}
-                                <!-- Si no hay objeto repuesto, es una carga manual del Paso 2 -->
-                                <br><small class="text-muted italic">Carga Manual / Accesorio</small>
+                                <br><small class="text-muted fst-italic">Carga Manual / Servicio de Taller</small>
                             {% endif %}
                         </td>
-                        <td class="text-end">${{ "{:,.2f}".format(d.precio_unitario) }}</td>
-                        <td class="text-end">${{ "{:,.2f}".format(d.precio_unitario * d.cantidad) }}</td>
+                        <td class="text-end">${{ "{:,.2f}".format(p_unit) }}</td>
+                        <td class="text-end fw-bold">${{ "{:,.2f}".format(sub_linea) }}</td>
                     </tr>
                     {% endfor %}
 
-                    <!-- Filas de relleno para mantener el formato de la hoja -->
-                    {% set filas_vacias = 8 - venta.detalles|length %}
+                    <!-- Filas de relleno estético para formato A4 -->
+                    {% set filas_vacias = 7 - detalles_lista|length %}
                     {% if filas_vacias > 0 %}
                         {% for i in range(filas_vacias) %}
                         <tr>
-                            <td style="height: 35px;"></td>
+                            <td style="height: 32px;"></td>
                             <td></td>
                             <td></td>
                             <td></td>
@@ -150,46 +195,153 @@
                         {% endfor %}
                     {% endif %}
                 </tbody>
-                <tfoot>
-                    <tr class="table-light">
-                        <td colspan="3" class="text-end"><strong>VALOR TOTAL DEL REMITO:</strong></td>
-                        <td class="text-end">
-                            <h5 class="fw-bold mb-0">${{ "{:,.2f}".format(venta.total) }}</h5>
-                        </td>
-                    </tr>
-                </tfoot>
             </table>
         </div>
 
+        <!-- CUADRO DE TOTALES, DESCUENTOS, RECARGOS E IMPUESTOS -->
         <div class="row mt-2">
-            <div class="col-12">
-                <p class="small"><strong>Importante:</strong> Los precios expresados en este remito corresponden al valor de venta acordado a la fecha de entrega.</p>
-            </div>
-        </div>
+            <!-- Izquierda: Información de Pago, Plazos y Observaciones -->
+            <div class="col-7">
+                <div class="border p-2 bg-light mb-2">
+                    <p class="mb-1 small"><strong>Condiciones Comerciales y Plazos:</strong></p>
+                    <ul class="mb-1 small ps-3">
+                        {% if es_presupuesto %}
+                            <li>Presupuesto sujeto a variación de costos y disponibilidad al momento de confirmar.</li>
+                            <li>Los repuestos cotizados se reservan únicamente con seña previa.</li>
+                        {% else %}
+                            <li>La firma del presente comprobante avala la recepción conforme de la mercadería.</li>
+                            {% if doc.plazo_pago and doc.plazo_pago > 0 %}
+                                <li>Plazo de pago pactado: <strong>{{ doc.plazo_pago }} días</strong> de fecha de emisión.</li>
+                            {% else %}
+                                <li>Operación de Contado / Pago inmediato.</li>
+                            {% endif %}
+                        {% endif %}
+                    </ul>
 
-        <!-- PIE DE PAGINA -->
-        <div class="row mt-4">
-            <div class="col-12 border p-2">
-                <p class="small mb-0"><strong>Observaciones:</strong> Mercadería recibida para su revisión/instalación. El presente documento avala la entrega física de los productos arriba mencionados.</p>
+                    <!-- Detalle de medios de pago si es remito/venta y existen pagos cargados -->
+                    {% if not es_presupuesto and doc.pagos and doc.pagos|length > 0 %}
+                        <div class="mt-2 pt-2 border-top">
+                            <span class="small fw-bold">Medios de Pago Asignados:</span>
+                            <div class="small">
+                                {% for pago in doc.pagos %}
+                                    <span class="badge bg-white text-dark border me-1">
+                                        {{ pago.metodo or pago.forma_pago or 'Pago' }}: ${{ "{:,.2f}".format(pago.monto) }}
+                                    </span>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="border p-2">
+                    <p class="small mb-0">
+                        <strong>Observaciones:</strong> 
+                        {{ doc.observaciones if doc.observaciones else ('Mercadería entregada en perfectas condiciones.' if not es_presupuesto else 'Validez sujeta a confirmación.') }}
+                    </p>
+                </div>
+            </div>
+
+            <!-- Derecha: Liquidación de Importes -->
+            <div class="col-5">
+                <table class="table table-bordered border-dark table-totales mb-0">
+                    <tbody>
+                        <!-- Subtotal Bruto -->
+                        <tr>
+                            <td class="text-end bg-light"><strong>Subtotal Bruto:</strong></td>
+                            <td class="text-end fw-bold" style="width: 45%;">
+                                ${{ "{:,.2f}".format(ns.subtotal_bruto) }}
+                            </td>
+                        </tr>
+
+                        <!-- 1. Descuento (si existe) -->
+                        {% set desc_porc = (doc.descuento_global if doc.descuento_global is defined and doc.descuento_global else (doc.descuento_porcentaje if doc.descuento_porcentaje is defined else 0)) | float %}
+                        
+                        {# Si no hay porcentaje en columna, deducirlo si el total es menor al subtotal #}
+                        {% if desc_porc == 0 and ns.subtotal_bruto is defined and doc.total and doc.total < ns.subtotal_bruto %}
+                            {% set desc_monto = ns.subtotal_bruto - doc.total %}
+                            {% set desc_porc = (desc_monto / ns.subtotal_bruto) * 100 if ns.subtotal_bruto > 0 else 0 %}
+                        {% else %}
+                            {% set desc_monto = (ns.subtotal_bruto * (desc_porc / 100.0)) if (ns.subtotal_bruto is defined and desc_porc > 0) else 0 %}
+                        {% endif %}
+
+                        {% if desc_monto > 0 or desc_porc > 0 %}
+                        <tr class="text-danger">
+                            <td class="text-end">Descuento ({{ "{:.1f}".format(desc_porc) }}%):</td>
+                            <td class="text-end fw-bold">-${{ "{:,.2f}".format(desc_monto) }}</td>
+                        </tr>
+                        {% endif %}
+
+
+                        <!-- 2. Recargo (si existe) -->
+                        {% set rec_porc = (doc.recargo_global if doc.recargo_global is defined and doc.recargo_global else (doc.recargo_porcentaje if doc.recargo_porcentaje is defined else 0)) | float %}
+                        
+                        {# Si no hay porcentaje en columna, deducirlo si el total es mayor al subtotal (sin IVA) #}
+                        {% if rec_porc == 0 and ns.subtotal_bruto is defined and doc.total and doc.total > ns.subtotal_bruto and (not doc.iva_porcentaje or doc.tipo_comprobante == 'REMITO') %}
+                            {% set rec_monto = doc.total - ns.subtotal_bruto %}
+                            {% set rec_porc = (rec_monto / ns.subtotal_bruto) * 100 if ns.subtotal_bruto > 0 else 0 %}
+                        {% else %}
+                            {% set rec_monto = (ns.subtotal_bruto * (rec_porc / 100.0)) if (ns.subtotal_bruto is defined and rec_porc > 0) else 0 %}
+                        {% endif %}
+
+                        {% if rec_monto > 0 or rec_porc > 0 %}
+                        <tr class="text-primary">
+                            <td class="text-end">Recargo ({{ "{:.1f}".format(rec_porc) }}%):</td>
+                            <td class="text-end fw-bold">+${{ "{:,.2f}".format(rec_monto) }}</td>
+                        </tr>
+                        {% endif %}
+
+
+                        <!-- 3. IVA (si aplica) -->
+                        {% set iva_porc = (doc.iva_porcentaje if doc.iva_porcentaje is defined and doc.iva_porcentaje else 0) | float %}
+                        {% set base_imponible = (ns.subtotal_bruto - desc_monto + rec_monto) if ns.subtotal_bruto is defined else doc.total %}
+                        {% set iva_monto = (base_imponible * (iva_porc / 100.0)) if iva_porc > 0 else 0 %}
+
+                        {% if iva_porc > 0 and iva_monto > 0 %}
+                        <tr>
+                            <td class="text-end">IVA ({{ "{:.1f}".format(iva_porc) }}%):</td>
+                            <td class="text-end fw-bold">+${{ "{:,.2f}".format(iva_monto) }}</td>
+                        </tr>
+                        {% endif %}
+
+                        <!-- TOTAL FINAL OPERACIÓN -->
+                        <tr class="table-secondary border-dark">
+                            <td class="text-end align-middle">
+                                <h6 class="fw-bold mb-0">TOTAL FINAL:</h6>
+                            </td>
+                            <td class="text-end align-middle">
+                                <h5 class="fw-bold mb-0 text-dark">
+                                    ${{ "{:,.2f}".format(doc.total) }}
+                                </h5>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
             </div>
         </div>
 
         <!-- SECCIÓN DE FIRMAS -->
         <div class="row footer-firmas">
             <div class="col-6 text-center">
-                <div style="border-top: 1px solid #000; width: 70%; margin: 40px auto 10px auto;"></div>
-                <p class="mb-0"><strong>Firma Autorizada Vacan</strong></p>
-                <p class="small">Control de Salida</p>
+                <div style="border-top: 1px solid #000; width: 70%; margin: 35px auto 8px auto;"></div>
+                <p class="mb-0 fw-bold">
+                    {{ 'Asesor Comercial / Vacan' if es_presupuesto else 'Firma Autorizada Vacan' }}
+                </p>
+                <small class="text-muted">{{ 'Emisión de Cotización' if es_presupuesto else 'Control y Salida de Depósito' }}</small>
             </div>
             <div class="col-6 text-center">
-                <div style="border-top: 1px solid #000; width: 70%; margin: 40px auto 10px auto;"></div>
-                <p class="mb-0"><strong>Recibí Conforme</strong></p>
-                <p class="small">Aclaración y DNI</p>
+                <div style="border-top: 1px solid #000; width: 70%; margin: 35px auto 8px auto;"></div>
+                <p class="mb-0 fw-bold">
+                    {{ 'Conformidad del Cliente' if es_presupuesto else 'Recibí Conforme' }}
+                </p>
+                <small class="text-muted">Aclaración y N° Documento</small>
             </div>
         </div>
 
-        <div class="text-center mt-5">
-            <small class="text-muted">ORIGINAL PARA EL CLIENTE - Impreso mediante Sistema de Gestión Vacan</small>
+        <!-- PIE DE HOJA -->
+        <div class="text-center mt-4 pt-3 border-top">
+            <small class="text-muted">
+                {{ 'COTIZACIÓN ESTIMATIVA' if es_presupuesto else 'ORIGINAL PARA EL CLIENTE' }} - Sistema de Gestión Vacan Radiadores
+            </small>
         </div>
     </div>
 </body>

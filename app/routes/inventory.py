@@ -1,3 +1,4 @@
+import math
 from flask import Blueprint, render_template, request, redirect, url_for, flash
 from app import db 
 from app.models import Repuesto, ModeloAuto, Venta, DetalleVenta, Cliente, Proveedor, MovimientoCtaCte, HistorialPrecio, ModeloAuto, Sucursal, Cheque, get_argentina_time
@@ -403,7 +404,7 @@ def eliminar_modelo(id):
 @inventory_bp.route('/pos')
 @login_required
 def pos():
-    recuperar_id = request.args.get('recuperar_id') # Capturamos el ID si viene del reporte
+    recuperar_id = request.args.get('recuperar_id') # Capturamos el ID si viene del reporte o de la lista
     productos = Repuesto.query.filter(Repuesto.stock > 0).all()
     clientes = Cliente.query.filter_by(activo=True).all()
     
@@ -411,10 +412,48 @@ def pos():
     cajas = Caja.query.filter(
         (Caja.sucursal_id == current_user.sucursal_id) | (Caja.tipo == 'VIRTUAL')
     ).all()
+
+    # --- RECUPERACIÓN DE PRESUPUESTO PARA EDICIÓN / FACTURACIÓN ---
+    presupuesto_recuperado = None
+    if recuperar_id:
+        p = Presupuesto.query.get(recuperar_id)
+        if p:
+            items_p = []
+            for dp in p.detalles:
+                items_p.append({
+                    "id": dp.repuesto_id if dp.repuesto_id else f"manual_{dp.id}",
+                    "nombre": dp.nombre_item or (dp.repuesto.nombre if dp.repuesto else "Ítem"),
+                    "codigo": dp.repuesto.codigo if (dp.repuesto and hasattr(dp.repuesto, 'codigo')) else "",
+                    "precio": float(dp.precio_pactado),
+                    "cantidad": int(dp.cantidad),
+                    "subtotal": float(dp.precio_pactado * dp.cantidad),
+                    "stock": dp.repuesto.stock if (dp.repuesto and hasattr(dp.repuesto, 'stock')) else 999
+                })
+
+            # Extraemos la razón social y cuit del cliente de forma segura
+            cliente_nombre = "Consumidor Final"
+            cliente_cuit = ""
+            if p.cliente:
+                cliente_nombre = getattr(p.cliente, 'razon_social', getattr(p.cliente, 'nombre', 'Consumidor Final'))
+                cliente_cuit = getattr(p.cliente, 'cuit', '')
+
+            presupuesto_recuperado = {
+                "id": p.id,
+                "cliente_id": p.cliente_id,
+                "cliente_nombre": cliente_nombre,
+                "cuit": cliente_cuit,
+                "total": float(p.total),
+                "items": items_p
+            }
     
-    return render_template('pos.html', productos=productos, clientes=clientes, cajas=cajas, recuperar_id=recuperar_id)
-
-
+    return render_template(
+        'pos.html', 
+        productos=productos, 
+        clientes=clientes, 
+        cajas=cajas, 
+        recuperar_id=recuperar_id,
+        presupuesto_recuperado=presupuesto_recuperado
+    )
 @inventory_bp.route('/vender', methods=['POST'])
 @login_required
 def procesar_venta():
@@ -477,36 +516,86 @@ def procesar_venta_pro():
 
     # Tomamos el total calculado por el frontend (ya incluye intereses si los hubo)
     total_operacion = float(pago_info.get('total_final', 0))
+
+    # =========================================================================
+    # NUEVO: EXTRAER DESCUENTO, RECARGO, IVA Y PLAZO DE PAGO
+    # Soporta tanto si vienen en la raíz de data como dentro de pago_info
+    # =========================================================================
+    descuento_val = float(
+        data.get('descuento_global') or 
+        data.get('descuento_porcentaje') or 
+        pago_info.get('descuento_porcentaje', 0.0) or 0.0
+    )
+    recargo_val = float(
+        data.get('recargo_global') or 
+        data.get('recargo_porcentaje') or 
+        pago_info.get('recargo_porcentaje') or 
+        pago_info.get('interes', 0.0) or 0.0
+    )
+    iva_val = float(
+        data.get('iva_porcentaje') or 
+        pago_info.get('iva_porcentaje', 21.0) or 21.0
+    )
+    plazo_val = int(
+        data.get('plazo_pago') or 
+        pago_info.get('plazo_pago', 0) or 0
+    )
     
     try:
         # --- CASO A: PRESUPUESTO (No toca Stock ni Caja) ---
+        # --- CASO A: PRESUPUESTO (No toca Stock ni Caja) ---
         if destino == 'PRESUPUESTO':
-            nuevo_preso = Presupuesto(
-                total=total_operacion,
-                cliente_id=cliente_id,
-                usuario_id=current_user.id,
-                sucursal_id=current_user.sucursal_id,
-                estado='PENDIENTE'
-            )
-            db.session.add(nuevo_preso)
-            db.session.flush()
+            # Capturamos el ID si estamos en modo edición
+            presupuesto_id = data.get('presupuesto_id') or data.get('presupuesto_id_origen')
+            preso_existente = Presupuesto.query.get(presupuesto_id) if presupuesto_id else None
 
+            if preso_existente:
+                # 1. MODO EDICIÓN: ACTUALIZAMOS EL PRESUPUESTO EXISTENTE
+                preso_actual = preso_existente
+                preso_actual.total = total_operacion
+                preso_actual.cliente_id = cliente_id
+                
+                # Vaciamos los detalles viejos para cargar los nuevos
+                for d_viejo in preso_actual.detalles:
+                    db.session.delete(d_viejo)
+                db.session.flush()
+            else:
+                # 2. MODO NUEVO: CREAMOS PRESUPUESTO DE CERO (Sin argumentos extras que rompan SQLite)
+                preso_actual = Presupuesto(
+                    total=total_operacion,
+                    cliente_id=cliente_id,
+                    usuario_id=current_user.id,
+                    sucursal_id=current_user.sucursal_id,
+                    estado='PENDIENTE'
+                )
+                db.session.add(preso_actual)
+                db.session.flush()
+
+            # Guardamos los ítems en DetallePresupuesto con precio_pactado
             for item in items:
-                es_manual = not str(item['id']).isdigit()
-                id_repuesto = None if es_manual else int(item['id'])
+                item_id = str(item['id'])
+                es_man = item_id.startswith(('MAN_', 'manual_')) or not item_id.isdigit()
+                id_repuesto = None if es_man else int(item_id)
+                nombre_item = str(item.get('nombre', 'ÍTEM SIN NOMBRE')).upper()
                 
                 detalle_p = DetallePresupuesto(
-                    presupuesto_id=nuevo_preso.id,
+                    presupuesto_id=preso_actual.id,
                     repuesto_id=id_repuesto,
-                    nombre_item=item.get('nombre', 'Sin nombre'),
+                    nombre_item=nombre_item,
                     cantidad=int(item['cantidad']),
                     precio_pactado=float(item['precio'])
                 )
                 db.session.add(detalle_p)
             
             db.session.commit()
-            return jsonify({"status": "ok", "presupuesto_id": nuevo_preso.id, "tipo": "PRESUPUESTO"})
-
+            return jsonify({
+                "status": "ok",
+                "tipo": "PRESUPUESTO",
+                "presupuesto_id": preso_actual.id,
+                "redireccion": url_for('inventory.imprimir_remito', venta_id=preso_actual.id) if hasattr('inventory', 'imprimir_remito') else f"/ventas/imprimir/{preso_actual.id}"
+            })
+            
+            
         # --- CASO B: VENTA REAL (Remito/Factura/Interno) ---
         else:
             metodo_pago = pago_info.get('medio', 'EFECTIVO')
@@ -517,15 +606,22 @@ def procesar_venta_pro():
             if destino == 'INTERNO':
                 estado_fiscal = 'NO_APLICA'
 
-            # 1. Crear la Venta base
+            tipo_comp = 'FACTURA' if destino == 'FACTURA' else ('REMITO' if destino != 'INTERNO' else 'INTERNO')
+
+            # 1. Crear la Venta base (guardando descuento_global, recargo_global, iva y plazo)
             nueva_venta = Venta(
                 total=total_operacion,
                 cliente_id=cliente_id,
                 usuario_id=current_user.id,
                 sucursal_id=current_user.sucursal_id,
-                tipo_comprobante='REMITO',
+                tipo_comprobante=tipo_comp,
                 metodo_pago=metodo_pago,
-                estado_arca=estado_fiscal
+                estado_arca=estado_fiscal,
+                # 👇 Campos clave para la impresión:
+                descuento_global=descuento_val,
+                recargo_global=recargo_val,
+                iva_porcentaje=iva_val,
+                plazo_pago=plazo_val
             )
             db.session.add(nueva_venta)
             db.session.flush() 
@@ -604,8 +700,8 @@ def procesar_venta_pro():
         print(f"Error procesando en POS: {str(e)}")
         return jsonify({"status": "error", "message": "Fallo interno: " + str(e)}), 500
     
-
-
+    
+    
 # Función para generar el código correlativo
 # --- FUNCIÓN AUXILIAR PARA EL SKU CORRELATIVO ---
 def generar_proximo_sku_vacan():
@@ -630,6 +726,13 @@ def lista_presupuestos():
     presupuestos = Presupuesto.query.filter_by(estado='PENDIENTE').order_by(Presupuesto.fecha.desc()).all()
     return render_template('presupuestos.html', presupuestos=presupuestos)
 
+
+@inventory_bp.route('/presupuesto/<int:id>')
+@login_required
+def ver_presupuesto(id):
+    presupuesto = Presupuesto.query.get_or_404(id)
+    return render_template('ver_presupuesto.html', p=presupuesto)
+
 @inventory_bp.route('/presupuesto/eliminar/<int:id>')
 @login_required
 def eliminar_presupuesto(id):
@@ -644,35 +747,56 @@ def eliminar_presupuesto(id):
 def convertir_a_remito(id):
     p = Presupuesto.query.get_or_404(id)
     
+    # Si tiene cliente va a CTA_CTE, si no tiene cliente (anónimo / mostrador) es EFECTIVO
+    metodo = 'CTA_CTE' if p.cliente_id else 'EFECTIVO'
+    sucursal_id = getattr(current_user, 'sucursal_id', None)
+
     # 1. Crear la Venta (Remito)
     nueva_venta = Venta(
-        total=p.total, cliente_id=p.cliente_id, 
-        usuario_id=current_user.id, sucursal_id=current_user.sucursal_id,
-        tipo_comprobante='REMITO', metodo_pago='CTA_CTE', estado_arca='PENDIENTE'
+        total=p.total, 
+        cliente_id=p.cliente_id, 
+        usuario_id=current_user.id, 
+        sucursal_id=sucursal_id,
+        tipo_comprobante='REMITO', 
+        metodo_pago=metodo, 
+        estado_arca='PENDIENTE'
     )
     db.session.add(nueva_venta)
     db.session.flush()
 
-    # 2. Mover detalles y DESCONTAR STOCK (Recién ahora)
+    # 2. Mover detalles y DESCONTAR STOCK (Protegido contra NoneType)
     for dp in p.detalles:
-        detalle_v = DetalleVenta(venta_id=nueva_venta.id, repuesto_id=dp.repuesto_id, 
-                                 cantidad=dp.cantidad, precio_unitario=dp.precio_pactado)
-        dp.repuesto.stock -= dp.cantidad
+        detalle_v = DetalleVenta(
+            venta_id=nueva_venta.id, 
+            repuesto_id=dp.repuesto_id, 
+            cantidad=dp.cantidad, 
+            precio_unitario=dp.precio_pactado
+        )
+        
+        # Descontar stock solo si el repuesto físico existe
+        if dp.repuesto and hasattr(dp.repuesto, 'stock') and dp.repuesto.stock is not None:
+            dp.repuesto.stock -= dp.cantidad
+            
         db.session.add(detalle_v)
 
-    # 3. Impactar Cta Cte y marcar presupuesto como usado
-    mov = MovimientoCtaCte(cliente_id=p.cliente_id, venta_id=nueva_venta.id, 
-                           monto=p.total, tipo='DEUDA', descripcion=f"Remito #{nueva_venta.id} (ex Presup #{p.id})")
+    # 3. Impactar Cta Cte SOLO SI EXISTE UN CLIENTE REGISTRADO
+    if p.cliente_id:
+        mov = MovimientoCtaCte(
+            cliente_id=p.cliente_id, 
+            venta_id=nueva_venta.id, 
+            sucursal_id=sucursal_id,
+            monto=p.total, 
+            tipo='DEUDA', 
+            descripcion=f"Remito #{nueva_venta.id} (ex Presup #{p.id})"
+        )
+        db.session.add(mov)
+
+    # 4. Marcar presupuesto como usado
     p.estado = 'CONVERTIDO'
     
-    db.session.add(mov)
     db.session.commit()
     flash("Presupuesto convertido en Venta exitosamente", "success")
     return redirect(url_for('inventory.imprimir_comprobante', id=nueva_venta.id, tipo='remito'))
-
-
-
-
     
 
 #IMPRESION DE REMITO Y COMPROBANTE INTERNO    
@@ -792,18 +916,18 @@ def procesar_venta_avanzada():
     if not data:
         return jsonify({"status": "error", "message": "No se recibieron datos"}), 400
 
-    presupuesto_id = data.get('presupuesto_id')
-    
+    # ID de presupuesto si viene de una cotización previa
+    presupuesto_id = data.get('presupuesto_id') or data.get('presupuesto_id_origen')
     cliente_id = data.get('cliente_id')
-    items = data.get('items') 
-    pagos = data.get('pagos') 
+    items = data.get('items', [])
+    pagos = data.get('pagos', [])
     tipo_comp = data.get('tipo_comprobante', 'REMITO')
     
-    # --- NUEVOS CAMPOS RECIBIDOS ---
-    iva_p = float(data.get('iva_porcentaje', 21.0))
-    plazo = int(data.get('plazo_pago', 0))
-    recargo_p = float(data.get('recargo_porcentaje', 0))
-    descuento_p = float(data.get('descuento_porcentaje', 0))
+    # Captura de porcentajes y plazo con compatibilidad de claves
+    iva_p = float(data.get('iva_porcentaje', 21.0) if data.get('iva_porcentaje') is not None else 21.0)
+    plazo = int(data.get('plazo_pago') or 0)
+    recargo_p = float(data.get('recargo_porcentaje') or data.get('recargo_global') or data.get('recargo') or 0.0)
+    descuento_p = float(data.get('descuento_porcentaje') or data.get('descuento_global') or data.get('descuento') or 0.0)
 
     # Identificamos la sucursal del vendedor actual
     sucursal_vendedor = current_user.sucursal_id
@@ -819,28 +943,32 @@ def procesar_venta_avanzada():
     
     try:
         # 2. Crear el objeto Venta vinculado a la sucursal del vendedor
+        # ¡IMPORTANTE!: Se agregan descuento_global y recargo_global para que figuren en la impresión
         nueva_v = Venta(
             total=total_venta,
             cliente_id=cliente_id,
             usuario_id=current_user.id,
-            sucursal_id=sucursal_vendedor, # Se asigna la sucursal del vendedor
+            sucursal_id=sucursal_vendedor,  # Se asigna la sucursal del vendedor
             tipo_comprobante=tipo_comp,
             estado_arca='FACTURADO' if tipo_comp == 'FACTURA' else 'PENDIENTE',
             iva_porcentaje=iva_p, 
-            plazo_pago=plazo      
+            plazo_pago=plazo,
+            descuento_global=descuento_p,
+            recargo_global=recargo_p
         )
         db.session.add(nueva_v)
         db.session.flush() 
 
-        # 3. Procesar los Ítems del Carrito (Lógica de SKU Local)
+        # 3. Procesar los Ítems del Carrito (Lógica de SKU Local y soporte manual)
         for item in items:
             item_id = str(item['id'])
-            es_man = item_id.startswith('MAN_')
+            # Es manual si empieza con 'MAN_', 'manual_' o si NO son solo dígitos
+            es_man = item_id.startswith(('MAN_', 'manual_')) or not item_id.isdigit()
             
             id_rep_final = None
             if not es_man:
-                # El ítem viene con un ID de la base de datos (podría ser de otra sucursal)
-                rep_seleccionado = Repuesto.query.get(int(item['id']))
+                # El ítem viene con un ID numérico de la base de datos
+                rep_seleccionado = Repuesto.query.get(int(item_id))
                 
                 if rep_seleccionado:
                     # BUSCAMOS EL MISMO SKU PERO EN LA SUCURSAL DEL VENDEDOR
@@ -854,99 +982,98 @@ def procesar_venta_avanzada():
 
                     # Verificamos stock en el registro LOCAL
                     if rep_local.stock < int(item['cantidad']):
-                         raise Exception(f"Stock insuficiente en esta sucursal para {rep_local.nombre} (Disponibilidad: {rep_local.stock})")
+                        raise Exception(f"Stock insuficiente en esta sucursal para {rep_local.nombre} (Disponibilidad: {rep_local.stock})")
                     
                     # Descontamos del registro de la sucursal del vendedor
                     rep_local.stock -= int(item['cantidad'])
                     id_rep_final = rep_local.id
 
+            nombre_item = str(item.get('nombre', 'ÍTEM')).upper()
+
             db.session.add(DetalleVenta(
                 venta_id=nueva_v.id, 
                 repuesto_id=id_rep_final,
-                nombre_item=item['nombre'].upper(),
+                nombre_item=nombre_item,
                 cantidad=int(item['cantidad']), 
                 precio_unitario=float(item['precio']) 
             ))
 
         # 4. Procesar la Bolsa de Pagos
-        total_abonado_real = 0
-        for p in pagos:
-            if p is None: continue
-            
-            monto_p = float(p.get('monto', 0))
-            medio = p.get('medio')
-            caja_id_manual = p.get('caja_id')
+        total_abonado_real = 0.0
+        if pagos:
+            for p in pagos:
+                if p is None:
+                    continue
+                
+                monto_p = float(p.get('monto', 0))
+                medio = p.get('medio')
+                caja_id_manual = p.get('caja_id')
 
-            if medio == 'CTA_CTE':
-                desc_cta = f"Venta {tipo_comp} #{nueva_v.id}"
-                if plazo > 0:
-                    fecha_venc = (get_argentina_time() + timedelta(days=plazo)).strftime('%d/%m/%Y')
-                    desc_cta += f" - VENCE: {fecha_venc}"
-                
-                db.session.add(MovimientoCtaCte(
-                    cliente_id=cliente_id, 
-                    venta_id=nueva_v.id, 
-                    monto=monto_p,
-                    tipo='DEUDA', 
-                    sucursal_id=sucursal_vendedor, # Deuda vinculada a la sucursal local
-                    descripcion=desc_cta
-                ))
-            else:
-                total_abonado_real += monto_p
-                
-                if caja_id_manual:
-                    caja_destino = Caja.query.get(caja_id_manual)
+                if medio == 'CTA_CTE':
+                    desc_cta = f"Venta {tipo_comp} #{nueva_v.id}"
+                    if plazo > 0:
+                        fecha_venc = (get_argentina_time() + timedelta(days=plazo)).strftime('%d/%m/%Y')
+                        desc_cta += f" - VENCE: {fecha_venc}"
                     
-                    if caja_destino:
-                        caja_destino.saldo_actual += monto_p
-                        db.session.add(MovimientoFinanciero(
-                            caja_id=caja_destino.id, 
-                            monto=monto_p, 
-                            tipo='INGRESO',
-                            motivo=f"Venta #{nueva_v.id} ({medio})", 
-                            metodo_detalle=medio,
-                            usuario_id=current_user.id, 
-                            venta_id=nueva_v.id
-                        ))
+                    db.session.add(MovimientoCtaCte(
+                        cliente_id=cliente_id, 
+                        venta_id=nueva_v.id, 
+                        monto=monto_p,
+                        tipo='DEUDA', 
+                        sucursal_id=sucursal_vendedor,  # Deuda vinculada a la sucursal local
+                        descripcion=desc_cta
+                    ))
                 else:
-                    raise Exception(f"No se seleccionó una caja de destino para el pago con {medio}")
+                    total_abonado_real += monto_p
+                    
+                    if caja_id_manual:
+                        caja_destino = Caja.query.get(caja_id_manual)
+                        
+                        if caja_destino:
+                            caja_destino.saldo_actual += monto_p
+                            db.session.add(MovimientoFinanciero(
+                                caja_id=caja_destino.id, 
+                                monto=monto_p, 
+                                tipo='INGRESO',
+                                motivo=f"Venta #{nueva_v.id} ({medio})", 
+                                metodo_detalle=medio,
+                                usuario_id=current_user.id, 
+                                venta_id=nueva_v.id
+                            ))
+                    else:
+                        raise Exception(f"No se seleccionó una caja de destino para el pago con {medio}")
 
-                if medio == 'CHEQUE':
-                    d = p.get('cheque_data')
-                    if d:
-                        db.session.add(Cheque(
-                            banco=d.get('banco', 'S/D').upper(), 
-                            numero=d.get('numero', '0'), 
-                            emisor=d.get('emisor', 'S/D').upper(),
-                            monto=monto_p,
-                            fecha_vencimiento=datetime.strptime(d.get('vencimiento'), '%Y-%m-%d').date() if d.get('vencimiento') else get_argentina_time().date(),
-                            tipo='FISICO', 
-                            cliente_id=cliente_id, 
-                            venta_id=nueva_v.id, 
-                            estado='EN_CARTERA'
-                        ))
+                    if medio == 'CHEQUE':
+                        d = p.get('cheque_data')
+                        if d:
+                            db.session.add(Cheque(
+                                banco=d.get('banco', 'S/D').upper(), 
+                                numero=d.get('numero', '0'), 
+                                emisor=d.get('emisor', 'S/D').upper(),
+                                monto=monto_p,
+                                fecha_vencimiento=datetime.strptime(d.get('vencimiento'), '%Y-%m-%d').date() if d.get('vencimiento') else get_argentina_time().date(),
+                                tipo='FISICO', 
+                                cliente_id=cliente_id, 
+                                venta_id=nueva_v.id, 
+                                estado='EN_CARTERA'
+                            ))
 
         # 5. Finalizar Venta
         nueva_v.total_pagado = total_abonado_real
         nueva_v.esta_pagada = (total_abonado_real >= (total_venta - 0.05)) 
         
-        #AGREGADO AL FINAL
+        # Si la venta provino de un presupuesto, lo marcamos como CONVERTIDO
         if presupuesto_id:
             preso_original = Presupuesto.query.get(presupuesto_id)
             if preso_original:
-                preso_original.estado = 'CONVERTIDO' # Ya no aparecerá en el reporte de pendientes
-                
-        
+                preso_original.estado = 'CONVERTIDO'
         
         db.session.commit()
         return jsonify({"status": "ok", "venta_id": nueva_v.id})
 
-        
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
-
-        
        
     
     
@@ -1004,3 +1131,653 @@ def obtener_datos_presupuesto(id):
         "items": detalles,
         "total": p.total
     })
+    
+    
+    
+    
+# ---------------------------------------------
+# 1. RUTA PARA IMPRIMIR REMITO (VENTA)
+# ---------------------------------------------
+@inventory_bp.route('/ventas/<int:id>/imprimir')
+@login_required
+def imprimir_remito(id):
+    venta = Venta.query.get_or_404(id)
+    # Le pasamos "venta" a la plantilla (se detectará automáticamente como Remito con la 'R')
+    return render_template('remito.html', venta=venta)
+
+
+# ---------------------------------------------
+# 2. RUTA PARA IMPRIMIR PRESUPUESTO
+# ---------------------------------------------
+@inventory_bp.route('/presupuestos/<int:id>/imprimir')
+@login_required
+def imprimir_presupuesto(id):
+    presupuesto = Presupuesto.query.get_or_404(id)
+    # Le pasamos "presupuesto" a la plantilla (se detectará automáticamente como Presupuesto con la 'X')
+    return render_template('comprobante_impresion.html', presupuesto=presupuesto)
+
+
+from datetime import datetime, date, timedelta
+import json
+import io
+import csv
+from flask import render_template, request, flash, redirect, url_for, Response, make_response
+from flask_login import login_required, current_user
+from sqlalchemy import func, or_
+# Importa tus modelos de base de datos
+from app.models import db, Repuesto, DetalleVenta, Venta, Proveedor, Sucursal
+
+@inventory_bp.route('/reportes/pedidos-proveedores', methods=['GET'])
+@login_required
+def reporte_pedidos_proveedores():
+    hoy = date.today()
+    hace_30_dias = hoy - timedelta(days=30)
+
+    # 1. Capturar parámetros de filtros enviados por la URL / Formulario
+    fecha_desde_str = request.args.get('fecha_desde', '')
+    fecha_hasta_str = request.args.get('fecha_hasta', '')
+    proveedor_id = request.args.get('proveedor_id', type=int)
+    sucursal_id = request.args.get('sucursal_id', type=int)
+    buscar_repuesto = request.args.get('buscar', '').strip()
+    solo_comprar = request.args.get('solo_comprar', '0') == '1'
+    
+    # Filtros adicionales
+    estado_stock = request.args.get('estado_stock', 'todos') # todos, sin_stock, bajo_minimo, con_stock
+    stock_minimo_filtro = request.args.get('stock_minimo_filtro', type=int) # Umbral manual opcional
+    ordenar_por = request.args.get('ordenar_por', 'sugerencia_desc') # sugerencia_desc, stock_asc, ventas_desc, costo_desc, nombre_asc
+
+    # Conversión de fechas elegidas con fallback seguro a los últimos 30 días
+    try:
+        fecha_desde = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date() if fecha_desde_str else hace_30_dias
+    except ValueError:
+        fecha_desde = hace_30_dias
+
+    try:
+        fecha_hasta = datetime.strptime(fecha_hasta_str, '%Y-%m-%d').date() if fecha_hasta_str else hoy
+    except ValueError:
+        fecha_hasta = hoy
+
+    # Corrección de orden si la fecha de inicio es mayor que la de fin
+    if fecha_desde > fecha_hasta:
+        fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
+
+    # 2. Fechas del año anterior (Estacionalidad)
+    try:
+        fecha_desde_ant = fecha_desde.replace(year=fecha_desde.year - 1)
+        fecha_hasta_ant = fecha_hasta.replace(year=fecha_hasta.year - 1)
+    except ValueError:
+        fecha_desde_ant = fecha_desde - timedelta(days=365)
+        fecha_hasta_ant = fecha_hasta - timedelta(days=365)
+
+    dias_periodo = max((fecha_hasta - fecha_desde).days, 1)
+
+    # 3. Consultar Ventas del período actual por Repuesto
+    query_ventas_actual = db.session.query(
+        DetalleVenta.repuesto_id,
+        func.sum(DetalleVenta.cantidad).label('total_vendido')
+    ).join(Venta, DetalleVenta.venta_id == Venta.id)\
+     .filter(func.date(Venta.fecha) >= fecha_desde)\
+     .filter(func.date(Venta.fecha) <= fecha_hasta)
+
+    if sucursal_id:
+        query_ventas_actual = query_ventas_actual.filter(Venta.sucursal_id == sucursal_id)
+
+    ventas_actual_dict = {
+        row.repuesto_id: int(row.total_vendido or 0)
+        for row in query_ventas_actual.group_by(DetalleVenta.repuesto_id).all()
+    }
+
+    # 4. Consultar Ventas del mismo período del año anterior (Estacionalidad)
+    query_ventas_anterior = db.session.query(
+        DetalleVenta.repuesto_id,
+        func.sum(DetalleVenta.cantidad).label('total_vendido_ant')
+    ).join(Venta, DetalleVenta.venta_id == Venta.id)\
+     .filter(func.date(Venta.fecha) >= fecha_desde_ant)\
+     .filter(func.date(Venta.fecha) <= fecha_hasta_ant)
+
+    if sucursal_id:
+        query_ventas_anterior = query_ventas_anterior.filter(Venta.sucursal_id == sucursal_id)
+
+    ventas_anterior_dict = {
+        row.repuesto_id: int(row.total_vendido_ant or 0)
+        for row in query_ventas_anterior.group_by(DetalleVenta.repuesto_id).all()
+    }
+
+    # 5. Consulta de Repuestos con los filtros aplicados
+    query_repuestos = Repuesto.query
+
+    if proveedor_id and hasattr(Repuesto, 'proveedor_id'):
+        query_repuestos = query_repuestos.filter(Repuesto.proveedor_id == proveedor_id)
+
+    if sucursal_id and hasattr(Repuesto, 'sucursal_id'):
+        query_repuestos = query_repuestos.filter(Repuesto.sucursal_id == sucursal_id)
+
+    if buscar_repuesto:
+        filtros_texto = []
+        if hasattr(Repuesto, 'codigo'):
+            filtros_texto.append(Repuesto.codigo.ilike(f'%{buscar_repuesto}%'))
+        if hasattr(Repuesto, 'sku'):
+            filtros_texto.append(Repuesto.sku.ilike(f'%{buscar_repuesto}%'))
+        if hasattr(Repuesto, 'nombre'):
+            filtros_texto.append(Repuesto.nombre.ilike(f'%{buscar_repuesto}%'))
+        if hasattr(Repuesto, 'descripcion'):
+            filtros_texto.append(Repuesto.descripcion.ilike(f'%{buscar_repuesto}%'))
+        
+        if filtros_texto:
+            query_repuestos = query_repuestos.filter(or_(*filtros_texto))
+
+    repuestos_db = query_repuestos.all()
+
+    # 6. Procesamiento inteligente de stock y sugerencias
+    reporte_items = []
+    conteo_sin_stock = 0
+    conteo_bajo_minimo = 0
+    conteo_stock_optimo = 0
+    total_unidades_comprar = 0
+    total_inversion_estimada = 0.0
+
+    for rep in repuestos_db:
+        stock_actual = int(getattr(rep, 'stock', 0) or 0)
+        
+        if stock_minimo_filtro is not None and stock_minimo_filtro >= 0:
+            stock_minimo = stock_minimo_filtro
+        else:
+            stock_minimo = int(getattr(rep, 'stock_minimo', 0) or 0)
+
+        # Clasificación
+        if stock_actual <= 0:
+            conteo_sin_stock += 1
+            estado_item = 'sin_stock'
+        elif stock_actual <= stock_minimo:
+            conteo_bajo_minimo += 1
+            estado_item = 'bajo_minimo'
+        else:
+            conteo_stock_optimo += 1
+            estado_item = 'con_stock'
+
+        # Filtro de estado
+        if estado_stock == 'sin_stock' and stock_actual > 0:
+            continue
+        elif estado_stock == 'bajo_minimo' and stock_actual > stock_minimo:
+            continue
+        elif estado_stock == 'con_stock' and stock_actual <= 0:
+            continue
+
+        v_actual = ventas_actual_dict.get(rep.id, 0)
+        v_anterior = ventas_anterior_dict.get(rep.id, 0)
+
+        # Estacionalidad
+        if v_anterior > 0:
+            var_pct = round(((v_actual - v_anterior) / v_anterior) * 100, 1)
+            if var_pct >= 25:
+                estacionalidad_badge = 'ALTA DEMANDA'
+                estacionalidad_color = 'success'
+            elif var_pct <= -25:
+                estacionalidad_badge = 'BAJA TEMPORADA'
+                estacionalidad_color = 'secondary'
+            else:
+                estacionalidad_badge = 'ESTABLE'
+                estacionalidad_color = 'info'
+        else:
+            if v_actual > 0:
+                estacionalidad_badge = 'EN ALZA'
+                estacionalidad_color = 'primary'
+                var_pct = 100.0
+            else:
+                estacionalidad_badge = 'SIN MOVIMIENTO'
+                estacionalidad_color = 'light text-dark'
+                var_pct = 0.0
+
+        # Sugerencia inicial calculada
+        demanda_esperada = max(v_actual, v_anterior)
+        necesidad_total = demanda_esperada + stock_minimo
+        sugerencia_pedido = max(0, necesidad_total - stock_actual)
+
+        if stock_actual <= stock_minimo and sugerencia_pedido == 0:
+            sugerencia_pedido = max(1, stock_minimo - stock_actual)
+
+        if solo_comprar and sugerencia_pedido == 0:
+            continue
+
+        costo_unitario = float(getattr(rep, 'precio_costo', 0) or getattr(rep, 'costo', 0) or 0.0)
+        subtotal_inversion = round(sugerencia_pedido * costo_unitario, 2)
+
+        total_unidades_comprar += sugerencia_pedido
+        total_inversion_estimada += subtotal_inversion
+
+        nombre_display = getattr(rep, 'nombre', '') or getattr(rep, 'descripcion', '') or f"Repuesto #{rep.id}"
+        codigo_display = getattr(rep, 'codigo', '') or getattr(rep, 'sku', '') or f"ID-{rep.id}"
+
+        reporte_items.append({
+            'repuesto_id': rep.id,
+            'repuesto': rep,
+            'nombre_display': nombre_display,
+            'codigo_display': codigo_display,
+            'stock_actual': stock_actual,
+            'stock_minimo': stock_minimo,
+            'estado_item': estado_item,
+            'ventas_periodo': v_actual,
+            'ventas_año_ant': v_anterior,
+            'variacion_pct': var_pct,
+            'estacionalidad_badge': estacionalidad_badge,
+            'estacionalidad_color': estacionalidad_color,
+            'sugerencia_compra': sugerencia_pedido,
+            'costo_unitario': costo_unitario,
+            'subtotal_inversion': subtotal_inversion
+        })
+
+    # 7. Ordenamiento dinámico
+    if ordenar_por == 'sugerencia_desc':
+        reporte_items.sort(key=lambda x: x['sugerencia_compra'], reverse=True)
+    elif ordenar_por == 'stock_asc':
+        reporte_items.sort(key=lambda x: x['stock_actual'])
+    elif ordenar_por == 'ventas_desc':
+        reporte_items.sort(key=lambda x: x['ventas_periodo'], reverse=True)
+    elif ordenar_por == 'costo_desc':
+        reporte_items.sort(key=lambda x: x['subtotal_inversion'], reverse=True)
+    elif ordenar_por == 'nombre_asc':
+        reporte_items.sort(key=lambda x: x['nombre_display'].lower())
+
+    # 8. Gráficos (Chart.js)
+    datos_grafico_estados = {
+        'labels': ['Sin Stock (0 o Negativo)', 'Stock Crítico (Bajo Mínimo)', 'Stock Óptimo'],
+        'data': [conteo_sin_stock, conteo_bajo_minimo, conteo_stock_optimo],
+        'colors': ['#dc3545', '#ffc107', '#198754']
+    }
+
+    items_con_sugerencia = [i for i in reporte_items if i['sugerencia_compra'] > 0]
+    items_urgentes = sorted(items_con_sugerencia, key=lambda x: x['sugerencia_compra'], reverse=True)[:8]
+
+    datos_grafico_top = {
+        'labels': [f"{i['codigo_display']} - {i['nombre_display'][:15]}..." if len(i['nombre_display']) > 15 else f"{i['codigo_display']} - {i['nombre_display']}" for i in items_urgentes],
+        'stock': [i['stock_actual'] for i in items_urgentes],
+        'pedir': [i['sugerencia_compra'] for i in items_urgentes]
+    }
+
+    # 9. Carga de Proveedores y Sucursales
+    proveedores = []
+    try:
+        if hasattr(Proveedor, 'razon_social'):
+            proveedores = Proveedor.query.order_by(Proveedor.razon_social.asc()).all()
+        elif hasattr(Proveedor, 'nombre_fantasia'):
+            proveedores = Proveedor.query.order_by(Proveedor.nombre_fantasia.asc()).all()
+        elif hasattr(Proveedor, 'empresa'):
+            proveedores = Proveedor.query.order_by(Proveedor.empresa.asc()).all()
+        elif hasattr(Proveedor, 'nombre'):
+            proveedores = Proveedor.query.order_by(Proveedor.nombre.asc()).all()
+        else:
+            proveedores = Proveedor.query.all()
+    except Exception:
+        proveedores = []
+
+    sucursales = []
+    try:
+        if hasattr(Sucursal, 'nombre'):
+            sucursales = Sucursal.query.order_by(Sucursal.nombre.asc()).all()
+        elif hasattr(Sucursal, 'descripcion'):
+            sucursales = Sucursal.query.order_by(Sucursal.descripcion.asc()).all()
+        else:
+            sucursales = Sucursal.query.all()
+    except Exception:
+        sucursales = []
+
+    # Proveedor seleccionado para encabezado
+    proveedor_actual = None
+    if proveedor_id:
+        try:
+            proveedor_actual = Proveedor.query.get(proveedor_id)
+        except Exception:
+            proveedor_actual = None
+
+    return render_template(
+        'reportes/sugerencia_pedidos.html',
+        items=reporte_items,
+        proveedores=proveedores,
+        sucursales=sucursales,
+        proveedor_actual=proveedor_actual,
+        fecha_desde=fecha_desde.strftime('%Y-%m-%d'),
+        fecha_hasta=fecha_hasta.strftime('%Y-%m-%d'),
+        fecha_desde_ant=fecha_desde_ant.strftime('%d/%m/%Y'),
+        fecha_hasta_ant=fecha_hasta_ant.strftime('%d/%m/%Y'),
+        dias_periodo=dias_periodo,
+        proveedor_id_sel=proveedor_id,
+        sucursal_id_sel=sucursal_id,
+        buscar_sel=buscar_repuesto,
+        solo_comprar_sel=solo_comprar,
+        estado_stock_sel=estado_stock,
+        stock_minimo_filtro_sel=stock_minimo_filtro if stock_minimo_filtro is not None else '',
+        ordenar_por_sel=ordenar_por,
+        conteo_sin_stock=conteo_sin_stock,
+        conteo_bajo_minimo=conteo_bajo_minimo,
+        conteo_stock_optimo=conteo_stock_optimo,
+        total_unidades_comprar=total_unidades_comprar,
+        total_inversion_estimada=total_inversion_estimada,
+        grafico_estados_json=json.dumps(datos_grafico_estados),
+        grafico_top_json=json.dumps(datos_grafico_top)
+    )
+
+
+# --------------------------------------------------------------------------
+# RUTA 1: Imprimir Comprobante Exclusivo del Pedido Seleccionado
+# --------------------------------------------------------------------------
+@inventory_bp.route('/reportes/pedidos-proveedores/imprimir-orden', methods=['POST'])
+@login_required
+def imprimir_orden_pedido():
+    """
+    Recibe por POST únicamente los ítems seleccionados y sus cantidades editadas
+    para generar el comprobante formal de compra listo para imprimir.
+    """
+    items_raw = request.form.get('items_seleccionados_json', '[]')
+    proveedor_nombre = request.form.get('proveedor_nombre', 'Proveedor General')
+    fecha_pedido = request.form.get('fecha_pedido', date.today().strftime('%d/%m/%Y'))
+    
+    try:
+        items_pedido = json.loads(items_raw)
+    except Exception:
+        items_pedido = []
+
+    total_unidades = sum(int(i.get('cantidad', 0)) for i in items_pedido)
+    total_monto = sum(float(i.get('subtotal', 0.0)) for i in items_pedido)
+
+    return render_template(
+        'reportes/imprimir_pedido_proveedor.html',
+        items=items_pedido,
+        proveedor_nombre=proveedor_nombre,
+        fecha_pedido=fecha_pedido,
+        total_unidades=total_unidades,
+        total_monto=total_monto
+    )
+
+
+# --------------------------------------------------------------------------
+# RUTA 2: Exportar a Excel (CSV con formato UTF-8 compatible con Microsoft Excel)
+# --------------------------------------------------------------------------
+@inventory_bp.route('/reportes/pedidos-proveedores/exportar-excel', methods=['POST'])
+@login_required
+def exportar_pedido_excel():
+    """
+    Genera un archivo descargable para Excel (.csv con delimitador ';' y codificación UTF-8 BOM)
+    con únicamente los repuestos seleccionados y las cantidades editadas.
+    """
+    items_raw = request.form.get('items_seleccionados_json', '[]')
+    proveedor_nombre = request.form.get('proveedor_nombre', 'Proveedor').strip() or 'Proveedor'
+    
+    try:
+        items_pedido = json.loads(items_raw)
+    except Exception:
+        items_pedido = []
+
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';')
+
+    # Encabezado del archivo
+    writer.writerow(['PEDIDO DE COMPRA - VACAN RADIADORES'])
+    writer.writerow(['Proveedor:', proveedor_nombre])
+    writer.writerow(['Fecha:', datetime.now().strftime('%d/%m/%Y %H:%M')])
+    writer.writerow([])
+    writer.writerow(['Codigo', 'Descripcion / Repuesto', 'Cantidad a Pedir', 'Costo Unitario ($)', 'Subtotal ($)'])
+
+    total_unidades = 0
+    total_dinero = 0.0
+
+    for item in items_pedido:
+        cant = int(item.get('cantidad', 0))
+        costo = float(item.get('costo', 0.0))
+        subtotal = float(item.get('subtotal', 0.0))
+        
+        total_unidades += cant
+        total_dinero += subtotal
+
+        writer.writerow([
+            item.get('codigo', ''),
+            item.get('nombre', ''),
+            cant,
+            f"{costo:.2f}".replace('.', ','),
+            f"{subtotal:.2f}".replace('.', ',')
+        ])
+
+    writer.writerow([])
+    writer.writerow(['TOTALES', '', total_unidades, '', f"{total_dinero:.2f}".replace('.', ',')])
+
+    # Codificación con BOM (\ufeff) para que Excel lo abra perfecto en Windows con tildes y caracteres especiales
+    csv_bytes = ('\ufeff' + output.getvalue()).encode('utf-8-sig')
+    
+    filename = f"Pedido_{proveedor_nombre.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
+    
+    response = make_response(csv_bytes)
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    return response
+
+
+
+
+@inventory_bp.route('/reportes/predictivo-inteligencia', methods=['GET'])
+@login_required
+def reporte_predictivo_inteligencia():
+    hoy = date.today()
+    
+    # 1. Parámetros de filtros capturados
+    escenario = request.args.get('escenario', 'moderado') # 'moderado', 'temporada_alta', 'conservador'
+    factor_inflacion = float(request.args.get('factor_inflacion', 0.0) or 0.0)
+    sucursal_id = request.args.get('sucursal_id', type=int)
+
+    # Multiplicador de demanda según escenario
+    if escenario == 'temporada_alta':
+        multiplicador_escenario = 1.25  # +25% demanda proyectada
+    elif escenario == 'conservador':
+        multiplicador_escenario = 0.85  # -15% demanda
+    else:
+        multiplicador_escenario = 1.0   # 100% tendencia natural
+
+    # 2. Extracción de Ventas Históricas de los últimos 6 meses (filtradas por sucursal si se seleccionó)
+    hace_6_meses = hoy - timedelta(days=180)
+    
+    query_historico = db.session.query(
+        func.strftime('%Y-%m', Venta.fecha).label('mes'),
+        func.count(Venta.id).label('cantidad_ventas'),
+        func.sum(Venta.total).label('total_facturado')
+    ).filter(Venta.fecha >= hace_6_meses)
+
+    if sucursal_id:
+        query_historico = query_historico.filter(Venta.sucursal_id == sucursal_id)
+
+    ventas_historicas = query_historico.group_by('mes').order_by('mes').all()
+
+    meses_etiquetas = []
+    totales_reales = []
+    
+    for row in ventas_historicas:
+        meses_etiquetas.append(row.mes)
+        totales_reales.append(float(row.total_facturado or 0.0))
+
+    if not totales_reales:
+        meses_etiquetas = [(hoy - timedelta(days=30*i)).strftime('%Y-%m') for i in reversed(range(1, 4))]
+        totales_reales = [0.0, 0.0, 0.0]
+
+    # 3. Algoritmo Predictivo: Regresión Lineal con proyección a 3 meses
+    n = len(totales_reales)
+    x_vals = list(range(n))
+    y_vals = totales_reales
+    
+    sum_x = sum(x_vals)
+    sum_y = sum(y_vals)
+    sum_xx = sum(x * x for x in x_vals)
+    sum_xy = sum(x * y for x, y in zip(x_vals, y_vals))
+    
+    denominador = (n * sum_xx - sum_x * sum_x)
+    if denominador != 0:
+        pendiente = (n * sum_xy - sum_x * sum_y) / denominador
+        interseccion = (sum_y - pendiente * sum_x) / n
+    else:
+        pendiente = 0.0
+        interseccion = sum_y / max(n, 1)
+
+    etiquetas_proyeccion = list(meses_etiquetas)
+    valores_proyectados = list(totales_reales)
+    solo_predicciones = [None] * (n - 1) + [totales_reales[-1]]
+    
+    total_proyectado_30d = 0.0
+    total_proyectado_60d = 0.0
+    total_proyectado_90d = 0.0
+
+    for i in range(1, 4):
+        proximo_x = (n - 1) + i
+        estimado = max(0.0, (interseccion + pendiente * proximo_x) * multiplicador_escenario)
+        fecha_futura = hoy + timedelta(days=30 * i)
+        etiquetas_proyeccion.append(fecha_futura.strftime('%Y-%m'))
+        valores_proyectados.append(None)
+        solo_predicciones.append(round(estimado, 2))
+
+        if i == 1: total_proyectado_30d = estimado
+        if i == 2: total_proyectado_60d = estimado
+        if i == 3: total_proyectado_90d = estimado
+
+    # 4. Velocidad de Ventas por Repuesto (Últimos 45 días) filtrada por sucursal
+    hace_45_dias = hoy - timedelta(days=45)
+    
+    query_recientes = db.session.query(
+        DetalleVenta.repuesto_id,
+        func.sum(DetalleVenta.cantidad).label('cant_vendida')
+    ).join(Venta, DetalleVenta.venta_id == Venta.id)\
+     .filter(Venta.fecha >= hace_45_dias)
+
+    if sucursal_id:
+        query_recientes = query_recientes.filter(Venta.sucursal_id == sucursal_id)
+
+    ventas_ritmo = {row.repuesto_id: float(row.cant_vendida or 0) for row in query_recientes.group_by(DetalleVenta.repuesto_id).all()}
+
+    # Consulta de Repuestos
+    query_repuestos = Repuesto.query
+    if sucursal_id and hasattr(Repuesto, 'sucursal_id'):
+        query_repuestos = query_repuestos.filter(Repuesto.sucursal_id == sucursal_id)
+
+    repuestos_db = query_repuestos.all()
+    
+    analisis_repuestos = []
+    capital_inmovilizado_total = 0.0
+    capital_en_riesgo_quiebre = 0.0
+    repuestos_criticos_quiebre = 0
+    repuestos_inmovilizados = 0
+
+    for r in repuestos_db:
+        stock = int(getattr(r, 'stock', 0) or 0)
+        costo = float(getattr(r, 'precio_costo', 0) or getattr(r, 'costo', 0) or 0.0)
+        stock_min = int(getattr(r, 'stock_minimo', 0) or 0)
+        costo_proyectado = costo * (1.0 + (factor_inflacion / 100.0))
+
+        cant_vendida_45d = ventas_ritmo.get(r.id, 0.0)
+        ritmo_diario = (cant_vendida_45d / 45.0) * multiplicador_escenario
+
+        if stock <= 0:
+            dias_autonomia = 0
+            riesgo = 'CRITICO'
+            repuestos_criticos_quiebre += 1
+            capital_en_riesgo_quiebre += costo_proyectado * stock_min
+        elif ritmo_diario > 0:
+            dias_autonomia = int(stock // ritmo_diario)
+            if dias_autonomia <= 15:
+                riesgo = 'ALTO'
+                repuestos_criticos_quiebre += 1
+            elif dias_autonomia <= 30:
+                riesgo = 'MEDIO'
+            else:
+                riesgo = 'BAJO'
+        else:
+            dias_autonomia = 999
+            if stock > 0:
+                riesgo = 'INMOVILIZADO'
+                repuestos_inmovilizados += 1
+            else:
+                riesgo = 'SIN_MOVIMIENTO'
+
+        if stock > 0:
+            capital_inmovilizado_total += (stock * costo)
+
+        demanda_proyectada_45d = int(ritmo_diario * 45) + (1 if (ritmo_diario * 45) % 1 > 0 else 0)
+        necesidad_compra = max(0, (demanda_proyectada_45d + stock_min) - stock)
+
+        nombre_desc = getattr(r, 'nombre', '') or getattr(r, 'descripcion', '') or f"Repuesto #{r.id}"
+        codigo_rep = getattr(r, 'codigo', '') or getattr(r, 'sku', '') or f"ID-{r.id}"
+
+        analisis_repuestos.append({
+            'id': r.id,
+            'codigo': codigo_rep,
+            'nombre': nombre_desc,
+            'stock': stock,
+            'stock_minimo': stock_min,
+            'ritmo_diario': round(ritmo_diario, 2),
+            'dias_autonomia': dias_autonomia,
+            'riesgo': riesgo,
+            'costo_actual': costo,
+            'costo_proyectado': costo_proyectado,
+            'sugerencia_45d': necesidad_compra,
+            'inversion_necesaria': round(necesidad_compra * costo_proyectado, 2)
+        })
+
+    analisis_repuestos.sort(key=lambda x: x['dias_autonomia'])
+
+    # 5. Cobranzas y Cuentas Corrientes (filtradas por sucursal)
+    deuda_total_clientes = 0.0
+    try:
+        query_cta = MovimientoCtaCte.query
+        if sucursal_id and hasattr(MovimientoCtaCte, 'sucursal_id'):
+            query_cta = query_cta.filter(MovimientoCtaCte.sucursal_id == sucursal_id)
+        
+        movs = query_cta.all()
+        deuda_total_clientes = sum(float(m.monto or 0.0) for m in movs if getattr(m, 'tipo', '') == 'DEUDA')
+    except Exception:
+        deuda_total_clientes = 0.0
+
+    cobranza_estimada_30d = deuda_total_clientes * 0.70
+
+    # 6. Gráficos
+    grafico_forecast_json = json.dumps({
+        'labels': etiquetas_proyeccion,
+        'historico': valores_proyectados,
+        'prediccion': solo_predicciones
+    })
+
+    conteo_riesgos = {
+        'Crítico (Quiebre / <15d)': sum(1 for x in analisis_repuestos if x['riesgo'] in ['CRITICO', 'ALTO']),
+        'Alerta Media (15-30d)': sum(1 for x in analisis_repuestos if x['riesgo'] == 'MEDIO'),
+        'Stock Saludable (>30d)': sum(1 for x in analisis_repuestos if x['riesgo'] == 'BAJO'),
+        'Capital Inmovilizado': repuestos_inmovilizados
+    }
+
+    grafico_riesgos_json = json.dumps({
+        'labels': list(conteo_riesgos.keys()),
+        'data': list(conteo_riesgos.values()),
+        'colors': ['#dc3545', '#ffc107', '#198754', '#6c757d']
+    })
+
+    # Carga de Sucursales para el desplegable
+    sucursales = []
+    try:
+        if hasattr(Sucursal, 'nombre'):
+            sucursales = Sucursal.query.order_by(Sucursal.nombre.asc()).all()
+        elif hasattr(Sucursal, 'descripcion'):
+            sucursales = Sucursal.query.order_by(Sucursal.descripcion.asc()).all()
+        else:
+            sucursales = Sucursal.query.all()
+    except Exception:
+        sucursales = []
+
+    return render_template(
+        'reportes/predictivo_ml.html',
+        escenario=escenario,
+        factor_inflacion=factor_inflacion,
+        sucursales=sucursales,
+        sucursal_id_sel=sucursal_id,
+        total_proyectado_30d=total_proyectado_30d,
+        total_proyectado_60d=total_proyectado_60d,
+        total_proyectado_90d=total_proyectado_90d,
+        capital_inmovilizado_total=capital_inmovilizado_total,
+        repuestos_criticos_quiebre=repuestos_criticos_quiebre,
+        repuestos_inmovilizados=repuestos_inmovilizados,
+        deuda_total_clientes=deuda_total_clientes,
+        cobranza_estimada_30d=cobranza_estimada_30d,
+        repuestos_alerta=analisis_repuestos[:15],
+        grafico_forecast_json=grafico_forecast_json,
+        grafico_riesgos_json=grafico_riesgos_json
+    )
