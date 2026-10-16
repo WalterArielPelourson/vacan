@@ -237,7 +237,9 @@
                     <i class="bi bi-calendar-check"></i> Pagar a Proveedores
                 </a>
 
-                <a href="{{ url_for('inventory.reporte_pedidos_proveedores') }}" class="sidebar-link">
+                <!-- AQUÍ COLOCAS AMBOS REPORTES: -->
+                <a href="{{ url_for('inventory.reporte_pedidos_proveedores') }}" 
+                class="sidebar-link {% if request.endpoint == 'inventory.reporte_pedidos_proveedores' %}active{% endif %}">
                     <i class="bi bi-cart-plus"></i> Pedidos a Proveedores
                 </a>
 

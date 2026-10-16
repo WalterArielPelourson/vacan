@@ -12,7 +12,7 @@
                 <i class="bi bi-box-seam me-2 text-primary"></i>Reposición y Pedidos a Proveedores
             </h3>
             <small class="text-muted">
-                Período: {{ fecha_desde }} al {{ fecha_hasta }} | Comparativa: {{ fecha_desde_ant }} al {{ fecha_hasta_ant }}
+                Período: {{ fecha_desde }} al {{ fecha_hasta }} | Comparativa Anterior: {{ fecha_desde_ant }} al {{ fecha_hasta_ant }}
             </small>
         </div>
         <div class="d-flex flex-wrap gap-2">
@@ -31,7 +31,7 @@
         </div>
     </div>
 
-    <!-- TARJETAS DE KPIS EN VIVO (Se recalculan solas si editas cantidades o desmarcas) -->
+    <!-- TARJETAS DE KPIS EN VIVO -->
     <div class="row g-2 mb-3">
         <div class="col-6 col-md-3">
             <div class="card border-0 shadow-sm bg-danger text-white p-3">
@@ -79,17 +79,19 @@
         </div>
     </div>
 
-    <!-- PANEL DE FILTROS -->
+    <!-- PANEL DE FILTROS AVANZADOS -->
     <div class="card border-0 shadow-sm mb-3">
         <div class="card-body">
             <form method="GET" action="{{ url_for('inventory.reporte_pedidos_proveedores') }}" class="row g-2 align-items-end">
                 
+                <!-- Buscar Repuesto -->
                 <div class="col-12 col-md-3">
                     <label class="form-label small fw-bold mb-1">Buscar Repuesto</label>
                     <input type="text" name="buscar" class="form-control form-control-sm" 
-                           placeholder="Código, SKU o descripción..." value="{{ buscar_sel }}">
+                           placeholder="Código o descripción..." value="{{ buscar_sel }}">
                 </div>
 
+                <!-- Estado de Stock -->
                 <div class="col-6 col-md-2">
                     <label class="form-label small fw-bold mb-1">Estado de Stock</label>
                     <select name="estado_stock" class="form-select form-select-sm">
@@ -100,14 +102,42 @@
                     </select>
                 </div>
 
+                <!-- NUEVO FILTRO: CANTIDAD VENDIDA EN EL PERÍODO -->
                 <div class="col-6 col-md-2">
-                    <label class="form-label small fw-bold mb-1" title="Si se define, sobreescribe el cálculo de reposición">
-                        Stock Mínimo Deseado
+                    <label class="form-label small fw-bold text-primary mb-1">
+                        <i class="bi bi-graph-up-arrow me-1"></i>Ventas Período
                     </label>
-                    <input type="number" min="0" name="stock_minimo_filtro" class="form-control form-control-sm" 
-                           placeholder="Ej: 5 (Opcional)" value="{{ stock_minimo_filtro_sel }}">
+                    <select name="filtro_ventas_periodo" class="form-select form-select-sm border-primary">
+                        <option value="todos" {% if filtro_ventas_periodo_sel == 'todos' %}selected{% endif %}>Todas las cantidades</option>
+                        <option value="mayor_cero" {% if filtro_ventas_periodo_sel == 'mayor_cero' %}selected{% endif %}>⚡ Con Ventas (> 0)</option>
+                        <option value="igual_cero" {% if filtro_ventas_periodo_sel == 'igual_cero' %}selected{% endif %}>💤 Sin Ventas (= 0)</option>
+                    </select>
                 </div>
 
+                <!-- NUEVO FILTRO: ESTACIONALIDAD -->
+                <div class="col-6 col-md-2">
+                    <label class="form-label small fw-bold text-primary mb-1">
+                        <i class="bi bi-calendar3 me-1"></i>Estacionalidad
+                    </label>
+                    <select name="filtro_estacionalidad" class="form-select form-select-sm border-primary">
+                        <option value="todos" {% if filtro_estacionalidad_sel == 'todos' %}selected{% endif %}>Todas las tendencias</option>
+                        <option value="alta" {% if filtro_estacionalidad_sel == 'alta' %}selected{% endif %}>🔥 Alta Demanda (En Alza)</option>
+                        <option value="baja" {% if filtro_estacionalidad_sel == 'baja' %}selected{% endif %}>📉 Baja Demanda (En Baja)</option>
+                        <option value="estable" {% if filtro_estacionalidad_sel == 'estable' %}selected{% endif %}>⚖️ Estable / Regular</option>
+                        <option value="sin_movimiento" {% if filtro_estacionalidad_sel == 'sin_movimiento' %}selected{% endif %}>⏸️ Sin Historial / Inactivo</option>
+                    </select>
+                </div>
+
+                <!-- Stock Mínimo Deseado -->
+                <div class="col-6 col-md-1">
+                    <label class="form-label small fw-bold mb-1" title="Si se define, sobreescribe el cálculo de reposición">
+                        Stock Mín.
+                    </label>
+                    <input type="number" min="0" name="stock_minimo_filtro" class="form-control form-control-sm text-center" 
+                           placeholder="Auto" value="{{ stock_minimo_filtro_sel }}">
+                </div>
+
+                <!-- Proveedor -->
                 <div class="col-6 col-md-2">
                     <label class="form-label small fw-bold mb-1">Proveedor</label>
                     <select name="proveedor_id" id="filtroProveedor" class="form-select form-select-sm">
@@ -121,6 +151,7 @@
                     </select>
                 </div>
 
+                <!-- Sucursal -->
                 {% if sucursales %}
                 <div class="col-6 col-md-2">
                     <label class="form-label small fw-bold mb-1">Sucursal</label>
@@ -135,6 +166,7 @@
                 </div>
                 {% endif %}
 
+                <!-- Fechas Desde / Hasta -->
                 <div class="col-6 col-md-2">
                     <label class="form-label small fw-bold mb-1">Fecha Desde</label>
                     <input type="date" name="fecha_desde" class="form-control form-control-sm" value="{{ fecha_desde }}">
@@ -145,6 +177,7 @@
                     <input type="date" name="fecha_hasta" class="form-control form-control-sm" value="{{ fecha_hasta }}">
                 </div>
 
+                <!-- Ordenar Por -->
                 <div class="col-6 col-md-2">
                     <label class="form-label small fw-bold mb-1">Ordenar Por</label>
                     <select name="ordenar_por" class="form-select form-select-sm">
@@ -156,12 +189,13 @@
                     </select>
                 </div>
 
+                <!-- Solo Comprar Checkbox y Botones -->
                 <div class="col-12 col-md-3 d-flex align-items-center mb-1">
                     <div class="form-check mt-3">
                         <input class="form-check-input" type="checkbox" name="solo_comprar" value="1" id="chkSoloComprar"
                                {% if solo_comprar_sel %}checked{% endif %}>
                         <label class="form-check-label small fw-semibold" for="chkSoloComprar">
-                            Solo items con compra sugerida (> 0)
+                            Solo con compra sugerida (> 0)
                         </label>
                     </div>
                 </div>
@@ -233,7 +267,7 @@
                             <th>Repuesto / Descripción</th>
                             <th class="text-center">Stock Actual</th>
                             <th class="text-center">Stock Mínimo</th>
-                            <th class="text-center">Ventas 30d</th>
+                            <th class="text-center">Ventas Período</th>
                             <th class="text-center">Temporada Ant.</th>
                             <th class="text-center">Estacionalidad</th>
                             <th class="text-center bg-primary-subtle text-primary fw-bold" style="width: 140px;">
@@ -284,11 +318,16 @@
                             <td class="text-center fw-bold">{{ item.ventas_periodo }}</td>
                             <td class="text-center text-muted">{{ item.ventas_año_ant }}</td>
 
-                            <!-- Estacionalidad -->
+                            <!-- Estacionalidad Badge -->
                             <td class="text-center">
                                 <span class="badge bg-{{ item.estacionalidad_color }}">
                                     {{ item.estacionalidad_badge }}
                                 </span>
+                                {% if item.variacion_pct != 0.0 %}
+                                    <div class="text-muted" style="font-size: 0.72rem;">
+                                        {{ "+ " if item.variacion_pct > 0 else "" }}{{ item.variacion_pct }}%
+                                    </div>
+                                {% endif %}
                             </td>
 
                             <!-- Cantidad a Pedir EDITABLE -->
@@ -387,10 +426,9 @@
             }
         });
 
-        // Calcular KPIs iniciales de acuerdo a lo seleccionado
         recalcularTotalesEnVivo();
 
-        // Control del Checkbox Maestro
+        // Control Checkbox Maestro
         document.getElementById('checkMaster').addEventListener('change', function () {
             seleccionarTodos(this.checked);
         });
@@ -411,7 +449,7 @@
         let cant = parseInt(inputElem.value) || 0;
         if (cant < 0) { cant = 0; inputElem.value = 0; }
         
-        // Si el usuario coloca cantidad mayor a 0, tildar automáticamente el checkbox
+        // Si el usuario pone cantidad mayor a 0, marcar checkbox automáticamente
         if (cant > 0) {
             check.checked = true;
         }

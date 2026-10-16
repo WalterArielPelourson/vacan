@@ -1170,23 +1170,37 @@ from app.models import db, Repuesto, DetalleVenta, Venta, Proveedor, Sucursal
 @inventory_bp.route('/reportes/pedidos-proveedores', methods=['GET'])
 @login_required
 def reporte_pedidos_proveedores():
-    hoy = date.today()
+    # 0. Fecha de hoy segura en Argentina
+    try:
+        from zoneinfo import ZoneInfo
+        hoy = datetime.now(ZoneInfo('America/Argentina/Buenos_Aires')).date()
+    except Exception:
+        try:
+            import pytz
+            hoy = datetime.now(pytz.timezone('America/Argentina/Buenos_Aires')).date()
+        except Exception:
+            hoy = date.today()
+
     hace_30_dias = hoy - timedelta(days=30)
 
-    # 1. Capturar parámetros de filtros enviados por la URL / Formulario
+    # 1. Capturar todos los parámetros de filtros
     fecha_desde_str = request.args.get('fecha_desde', '')
     fecha_hasta_str = request.args.get('fecha_hasta', '')
     proveedor_id = request.args.get('proveedor_id', type=int)
     sucursal_id = request.args.get('sucursal_id', type=int)
     buscar_repuesto = request.args.get('buscar', '').strip()
     solo_comprar = request.args.get('solo_comprar', '0') == '1'
+    estado_stock = request.args.get('estado_stock', 'todos')
+    ordenar_por = request.args.get('ordenar_por', 'sugerencia_desc')
     
-    # Filtros adicionales
-    estado_stock = request.args.get('estado_stock', 'todos') # todos, sin_stock, bajo_minimo, con_stock
-    stock_minimo_filtro = request.args.get('stock_minimo_filtro', type=int) # Umbral manual opcional
-    ordenar_por = request.args.get('ordenar_por', 'sugerencia_desc') # sugerencia_desc, stock_asc, ventas_desc, costo_desc, nombre_asc
+    # NUEVOS FILTROS SOLICITADOS:
+    filtro_estacionalidad = request.args.get('filtro_estacionalidad', 'todos') # 'todos', 'alta', 'baja', 'estable', 'sin_movimiento'
+    filtro_ventas_periodo = request.args.get('filtro_ventas_periodo', 'todos') # 'todos', 'mayor_cero', 'igual_cero'
+    
+    # Stock mínimo definido por filtro
+    stock_minimo_filtro = request.args.get('stock_minimo_filtro', type=int)
 
-    # Conversión de fechas elegidas con fallback seguro a los últimos 30 días
+    # Conversión segura de fechas
     try:
         fecha_desde = datetime.strptime(fecha_desde_str, '%Y-%m-%d').date() if fecha_desde_str else hace_30_dias
     except ValueError:
@@ -1197,11 +1211,10 @@ def reporte_pedidos_proveedores():
     except ValueError:
         fecha_hasta = hoy
 
-    # Corrección de orden si la fecha de inicio es mayor que la de fin
     if fecha_desde > fecha_hasta:
         fecha_desde, fecha_hasta = fecha_hasta, fecha_desde
 
-    # 2. Fechas del año anterior (Estacionalidad)
+    # 2. Período anterior (Mismas fechas año pasado para comparar estacionalidad)
     try:
         fecha_desde_ant = fecha_desde.replace(year=fecha_desde.year - 1)
         fecha_hasta_ant = fecha_hasta.replace(year=fecha_hasta.year - 1)
@@ -1209,9 +1222,7 @@ def reporte_pedidos_proveedores():
         fecha_desde_ant = fecha_desde - timedelta(days=365)
         fecha_hasta_ant = fecha_hasta - timedelta(days=365)
 
-    dias_periodo = max((fecha_hasta - fecha_desde).days, 1)
-
-    # 3. Consultar Ventas del período actual por Repuesto
+    # 3. Ventas período actual por repuesto
     query_ventas_actual = db.session.query(
         DetalleVenta.repuesto_id,
         func.sum(DetalleVenta.cantidad).label('total_vendido')
@@ -1227,7 +1238,7 @@ def reporte_pedidos_proveedores():
         for row in query_ventas_actual.group_by(DetalleVenta.repuesto_id).all()
     }
 
-    # 4. Consultar Ventas del mismo período del año anterior (Estacionalidad)
+    # 4. Ventas período anterior (año pasado)
     query_ventas_anterior = db.session.query(
         DetalleVenta.repuesto_id,
         func.sum(DetalleVenta.cantidad).label('total_vendido_ant')
@@ -1243,59 +1254,78 @@ def reporte_pedidos_proveedores():
         for row in query_ventas_anterior.group_by(DetalleVenta.repuesto_id).all()
     }
 
-    # 5. Consulta de Repuestos con los filtros aplicados
-    query_repuestos = Repuesto.query
+    # 5. Consulta base de repuestos
+    query_rep = Repuesto.query
 
-    if proveedor_id and hasattr(Repuesto, 'proveedor_id'):
-        query_repuestos = query_repuestos.filter(Repuesto.proveedor_id == proveedor_id)
+    if proveedor_id:
+        query_rep = query_rep.filter(Repuesto.proveedor_id == proveedor_id)
 
     if sucursal_id and hasattr(Repuesto, 'sucursal_id'):
-        query_repuestos = query_repuestos.filter(Repuesto.sucursal_id == sucursal_id)
+        query_rep = query_rep.filter(Repuesto.sucursal_id == sucursal_id)
 
     if buscar_repuesto:
-        filtros_texto = []
-        if hasattr(Repuesto, 'codigo'):
-            filtros_texto.append(Repuesto.codigo.ilike(f'%{buscar_repuesto}%'))
-        if hasattr(Repuesto, 'sku'):
-            filtros_texto.append(Repuesto.sku.ilike(f'%{buscar_repuesto}%'))
-        if hasattr(Repuesto, 'nombre'):
-            filtros_texto.append(Repuesto.nombre.ilike(f'%{buscar_repuesto}%'))
-        if hasattr(Repuesto, 'descripcion'):
-            filtros_texto.append(Repuesto.descripcion.ilike(f'%{buscar_repuesto}%'))
-        
-        if filtros_texto:
-            query_repuestos = query_repuestos.filter(or_(*filtros_texto))
+        query_rep = query_rep.filter(Repuesto.descripcion.ilike(f"%{buscar_repuesto}%"))
 
-    repuestos_db = query_repuestos.all()
+    todos_repuestos = query_rep.all()
 
-    # 6. Procesamiento inteligente de stock y sugerencias
-    reporte_items = []
-    conteo_sin_stock = 0
-    conteo_bajo_minimo = 0
-    conteo_stock_optimo = 0
+    # 6. Procesamiento y filtros de cada repuesto
+    items_reporte = []
     total_unidades_comprar = 0
     total_inversion_estimada = 0.0
+    conteo_sin_stock = 0
+    conteo_bajo_minimo = 0
+    conteo_optimo = 0
+    conteo_sin_rotacion = 0
 
-    for rep in repuestos_db:
+    for rep in todos_repuestos:
         stock_actual = int(getattr(rep, 'stock', 0) or 0)
+        costo_unit = float(getattr(rep, 'costo', 0.0) or 0.0)
         
+        # Stock mínimo: usa el del filtro si se especificó, sino intenta leer del modelo o toma 0
         if stock_minimo_filtro is not None and stock_minimo_filtro >= 0:
             stock_minimo = stock_minimo_filtro
         else:
-            stock_minimo = int(getattr(rep, 'stock_minimo', 0) or 0)
+            stock_minimo = int(getattr(rep, 'stock_minimo', getattr(rep, 'stock_min', 0)) or 0)
 
-        # Clasificación
-        if stock_actual <= 0:
-            conteo_sin_stock += 1
-            estado_item = 'sin_stock'
-        elif stock_actual <= stock_minimo:
-            conteo_bajo_minimo += 1
-            estado_item = 'bajo_minimo'
+        vendidos_periodo = ventas_actual_dict.get(rep.id, 0)
+        vendidos_anterior = ventas_anterior_dict.get(rep.id, 0)
+
+        # NUEVO FILTRO: CANTIDAD VENDIDA EN EL PERÍODO (MAYOR A 0 O IGUAL A 0)
+        if filtro_ventas_periodo == 'mayor_cero' and vendidos_periodo <= 0:
+            continue
+        elif filtro_ventas_periodo == 'igual_cero' and vendidos_periodo > 0:
+            continue
+
+        # CÁLCULO DE ESTACIONALIDAD
+        if vendidos_anterior > 0:
+            variacion_pct = round(((vendidos_periodo - vendidos_anterior) / vendidos_anterior) * 100, 1)
+        elif vendidos_periodo > 0:
+            variacion_pct = 100.0
         else:
-            conteo_stock_optimo += 1
-            estado_item = 'con_stock'
+            variacion_pct = 0.0
 
-        # Filtro de estado
+        if vendidos_periodo == 0 and vendidos_anterior == 0:
+            tipo_estacionalidad = 'sin_movimiento'
+            estacionalidad_badge = 'Sin Movimiento'
+            estacionalidad_color = 'secondary'
+        elif variacion_pct >= 20.0:
+            tipo_estacionalidad = 'alta'
+            estacionalidad_badge = 'Alta Demanda'
+            estacionalidad_color = 'success'
+        elif variacion_pct <= -20.0:
+            tipo_estacionalidad = 'baja'
+            estacionalidad_badge = 'Baja Demanda'
+            estacionalidad_color = 'danger'
+        else:
+            tipo_estacionalidad = 'estable'
+            estacionalidad_badge = 'Estable'
+            estacionalidad_color = 'info'
+
+        # NUEVO FILTRO: ESTACIONALIDAD
+        if filtro_estacionalidad != 'todos' and tipo_estacionalidad != filtro_estacionalidad:
+            continue
+
+        # FILTRO DE ESTADO DE STOCK
         if estado_stock == 'sin_stock' and stock_actual > 0:
             continue
         elif estado_stock == 'bajo_minimo' and stock_actual > stock_minimo:
@@ -1303,250 +1333,250 @@ def reporte_pedidos_proveedores():
         elif estado_stock == 'con_stock' and stock_actual <= 0:
             continue
 
-        v_actual = ventas_actual_dict.get(rep.id, 0)
-        v_anterior = ventas_anterior_dict.get(rep.id, 0)
-
-        # Estacionalidad
-        if v_anterior > 0:
-            var_pct = round(((v_actual - v_anterior) / v_anterior) * 100, 1)
-            if var_pct >= 25:
-                estacionalidad_badge = 'ALTA DEMANDA'
-                estacionalidad_color = 'success'
-            elif var_pct <= -25:
-                estacionalidad_badge = 'BAJA TEMPORADA'
-                estacionalidad_color = 'secondary'
-            else:
-                estacionalidad_badge = 'ESTABLE'
-                estacionalidad_color = 'info'
+        # Contadores para KPIs y Gráficos
+        if stock_actual <= 0:
+            conteo_sin_stock += 1
+        elif stock_actual <= stock_minimo:
+            conteo_bajo_minimo += 1
+        elif vendidos_periodo == 0:
+            conteo_sin_rotacion += 1
         else:
-            if v_actual > 0:
-                estacionalidad_badge = 'EN ALZA'
-                estacionalidad_color = 'primary'
-                var_pct = 100.0
-            else:
-                estacionalidad_badge = 'SIN MOVIMIENTO'
-                estacionalidad_color = 'light text-dark'
-                var_pct = 0.0
+            conteo_optimo += 1
 
-        # Sugerencia inicial calculada
-        demanda_esperada = max(v_actual, v_anterior)
-        necesidad_total = demanda_esperada + stock_minimo
-        sugerencia_pedido = max(0, necesidad_total - stock_actual)
+        # CÁLCULO DE SUGERENCIA A PEDIR
+        # 1. Déficit para alcanzar el mínimo
+        deficit_minimo = max(0, stock_minimo - stock_actual)
+        
+        # 2. Factor ponderado de reposición
+        if vendidos_anterior > 0:
+            demanda_proyectada = (vendidos_periodo * 0.7) + (vendidos_anterior * 0.3)
+        else:
+            demanda_proyectada = float(vendidos_periodo)
 
-        if stock_actual <= stock_minimo and sugerencia_pedido == 0:
-            sugerencia_pedido = max(1, stock_minimo - stock_actual)
+        sugerencia = math.ceil(deficit_minimo + (demanda_proyectada * 0.5))
 
-        if solo_comprar and sugerencia_pedido == 0:
+        if stock_actual >= (stock_minimo + vendidos_periodo):
+            sugerencia = 0
+
+        # Filtro: Solo los que necesitan comprar
+        if solo_comprar and sugerencia <= 0:
             continue
 
-        costo_unitario = float(getattr(rep, 'precio_costo', 0) or getattr(rep, 'costo', 0) or 0.0)
-        subtotal_inversion = round(sugerencia_pedido * costo_unitario, 2)
+        subtotal = sugerencia * costo_unit
+        total_unidades_comprar += sugerencia
+        total_inversion_estimada += subtotal
 
-        total_unidades_comprar += sugerencia_pedido
-        total_inversion_estimada += subtotal_inversion
+        # Nombres seguros
+        codigo_disp = getattr(rep, 'codigo', getattr(rep, 'codigo_repuesto', getattr(rep, 'codigo_interno', f"#{rep.id}")))
+        nombre_disp = (rep.descripcion or getattr(rep, 'nombre', f"Repuesto #{rep.id}")).strip()
 
-        nombre_display = getattr(rep, 'nombre', '') or getattr(rep, 'descripcion', '') or f"Repuesto #{rep.id}"
-        codigo_display = getattr(rep, 'codigo', '') or getattr(rep, 'sku', '') or f"ID-{rep.id}"
-
-        reporte_items.append({
-            'repuesto_id': rep.id,
+        items_reporte.append({
             'repuesto': rep,
-            'nombre_display': nombre_display,
-            'codigo_display': codigo_display,
+            'repuesto_id': rep.id,
+            'codigo_display': codigo_disp,
+            'nombre_display': nombre_disp,
             'stock_actual': stock_actual,
             'stock_minimo': stock_minimo,
-            'estado_item': estado_item,
-            'ventas_periodo': v_actual,
-            'ventas_año_ant': v_anterior,
-            'variacion_pct': var_pct,
+            'ventas_periodo': vendidos_periodo,
+            'ventas_año_ant': vendidos_anterior,
+            'variacion_pct': variacion_pct,
             'estacionalidad_badge': estacionalidad_badge,
             'estacionalidad_color': estacionalidad_color,
-            'sugerencia_compra': sugerencia_pedido,
-            'costo_unitario': costo_unitario,
-            'subtotal_inversion': subtotal_inversion
+            'sugerencia_compra': sugerencia,
+            'costo_unitario': costo_unit,
+            'subtotal_inversion': subtotal
         })
 
-    # 7. Ordenamiento dinámico
+    # 7. ORDENAMIENTO DE RESULTADOS
     if ordenar_por == 'sugerencia_desc':
-        reporte_items.sort(key=lambda x: x['sugerencia_compra'], reverse=True)
+        items_reporte.sort(key=lambda x: x['sugerencia_compra'], reverse=True)
     elif ordenar_por == 'stock_asc':
-        reporte_items.sort(key=lambda x: x['stock_actual'])
-    elif ordenar_por == 'ventas_desc':
-        reporte_items.sort(key=lambda x: x['ventas_periodo'], reverse=True)
+        items_reporte.sort(key=lambda x: x['stock_actual'])
     elif ordenar_por == 'costo_desc':
-        reporte_items.sort(key=lambda x: x['subtotal_inversion'], reverse=True)
+        items_reporte.sort(key=lambda x: x['subtotal_inversion'], reverse=True)
+    elif ordenar_por == 'ventas_desc':
+        items_reporte.sort(key=lambda x: x['ventas_periodo'], reverse=True)
     elif ordenar_por == 'nombre_asc':
-        reporte_items.sort(key=lambda x: x['nombre_display'].lower())
+        items_reporte.sort(key=lambda x: x['nombre_display'].lower())
 
-    # 8. Gráficos (Chart.js)
-    datos_grafico_estados = {
-        'labels': ['Sin Stock (0 o Negativo)', 'Stock Crítico (Bajo Mínimo)', 'Stock Óptimo'],
-        'data': [conteo_sin_stock, conteo_bajo_minimo, conteo_stock_optimo],
-        'colors': ['#dc3545', '#ffc107', '#198754']
-    }
+    # 8. PREPARACIÓN DE GRÁFICOS (CHART.JS)
+    grafico_estados_json = json.dumps({
+        'labels': ['Sin Stock (0)', 'Bajo Mínimo', 'Óptimo', 'Sin Rotación'],
+        'data': [conteo_sin_stock, conteo_bajo_minimo, conteo_optimo, conteo_sin_rotacion],
+        'colors': ['#dc3545', '#ffc107', '#198754', '#6c757d']
+    })
 
-    items_con_sugerencia = [i for i in reporte_items if i['sugerencia_compra'] > 0]
-    items_urgentes = sorted(items_con_sugerencia, key=lambda x: x['sugerencia_compra'], reverse=True)[:8]
+    top_urgentes = sorted(
+        [i for i in items_reporte if i['sugerencia_compra'] > 0],
+        key=lambda x: x['sugerencia_compra'],
+        reverse=True
+    )[:8]
 
-    datos_grafico_top = {
-        'labels': [f"{i['codigo_display']} - {i['nombre_display'][:15]}..." if len(i['nombre_display']) > 15 else f"{i['codigo_display']} - {i['nombre_display']}" for i in items_urgentes],
-        'stock': [i['stock_actual'] for i in items_urgentes],
-        'pedir': [i['sugerencia_compra'] for i in items_urgentes]
-    }
+    grafico_top_json = json.dumps({
+        'labels': [i['nombre_display'][:18] for i in top_urgentes],
+        'stock': [i['stock_actual'] for i in top_urgentes],
+        'pedir': [i['sugerencia_compra'] for i in top_urgentes]
+    })
 
-    # 9. Carga de Proveedores y Sucursales
-    proveedores = []
-    try:
-        if hasattr(Proveedor, 'razon_social'):
-            proveedores = Proveedor.query.order_by(Proveedor.razon_social.asc()).all()
-        elif hasattr(Proveedor, 'nombre_fantasia'):
-            proveedores = Proveedor.query.order_by(Proveedor.nombre_fantasia.asc()).all()
-        elif hasattr(Proveedor, 'empresa'):
-            proveedores = Proveedor.query.order_by(Proveedor.empresa.asc()).all()
-        elif hasattr(Proveedor, 'nombre'):
-            proveedores = Proveedor.query.order_by(Proveedor.nombre.asc()).all()
-        else:
-            proveedores = Proveedor.query.all()
-    except Exception:
-        proveedores = []
+    # Consulta segura de proveedores y sucursales
+    col_prov = next((getattr(Proveedor, c) for c in ['razon_social', 'nombre', 'empresa', 'nombre_fantasia'] if hasattr(Proveedor, c)), None)
+    proveedores = Proveedor.query.order_by(col_prov.asc()).all() if col_prov is not None else Proveedor.query.all()
 
-    sucursales = []
-    try:
-        if hasattr(Sucursal, 'nombre'):
-            sucursales = Sucursal.query.order_by(Sucursal.nombre.asc()).all()
-        elif hasattr(Sucursal, 'descripcion'):
-            sucursales = Sucursal.query.order_by(Sucursal.descripcion.asc()).all()
-        else:
-            sucursales = Sucursal.query.all()
-    except Exception:
-        sucursales = []
-
-    # Proveedor seleccionado para encabezado
-    proveedor_actual = None
-    if proveedor_id:
-        try:
-            proveedor_actual = Proveedor.query.get(proveedor_id)
-        except Exception:
-            proveedor_actual = None
+    col_suc = next((getattr(Sucursal, c) for c in ['nombre', 'descripcion'] if hasattr(Sucursal, c)), None) if 'Sucursal' in globals() else None
+    sucursales = Sucursal.query.order_by(col_suc.asc()).all() if col_suc is not None else (Sucursal.query.all() if 'Sucursal' in globals() else [])
 
     return render_template(
         'reportes/sugerencia_pedidos.html',
-        items=reporte_items,
-        proveedores=proveedores,
-        sucursales=sucursales,
-        proveedor_actual=proveedor_actual,
-        fecha_desde=fecha_desde.strftime('%Y-%m-%d'),
-        fecha_hasta=fecha_hasta.strftime('%Y-%m-%d'),
-        fecha_desde_ant=fecha_desde_ant.strftime('%d/%m/%Y'),
-        fecha_hasta_ant=fecha_hasta_ant.strftime('%d/%m/%Y'),
-        dias_periodo=dias_periodo,
-        proveedor_id_sel=proveedor_id,
-        sucursal_id_sel=sucursal_id,
-        buscar_sel=buscar_repuesto,
-        solo_comprar_sel=solo_comprar,
-        estado_stock_sel=estado_stock,
-        stock_minimo_filtro_sel=stock_minimo_filtro if stock_minimo_filtro is not None else '',
-        ordenar_por_sel=ordenar_por,
-        conteo_sin_stock=conteo_sin_stock,
-        conteo_bajo_minimo=conteo_bajo_minimo,
-        conteo_stock_optimo=conteo_stock_optimo,
+        items=items_reporte,
+        total_articulos=len(items_reporte),
         total_unidades_comprar=total_unidades_comprar,
         total_inversion_estimada=total_inversion_estimada,
-        grafico_estados_json=json.dumps(datos_grafico_estados),
-        grafico_top_json=json.dumps(datos_grafico_top)
+        conteo_sin_stock=conteo_sin_stock,
+        conteo_bajo_minimo=conteo_bajo_minimo,
+        fecha_desde=fecha_desde.strftime('%Y-%m-%d'),
+        fecha_hasta=fecha_hasta.strftime('%Y-%m-%d'),
+        fecha_desde_ant=fecha_desde_ant.strftime('%Y-%m-%d'),
+        fecha_hasta_ant=fecha_hasta_ant.strftime('%Y-%m-%d'),
+        hoy=hoy.strftime('%d/%m/%Y'),
+        proveedores=proveedores,
+        sucursales=sucursales,
+        # Parámetros para mantener el estado de los filtros en la vista
+        buscar_sel=buscar_repuesto,
+        estado_stock_sel=estado_stock,
+        stock_minimo_filtro_sel=stock_minimo_filtro if stock_minimo_filtro is not None else '',
+        proveedor_id_sel=proveedor_id,
+        sucursal_id_sel=sucursal_id,
+        ordenar_por_sel=ordenar_por,
+        solo_comprar_sel=solo_comprar,
+        filtro_estacionalidad_sel=filtro_estacionalidad,
+        filtro_ventas_periodo_sel=filtro_ventas_periodo,
+        # Gráficos
+        grafico_estados_json=grafico_estados_json,
+        grafico_top_json=grafico_top_json
     )
 
 
-# --------------------------------------------------------------------------
-# RUTA 1: Imprimir Comprobante Exclusivo del Pedido Seleccionado
-# --------------------------------------------------------------------------
-@inventory_bp.route('/reportes/pedidos-proveedores/imprimir-orden', methods=['POST'])
+# --- RUTAS DE APOYO PARA EXPORTAR E IMPRIMIR EXCLUSIVAMENTE LO SELECCIONADO ---
+
+@inventory_bp.route('/reportes/pedidos-proveedores/imprimir', methods=['POST'])
 @login_required
 def imprimir_orden_pedido():
-    """
-    Recibe por POST únicamente los ítems seleccionados y sus cantidades editadas
-    para generar el comprobante formal de compra listo para imprimir.
-    """
-    items_raw = request.form.get('items_seleccionados_json', '[]')
+    items_json = request.form.get('items_seleccionados_json', '[]')
     proveedor_nombre = request.form.get('proveedor_nombre', 'Proveedor General')
     fecha_pedido = request.form.get('fecha_pedido', date.today().strftime('%d/%m/%Y'))
     
     try:
-        items_pedido = json.loads(items_raw)
+        items = json.loads(items_json)
     except Exception:
-        items_pedido = []
+        items = []
 
-    total_unidades = sum(int(i.get('cantidad', 0)) for i in items_pedido)
-    total_monto = sum(float(i.get('subtotal', 0.0)) for i in items_pedido)
+    total_unidades = sum(int(it.get('cantidad', 0)) for it in items)
+    total_monto = sum(float(it.get('subtotal', 0.0)) for it in items)
 
-    return render_template(
-        'reportes/imprimir_pedido_proveedor.html',
-        items=items_pedido,
-        proveedor_nombre=proveedor_nombre,
-        fecha_pedido=fecha_pedido,
-        total_unidades=total_unidades,
-        total_monto=total_monto
-    )
+    html = f"""
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+        <meta charset="UTF-8">
+        <title>Orden de Compra - Vacan Radiadores</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; padding: 25px; color: #222; }}
+            .header {{ display: flex; justify-content: space-between; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 20px; }}
+            .title {{ font-size: 20px; font-weight: bold; }}
+            table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
+            th, td {{ border: 1px solid #ccc; padding: 8px; font-size: 13px; }}
+            th {{ background-color: #f4f4f4; text-align: left; }}
+            .text-end {{ text-align: right; }}
+            .text-center {{ text-align: center; }}
+            .totales {{ margin-top: 25px; text-align: right; font-size: 15px; font-weight: bold; }}
+            .firmas {{ margin-top: 60px; display: flex; justify-content: space-between; }}
+            .linea-firma {{ width: 220px; border-top: 1px solid #000; text-align: center; padding-top: 6px; font-size: 12px; }}
+            @media print {{ body {{ padding: 0; }} }}
+        </style>
+    </head>
+    <body onload="window.print()">
+        <div class="header">
+            <div>
+                <div class="title">VACAN RADIADORES</div>
+                <div>Orden de Compra y Reposición a Proveedor</div>
+                <div><strong>Destinatario:</strong> {proveedor_nombre}</div>
+            </div>
+            <div style="text-align: right; font-size: 13px;">
+                <strong>Fecha:</strong> {fecha_pedido}<br>
+                <strong>Items Solicitados:</strong> {len(items)}
+            </div>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 15%;">Código</th>
+                    <th style="width: 50%;">Descripción / Repuesto</th>
+                    <th class="text-center" style="width: 10%;">Cantidad</th>
+                    <th class="text-end" style="width: 12%;">Costo Unit.</th>
+                    <th class="text-end" style="width: 13%;">Subtotal</th>
+                </tr>
+            </thead>
+            <tbody>
+    """
+    for it in items:
+        html += f"""
+                <tr>
+                    <td><strong>{it.get('codigo', '')}</strong></td>
+                    <td>{it.get('nombre', '')}</td>
+                    <td class="text-center"><strong>{it.get('cantidad', 0)}</strong></td>
+                    <td class="text-end">${it.get('costo', 0.0):,.2f}</td>
+                    <td class="text-end"><strong>${it.get('subtotal', 0.0):,.2f}</strong></td>
+                </tr>
+        """
+    html += f"""
+            </tbody>
+        </table>
+
+        <div class="totales">
+            <div>Total de Piezas a Reponer: {total_unidades}</div>
+            <div style="font-size: 18px; margin-top: 5px; color: #0d6efd;">Monto Total Estimado: ${total_monto:,.2f}</div>
+        </div>
+
+        <div class="firmas">
+            <div class="linea-firma">Firma y Aclaración (Compras)</div>
+            <div class="linea-firma">Recepción Proveedor</div>
+        </div>
+    </body>
+    </html>
+    """
+    return html
 
 
-# --------------------------------------------------------------------------
-# RUTA 2: Exportar a Excel (CSV con formato UTF-8 compatible con Microsoft Excel)
-# --------------------------------------------------------------------------
 @inventory_bp.route('/reportes/pedidos-proveedores/exportar-excel', methods=['POST'])
 @login_required
 def exportar_pedido_excel():
-    """
-    Genera un archivo descargable para Excel (.csv con delimitador ';' y codificación UTF-8 BOM)
-    con únicamente los repuestos seleccionados y las cantidades editadas.
-    """
-    items_raw = request.form.get('items_seleccionados_json', '[]')
-    proveedor_nombre = request.form.get('proveedor_nombre', 'Proveedor').strip() or 'Proveedor'
-    
+    items_json = request.form.get('items_seleccionados_json', '[]')
     try:
-        items_pedido = json.loads(items_raw)
+        items = json.loads(items_json)
     except Exception:
-        items_pedido = []
+        items = []
 
+    # Generar CSV con BOM para Excel en español
     output = io.StringIO()
+    output.write('\ufeff')
     writer = csv.writer(output, delimiter=';')
+    writer.writerow(['Código', 'Descripción', 'Cantidad Pedida', 'Costo Unitario', 'Subtotal Estimado'])
 
-    # Encabezado del archivo
-    writer.writerow(['PEDIDO DE COMPRA - VACAN RADIADORES'])
-    writer.writerow(['Proveedor:', proveedor_nombre])
-    writer.writerow(['Fecha:', datetime.now().strftime('%d/%m/%Y %H:%M')])
-    writer.writerow([])
-    writer.writerow(['Codigo', 'Descripcion / Repuesto', 'Cantidad a Pedir', 'Costo Unitario ($)', 'Subtotal ($)'])
-
-    total_unidades = 0
-    total_dinero = 0.0
-
-    for item in items_pedido:
-        cant = int(item.get('cantidad', 0))
-        costo = float(item.get('costo', 0.0))
-        subtotal = float(item.get('subtotal', 0.0))
-        
-        total_unidades += cant
-        total_dinero += subtotal
-
+    for it in items:
         writer.writerow([
-            item.get('codigo', ''),
-            item.get('nombre', ''),
-            cant,
-            f"{costo:.2f}".replace('.', ','),
-            f"{subtotal:.2f}".replace('.', ',')
+            it.get('codigo', ''),
+            it.get('nombre', ''),
+            it.get('cantidad', 0),
+            f"{it.get('costo', 0.0):.2f}".replace('.', ','),
+            f"{it.get('subtotal', 0.0):.2f}".replace('.', ',')
         ])
 
-    writer.writerow([])
-    writer.writerow(['TOTALES', '', total_unidades, '', f"{total_dinero:.2f}".replace('.', ',')])
+    csv_data = output.getvalue()
+    output.close()
 
-    # Codificación con BOM (\ufeff) para que Excel lo abra perfecto en Windows con tildes y caracteres especiales
-    csv_bytes = ('\ufeff' + output.getvalue()).encode('utf-8-sig')
-    
-    filename = f"Pedido_{proveedor_nombre.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M')}.csv"
-    
-    response = make_response(csv_bytes)
-    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-    response.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    response = Response(csv_data, mimetype='text/csv')
+    response.headers['Content-Disposition'] = f'attachment; filename=Pedido_Proveedores_{date.today().strftime("%Y%m%d")}.csv'
     return response
 
 
