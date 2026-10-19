@@ -1157,15 +1157,20 @@ def imprimir_presupuesto(id):
     return render_template('comprobante_impresion.html', presupuesto=presupuesto)
 
 
-from datetime import datetime, date, timedelta
+import math
 import json
 import io
 import csv
-from flask import render_template, request, flash, redirect, url_for, Response, make_response
-from flask_login import login_required, current_user
+from datetime import datetime, date, timedelta
+from flask import render_template, request, Response
+from flask_login import login_required
 from sqlalchemy import func, or_
-# Importa tus modelos de base de datos
-from app.models import db, Repuesto, DetalleVenta, Venta, Proveedor, Sucursal
+
+# Asegurar modelos e imports según tu aplicación
+# from app import db
+# from app.models import Repuesto, Proveedor, Sucursal, Venta, DetalleVenta
+# from . import inventory_bp
+
 
 @inventory_bp.route('/reportes/pedidos-proveedores', methods=['GET'])
 @login_required
@@ -1193,7 +1198,7 @@ def reporte_pedidos_proveedores():
     estado_stock = request.args.get('estado_stock', 'todos')
     ordenar_por = request.args.get('ordenar_por', 'sugerencia_desc')
     
-    # NUEVOS FILTROS SOLICITADOS:
+    # Filtros de estacionalidad y rotación
     filtro_estacionalidad = request.args.get('filtro_estacionalidad', 'todos') # 'todos', 'alta', 'baja', 'estable', 'sin_movimiento'
     filtro_ventas_periodo = request.args.get('filtro_ventas_periodo', 'todos') # 'todos', 'mayor_cero', 'igual_cero'
     
@@ -1263,8 +1268,14 @@ def reporte_pedidos_proveedores():
     if sucursal_id and hasattr(Repuesto, 'sucursal_id'):
         query_rep = query_rep.filter(Repuesto.sucursal_id == sucursal_id)
 
+    # Buscador: Busca por SKU Proveedor, código general o descripción
     if buscar_repuesto:
-        query_rep = query_rep.filter(Repuesto.descripcion.ilike(f"%{buscar_repuesto}%"))
+        criterios_busqueda = [Repuesto.descripcion.ilike(f"%{buscar_repuesto}%")]
+        # Detección inteligente de la columna del SKU / Código de proveedor
+        for campo_sku in ['sku_proveedor', 'codigo_proveedor', 'cod_proveedor', 'sku_prov', 'sku', 'codigo', 'codigo_repuesto']:
+            if hasattr(Repuesto, campo_sku):
+                criterios_busqueda.append(getattr(Repuesto, campo_sku).ilike(f"%{buscar_repuesto}%"))
+        query_rep = query_rep.filter(or_(*criterios_busqueda))
 
     todos_repuestos = query_rep.all()
 
@@ -1290,7 +1301,7 @@ def reporte_pedidos_proveedores():
         vendidos_periodo = ventas_actual_dict.get(rep.id, 0)
         vendidos_anterior = ventas_anterior_dict.get(rep.id, 0)
 
-        # NUEVO FILTRO: CANTIDAD VENDIDA EN EL PERÍODO (MAYOR A 0 O IGUAL A 0)
+        # FILTRO: CANTIDAD VENDIDA EN EL PERÍODO (MAYOR A 0 O IGUAL A 0)
         if filtro_ventas_periodo == 'mayor_cero' and vendidos_periodo <= 0:
             continue
         elif filtro_ventas_periodo == 'igual_cero' and vendidos_periodo > 0:
@@ -1321,11 +1332,11 @@ def reporte_pedidos_proveedores():
             estacionalidad_badge = 'Estable'
             estacionalidad_color = 'info'
 
-        # NUEVO FILTRO: ESTACIONALIDAD
+        # FILTRO: ESTACIONALIDAD
         if filtro_estacionalidad != 'todos' and tipo_estacionalidad != filtro_estacionalidad:
             continue
 
-        # FILTRO DE ESTADO DE STOCK
+        # FILTRO: ESTADO DE STOCK
         if estado_stock == 'sin_stock' and stock_actual > 0:
             continue
         elif estado_stock == 'bajo_minimo' and stock_actual > stock_minimo:
@@ -1366,14 +1377,27 @@ def reporte_pedidos_proveedores():
         total_unidades_comprar += sugerencia
         total_inversion_estimada += subtotal
 
-        # Nombres seguros
-        codigo_disp = getattr(rep, 'codigo', getattr(rep, 'codigo_repuesto', getattr(rep, 'codigo_interno', f"#{rep.id}")))
+        # OBTENCIÓN DEL SKU DEL PROVEEDOR COMO PRINCIPAL:
+        # Busca en orden de prioridad: sku_proveedor -> codigo_proveedor -> cod_proveedor -> sku -> codigo -> fallback
+        sku_proveedor_val = (
+            getattr(rep, 'sku_proveedor', None) or
+            getattr(rep, 'codigo_proveedor', None) or
+            getattr(rep, 'cod_proveedor', None) or
+            getattr(rep, 'sku_prov', None) or
+            getattr(rep, 'sku', None) or
+            getattr(rep, 'codigo', None) or
+            getattr(rep, 'codigo_repuesto', None) or
+            getattr(rep, 'codigo_interno', None) or
+            f"ART-{rep.id}"
+        )
+        
         nombre_disp = (rep.descripcion or getattr(rep, 'nombre', f"Repuesto #{rep.id}")).strip()
 
         items_reporte.append({
             'repuesto': rep,
             'repuesto_id': rep.id,
-            'codigo_display': codigo_disp,
+            'sku_proveedor': sku_proveedor_val,     # SKU del proveedor principal
+            'codigo_display': sku_proveedor_val,    # Por retrocompatibilidad con vistas
             'nombre_display': nombre_disp,
             'stock_actual': stock_actual,
             'stock_minimo': stock_minimo,
@@ -1413,7 +1437,7 @@ def reporte_pedidos_proveedores():
     )[:8]
 
     grafico_top_json = json.dumps({
-        'labels': [i['nombre_display'][:18] for i in top_urgentes],
+        'labels': [f"[{i['sku_proveedor']}] {i['nombre_display'][:14]}" for i in top_urgentes],
         'stock': [i['stock_actual'] for i in top_urgentes],
         'pedir': [i['sugerencia_compra'] for i in top_urgentes]
     })
@@ -1456,7 +1480,7 @@ def reporte_pedidos_proveedores():
     )
 
 
-# --- RUTAS DE APOYO PARA EXPORTAR E IMPRIMIR EXCLUSIVAMENTE LO SELECCIONADO ---
+# --- RUTAS DE APOYO PARA EXPORTAR E IMPRIMIR CON SKU PROVEEDOR ---
 
 @inventory_bp.route('/reportes/pedidos-proveedores/imprimir', methods=['POST'])
 @login_required
@@ -1488,6 +1512,7 @@ def imprimir_orden_pedido():
             th {{ background-color: #f4f4f4; text-align: left; }}
             .text-end {{ text-align: right; }}
             .text-center {{ text-align: center; }}
+            .sku-badge {{ font-family: monospace; font-weight: bold; background: #eef2ff; padding: 2px 6px; border-radius: 3px; }}
             .totales {{ margin-top: 25px; text-align: right; font-size: 15px; font-weight: bold; }}
             .firmas {{ margin-top: 60px; display: flex; justify-content: space-between; }}
             .linea-firma {{ width: 220px; border-top: 1px solid #000; text-align: center; padding-top: 6px; font-size: 12px; }}
@@ -1510,8 +1535,8 @@ def imprimir_orden_pedido():
         <table>
             <thead>
                 <tr>
-                    <th style="width: 15%;">Código</th>
-                    <th style="width: 50%;">Descripción / Repuesto</th>
+                    <th style="width: 20%;">SKU Proveedor</th>
+                    <th style="width: 45%;">Descripción / Repuesto</th>
                     <th class="text-center" style="width: 10%;">Cantidad</th>
                     <th class="text-end" style="width: 12%;">Costo Unit.</th>
                     <th class="text-end" style="width: 13%;">Subtotal</th>
@@ -1520,9 +1545,10 @@ def imprimir_orden_pedido():
             <tbody>
     """
     for it in items:
+        sku_prov = it.get('sku_proveedor') or it.get('codigo') or ''
         html += f"""
                 <tr>
-                    <td><strong>{it.get('codigo', '')}</strong></td>
+                    <td><span class="sku-badge">{sku_prov}</span></td>
                     <td>{it.get('nombre', '')}</td>
                     <td class="text-center"><strong>{it.get('cantidad', 0)}</strong></td>
                     <td class="text-end">${it.get('costo', 0.0):,.2f}</td>
@@ -1557,15 +1583,16 @@ def exportar_pedido_excel():
     except Exception:
         items = []
 
-    # Generar CSV con BOM para Excel en español
+    # Generar CSV con BOM para compatibilidad total con Excel en español
     output = io.StringIO()
     output.write('\ufeff')
     writer = csv.writer(output, delimiter=';')
-    writer.writerow(['Código', 'Descripción', 'Cantidad Pedida', 'Costo Unitario', 'Subtotal Estimado'])
+    writer.writerow(['SKU Proveedor', 'Descripción', 'Cantidad Pedida', 'Costo Unitario', 'Subtotal Estimado'])
 
     for it in items:
+        sku_prov = it.get('sku_proveedor') or it.get('codigo') or ''
         writer.writerow([
-            it.get('codigo', ''),
+            sku_prov,
             it.get('nombre', ''),
             it.get('cantidad', 0),
             f"{it.get('costo', 0.0):.2f}".replace('.', ','),
@@ -1578,9 +1605,6 @@ def exportar_pedido_excel():
     response = Response(csv_data, mimetype='text/csv')
     response.headers['Content-Disposition'] = f'attachment; filename=Pedido_Proveedores_{date.today().strftime("%Y%m%d")}.csv'
     return response
-
-
-
 
 @inventory_bp.route('/reportes/predictivo-inteligencia', methods=['GET'])
 @login_required
