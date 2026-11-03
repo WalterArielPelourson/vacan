@@ -2,246 +2,440 @@
 
 {% block content %}
 <style>
-    .kpi-card {
-        border-radius: 12px;
-        padding: 1rem;
-        background: #111;
-        border: 1px solid #222;
-        color: white;
+    /* CONTENEDOR GENERAL ADAPTADO AL ALTO DE PANTALLA */
+    .rentabilidad-wrapper {
+        display: flex;
+        flex-direction: column;
+        height: calc(100vh - 65px);
+        overflow: hidden;
     }
-    .kpi-title { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 1px; color: #888; font-weight: 700; }
-    .kpi-value { font-size: 1.4rem; font-weight: 800; }
-    .table-rentabilidad { font-size: 0.74rem !important; }
-    .table-rentabilidad th { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* BARRA DE 7 KPIS SUPERIOR - ESTILO ERP DARK */
+    .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(7, 1fr);
+        gap: 6px;
+        margin-bottom: 6px;
+    }
+
+    @media (max-width: 1200px) {
+        .kpi-strip {
+            grid-template-columns: repeat(4, 1fr);
+        }
+    }
+    @media (max-width: 768px) {
+        .kpi-strip {
+            grid-template-columns: repeat(2, 1fr);
+        }
+    }
+
+    .kpi-box {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 5px 8px;
+        color: #fff;
+    }
+    .kpi-box-title {
+        font-size: 0.62rem;
+        text-transform: uppercase;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: #9ca3af;
+        white-space: nowrap;
+    }
+    .kpi-box-val {
+        font-size: 1.05rem;
+        font-weight: 800;
+        line-height: 1.2;
+        font-family: 'Courier New', Courier, monospace, monospace;
+    }
+    .kpi-box-sub {
+        font-size: 0.58rem;
+        color: #6b7280;
+        white-space: nowrap;
+    }
+
+    /* CONTENEDOR DE TABLA CON SCROLL VERTICAL Y CERO SCROLL HORIZONTAL */
+    .table-viewport-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        overflow-x: hidden !important; /* Elimina scroll horizontal */
+        overflow-y: auto !important;   /* Mantiene scroll vertical */
+        flex-grow: 1;
+        border: 1px solid #374151;
+        border-radius: 6px;
+        background: #fff;
+    }
+
+    /* TABLA DE RENTABILIDAD FIJA CON TEXTO CALIBRADO */
+    .table-rentabilidad {
+        width: 100% !important;
+        table-layout: fixed !important; /* Fuerza a respetar los anchos del colgroup sin desbordar */
+        margin-bottom: 0 !important;
+        font-size: 0.50rem !important;  /* Tamaño calibrado para que entre todo */
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .table-rentabilidad th {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background-color: #111827 !important;
+        color: #f9fafb !important;
+        font-size: 0.50rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+        padding: 4px 3px !important;
+        border-bottom: 2px solid #374151;
+        white-space: nowrap;
+        line-height: 1.15;
+    }
+
+    .table-rentabilidad td {
+        padding: 3px 3px !important;
+        line-height: 1.15;
+        vertical-align: middle;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+    /* PIE DE TABLA FIJO */
+    .table-rentabilidad tfoot td {
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
+        background-color: #111827 !important;
+        color: #f9fafb !important;
+        font-size: 0.60rem !important;
+        font-weight: 800;
+        padding: 5px 3px !important;
+        border-top: 2px solid #374151;
+        white-space: nowrap;
+    }
+
+    /* TRUNCADO CON TOOLTIP PARA DESCRIPCIONES Y CLIENTES */
+    .cell-truncate {
+        max-width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        display: block;
+    }
+
+    /* AJUSTE TIPOGRÁFICO DE NÚMEROS MONOSPACE */
+    .font-monospace {
+        font-family: 'SFMono-Regular', Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace !important;
+        letter-spacing: -0.3px;
+    }
+
+    /* FONDOS DESTACADOS DE COLUMNAS */
+    .col-highlight-iva {
+        background-color: rgba(13, 202, 240, 0.08) !important;
+    }
+    .col-highlight-desc {
+        background-color: rgba(255, 193, 7, 0.08) !important;
+    }
+    .col-highlight-costo {
+        background-color: rgba(243, 244, 246, 0.7) !important;
+    }
 </style>
 
-<div class="container-fluid px-2">
-    <!-- ENCABEZADO -->
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-            <h5 class="mb-0 fw-bold text-uppercase text-dark">
-                <i class="bi bi-graph-up-arrow text-pink me-2"></i>Rentabilidad por Repuesto Vendido
-            </h5>
-            <small class="text-muted">Análisis comparativo de Costo vs Venta y Margen de Utilidad</small>
+<div class="container-fluid px-2 rentabilidad-wrapper">
+    <!-- ENCABEZADO Y FILTROS COMPACTOS -->
+    <div class="no-print mb-2">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+            <h6 class="mb-0 fw-bold text-uppercase text-dark">
+                <i class="bi bi-graph-up-arrow text-primary me-1"></i>Rentabilidad por Repuesto Vendido
+            </h6>
+            <div class="d-flex gap-2">
+                <!-- BOTÓN EXPORTAR A EXCEL -->
+                <button type="button" onclick="exportarExcel()" class="btn btn-sm btn-success py-0 px-2 fw-bold text-white shadow-sm" style="font-size: 0.68rem; height: 26px;">
+                    <i class="bi bi-file-earmark-excel-fill me-1"></i>Exportar a Excel
+                </button>
+                <!--<button type="button" onclick="descargarCSVDirecto()" class="btn btn-sm btn-outline-success py-0 px-2 fw-bold shadow-sm" style="font-size: 0.68rem; height: 26px;">
+                    <i class="bi bi-filetype-csv me-1"></i>CSV
+                </button>-->
+                <button type="button" onclick="window.print()" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size: 0.65rem; height: 26px;">
+                    <i class="bi bi-printer me-1"></i>Imprimir
+                </button>
+            </div>
         </div>
-    </div>
 
-    <!-- BARRA DE FILTROS SUPERIOR -->
-    <div class="card mb-4 border-0 shadow-sm" style="background-color: #000; border-radius: 12px; padding: 12px 0;">
-        <div class="card-body px-3 py-1">
-            <form method="GET" action="{{ url_for('admin.reporte_rentabilidad_ventas') }}" class="row g-2 align-items-end mx-0">
-                <div class="col-6 col-md-2">
-                    <label class="form-label text-white small mb-1 fw-bold">DESDE</label>
-                    <input type="date" name="desde" value="{{ filtros.desde }}" class="form-control form-control-sm bg-dark text-white border-secondary">
-                </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label text-white small mb-1 fw-bold">HASTA</label>
-                    <input type="date" name="hasta" value="{{ filtros.hasta }}" class="form-control form-control-sm bg-dark text-white border-secondary">
+        <!-- FORMULARIO DE FILTROS ULTRA COMPACTO -->
+        <div class="card border-0 shadow-sm" style="background-color: #000; border-radius: 8px; padding: 6px 10px;">
+            <form method="GET" action="{{ url_for('admin.reporte_rentabilidad_ventas') }}" class="row g-1 align-items-end mx-0">
+                <div class="col-6 col-md-3">
+                    <label class="form-label text-white fw-bold mb-0" style="font-size: 0.65rem;">DESDE</label>
+                    <input type="date" name="desde" value="{{ filtros.desde }}" class="form-control form-control-sm bg-dark text-white border-secondary py-0" style="font-size: 0.75rem;">
                 </div>
                 <div class="col-6 col-md-3">
-                    <label class="form-label text-white small mb-1 fw-bold">SUCURSAL</label>
-                    <select name="sucursal_id" class="form-select form-select-sm bg-dark text-white border-secondary">
-                        <option value="">Todas las Sedes</option>
+                    <label class="form-label text-white fw-bold mb-0" style="font-size: 0.65rem;">HASTA</label>
+                    <input type="date" name="hasta" value="{{ filtros.hasta }}" class="form-control form-control-sm bg-dark text-white border-secondary py-0" style="font-size: 0.75rem;">
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label text-white fw-bold mb-0" style="font-size: 0.65rem;">SUCURSAL</label>
+                    <select name="sucursal_id" class="form-select form-select-sm bg-dark text-white border-secondary py-0" style="font-size: 0.75rem;">
+                        <option value="">Todas</option>
                         {% for s in sucursales %}
                         <option value="{{ s.id }}" {% if filtros.sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="col-6 col-md-3">
-                    <label class="form-label text-white small mb-1 fw-bold">CLIENTE</label>
-                    <select name="cliente_id" class="form-select form-select-sm bg-dark text-white border-secondary">
-                        <option value="">Todos los Clientes</option>
+                <div class="col-6 col-md-2">
+                    <label class="form-label text-white fw-bold mb-0" style="font-size: 0.65rem;">CLIENTE</label>
+                    <select name="cliente_id" class="form-select form-select-sm bg-dark text-white border-secondary py-0" style="font-size: 0.75rem;">
+                        <option value="">Todos</option>
                         {% for c in clientes %}
                         <option value="{{ c.id }}" {% if filtros.cliente_id == c.id %}selected{% endif %}>{{ c.razon_social }}</option>
                         {% endfor %}
                     </select>
                 </div>
                 <div class="col-12 col-md-2 d-flex gap-1">
-                    <button type="submit" class="btn btn-warning btn-sm fw-bold w-100"><i class="bi bi-funnel-fill me-1"></i> Filtrar</button>
-                    <a href="{{ url_for('admin.reporte_rentabilidad_ventas') }}" class="btn btn-outline-light btn-sm"><i class="bi bi-undo"></i></a>
+                    <button type="submit" class="btn btn-primary btn-sm w-100 fw-bold py-0" style="font-size: 0.75rem; height: 28px;">
+                        <i class="bi bi-funnel"></i> Filtrar
+                    </button>
+                    <a href="{{ url_for('admin.reporte_rentabilidad_ventas') }}" class="btn btn-outline-secondary btn-sm py-0 px-2" title="Limpiar filtros" style="font-size: 0.75rem; height: 28px;">
+                        <i class="bi bi-x-circle"></i>
+                    </a>
                 </div>
             </form>
         </div>
     </div>
 
-    <!-- TARJETAS TOTALIZADORAS GLOBALES (KPIs CON DEVOLUCIONES) -->
-    <div class="row g-2 mb-4">
-        <!-- 1. UNIDADES VENDIDAS -->
-        <div class="col-6 col-md-4 col-xl-2">
-            <div class="kpi-card shadow-sm h-100">
-                <div class="kpi-title"><i class="bi bi-box-seam me-1 text-info"></i> Unidades</div>
-                <div class="kpi-value text-info">{{ total_unidades }}</div>
-                <small class="text-muted">Artículos vendidos</small>
+    <!-- CINTA DE 7 KPIS COMPACTA -->
+    <div class="kpi-strip no-print">
+        <div class="kpi-box">
+            <div class="kpi-box-title">Venta Bruta</div>
+            <div class="kpi-box-val text-white">$ {{ "{:,.2f}".format(total_venta_bruto) }}</div>
+            <div class="kpi-box-sub">{{ total_unidades }} unidades</div>
+        </div>
+        <div class="kpi-box" style="border-color: #d97706;">
+            <div class="kpi-box-title text-warning">(-) Descuentos Ventas</div>
+            <div class="kpi-box-val text-warning">-$ {{ "{:,.2f}".format(total_descuentos) }}</div>
+            <div class="kpi-box-sub">Bonificaciones</div>
+        </div>
+        <div class="kpi-box" style="border-color: #dc2626;">
+            <div class="kpi-box-title text-danger">(-) Devoluciones</div>
+            <div class="kpi-box-val text-danger">-$ {{ "{:,.2f}".format(total_devoluciones) }}</div>
+            <div class="kpi-box-sub">
+                <a href="#" class="text-danger text-decoration-none" data-bs-toggle="modal" data-bs-target="#modalDevoluciones">
+                    Ver detalle <i class="bi bi-eye"></i>
+                </a>
             </div>
         </div>
-
-        <!-- 2. VENTA BRUTA FACTURADA -->
-        <div class="col-6 col-md-4 col-xl-2">
-            <div class="kpi-card shadow-sm h-100">
-                <div class="kpi-title"><i class="bi bi-receipt me-1 text-primary"></i> Venta Bruta</div>
-                <div class="kpi-value text-primary">${{ "{:,.2f}".format(total_venta_bruto or total_venta) }}</div>
-                <small class="text-muted">Facturación sin quitas</small>
-            </div>
+        <div class="kpi-box">
+            <div class="kpi-box-title">Costo Total Compra</div>
+            <div class="kpi-box-val text-light">$ {{ "{:,.2f}".format(total_costo) }}</div>
+            <div class="kpi-box-sub">Costo base + IVA compras</div>
         </div>
-
-        <!-- 3. DEVOLUCIONES TOTALES (DESGLOSE CAJA Y CTA CTE) -->
-        <div class="col-6 col-md-4 col-xl-2">
-            <div class="kpi-card shadow-sm border-danger h-100" style="background: #190505;">
-                <div class="kpi-title text-danger"><i class="bi bi-arrow-counterclockwise me-1"></i> (-) Devoluciones</div>
-                <div class="kpi-value text-danger">-${{ "{:,.2f}".format(total_devoluciones or 0) }}</div>
-                <small class="text-white-50 d-block text-truncate" style="font-size: 0.65rem;">
-                    Caja: ${{ "{:,.2f}".format(devs_caja_monto or 0) }} | Cta: ${{ "{:,.2f}".format(devs_cta_monto or 0) }}
-                </small>
-            </div>
+        <div class="kpi-box" style="border-color: #0284c7;">
+            <div class="kpi-box-title text-info">(+) IVA Compras</div>
+            <div class="kpi-box-val text-info">$ {{ "{:,.2f}".format(total_iva_compras) }}</div>
+            <div class="kpi-box-sub">Crédito Fiscal real de compra</div>
         </div>
-
-        <!-- 4. VENTA NETA REAL -->
-        <div class="col-6 col-md-4 col-xl-2">
-            <div class="kpi-card shadow-sm border-info h-100">
-                <div class="kpi-title text-info"><i class="bi bi-cash-stack me-1"></i> (=) Venta Neta</div>
-                <div class="kpi-value text-info">${{ "{:,.2f}".format(total_venta) }}</div>
-                <small class="text-muted">Bruto (-) Devoluciones</small>
+        <div class="kpi-box" style="border-color: {% if ganancia_global >= 0 %}#16a34a{% else %}#dc2626{% endif %};">
+            <div class="kpi-box-title {% if ganancia_global >= 0 %}text-success{% else %}text-danger{% endif %}">Ganancia Neta</div>
+            <div class="kpi-box-val {% if ganancia_global >= 0 %}text-success{% else %}text-danger{% endif %}">
+                $ {{ "{:,.2f}".format(ganancia_global) }}
             </div>
+            <div class="kpi-box-sub">Venta neta - Costo c/ IVA</div>
         </div>
-
-        <!-- 5. COSTO TOTAL MERCADERÍA -->
-        <div class="col-6 col-md-4 col-xl-2">
-            <div class="kpi-card shadow-sm h-100">
-                <div class="kpi-title text-danger"><i class="bi bi-tags me-1"></i> Costo Total</div>
-                <div class="kpi-value text-danger">${{ "{:,.2f}".format(total_costo) }}</div>
-                <small class="text-muted">Costo mercadería</small>
-            </div>
-        </div>
-
-        <!-- 6. GANANCIA NETA Y MARGEN -->
-        <div class="col-12 col-md-4 col-xl-2">
-            <div class="kpi-card shadow-sm border-success h-100">
-                <div class="kpi-title text-success"><i class="bi bi-graph-up me-1"></i> Ganancia Neta</div>
-                <div class="kpi-value text-success">${{ "{:,.2f}".format(ganancia_global) }}</div>
-                <small class="text-warning fw-bold">Margen: {{ margen_global }}%</small>
-            </div>
+        <div class="kpi-box">
+            <div class="kpi-box-title">Margen Global</div>
+            <div class="kpi-box-val text-info">{{ "{:,.2f}".format(margen_global) }}%</div>
+            <div class="kpi-box-sub">{{ "{:,.2f}".format(margen_sobre_venta) }}% s/ venta</div>
         </div>
     </div>
 
-    <!-- PANEL DESPLEGABLE DE DETALLE DE DEVOLUCIONES DEL PERÍODO -->
-    {% if devoluciones and devoluciones|length > 0 %}
-    <div class="alert alert-dark border-danger mb-3 p-2 d-flex justify-content-between align-items-center shadow-sm" style="background-color: #1a0505;">
-        <div>
-            <i class="bi bi-exclamation-triangle-fill text-danger me-2"></i>
-            <strong class="text-white small">Se registraron {{ devoluciones|length }} devolución(es) en este período por un total de:</strong>
-            <span class="badge bg-danger ms-2">-${{ "{:,.2f}".format(total_devoluciones) }}</span>
-        </div>
-        <button class="btn btn-sm btn-outline-danger py-0" type="button" data-bs-toggle="collapse" data-bs-target="#collapseDevoluciones">
-            Ver Devoluciones <i class="bi bi-chevron-down ms-1"></i>
-        </button>
-    </div>
-
-    <div class="collapse mb-3" id="collapseDevoluciones">
-        <div class="card bg-dark border-danger p-0 shadow-sm">
-            <div class="table-responsive">
-                <table class="table table-dark table-sm mb-0 small align-middle">
-                    <thead class="table-secondary text-dark">
-                        <tr>
-                            <th style="width: 15%;">Fecha</th>
-                            <th style="width: 15%;">Medio / Origen</th>
-                            <th style="width: 25%;">Destino / Cuenta</th>
-                            <th style="width: 30%;">Motivo / Comprobante</th>
-                            <th style="width: 15%;" class="text-end">Monto Devuelto</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for dev in devoluciones %}
-                        <tr>
-                            <td>{{ dev.fecha.strftime('%d/%m/%Y %H:%M') }}</td>
-                            <td>
-                                <span class="badge {% if 'CTA' in dev.tipo %}bg-primary{% else %}bg-warning text-dark{% endif %}">
-                                    {{ dev.tipo }}
-                                </span>
-                            </td>
-                            <td class="text-truncate" style="max-width: 200px;">{{ dev.cuenta }}</td>
-                            <td>{{ dev.motivo }}</td>
-                            <td class="text-end text-danger fw-bold">-${{ "{:,.2f}".format(dev.monto) }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-    {% endif %}
-
-    <!-- TABLA DETALLE POR REPUESTO VENDIDO -->
-    <div class="card shadow-sm border-0">
-        <div class="card-header bg-dark text-white py-2 px-3 d-flex justify-content-between align-items-center">
-            <span class="small fw-bold text-uppercase">Detalle de Repuestos Vendidos ({{ items|length }} registros)</span>
-            <button onclick="window.print()" class="btn btn-sm btn-outline-light py-0"><i class="bi bi-printer me-1"></i> Imprimir</button>
-        </div>
-        <div class="card-body p-0">
-            <div class="table-responsive">
-                <table class="table table-hover table-striped mb-0 align-middle table-rentabilidad">
-                    <thead class="table-light">
-                        <tr>
-                            <th style="width: 7%;">Fecha</th>
-                            <th style="width: 6%;">Comp #</th>
-                            <th style="width: 11%;">Cliente</th>
-                            <th style="width: 7%;">Sucursal</th>
-                            <th style="width: 8%;">SKU</th>
-                            <th style="width: 17%;">Descripción</th>
-                            <th style="width: 4%;" class="text-center">Cant</th>
-                            <th style="width: 7%;" class="text-end">Costo U.</th>
-                            <th style="width: 8%;" class="text-end text-danger">Costo Tot.</th>
-                            <th style="width: 7%;" class="text-end">Venta U.</th>
-                            <th style="width: 8%;" class="text-end text-primary">Venta Tot.</th>
-                            <th style="width: 8%;" class="text-end text-success">Utilidad ($)</th>
-                            <th style="width: 6%;" class="text-center">Rent. (%)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for it in items %}
-                        <tr>
-                            <td>{{ it.fecha.strftime('%d/%m/%Y') }}</td>
-                            <td><span class="badge bg-secondary">{{ it.tipo_comp[:3] }} #{{ it.venta_id }}</span></td>
-                            <td class="text-truncate" style="max-width: 120px;" title="{{ it.cliente }}">{{ it.cliente }}</td>
-                            <td>{{ it.sucursal }}</td>
-                            <td><span class="badge bg-dark">{{ it.sku }}</span></td>
-                            <td class="text-truncate fw-bold" style="max-width: 180px;" title="{{ it.nombre }}">{{ it.nombre }}</td>
-                            <td class="text-center fw-bold">{{ it.cantidad }}</td>
-                            <td class="text-end text-muted">${{ "{:,.2f}".format(it.costo_unitario) }}</td>
-                            <td class="text-end text-danger">${{ "{:,.2f}".format(it.costo_total) }}</td>
-                            <td class="text-end text-muted">${{ "{:,.2f}".format(it.precio_unitario) }}</td>
-                            <td class="text-end text-primary fw-bold">${{ "{:,.2f}".format(it.venta_total) }}</td>
-                            <td class="text-end fw-bold {% if it.ganancia >= 0 %}text-success{% else %}text-danger{% endif %}">
-                                ${{ "{:,.2f}".format(it.ganancia) }}
-                            </td>
-                            <td class="text-center">
-                                <span class="badge {% if it.margen_porc >= 35 %}bg-success{% elif it.margen_porc >= 15 %}bg-warning text-dark{% elif it.margen_porc >= 0 %}bg-info text-dark{% else %}bg-danger{% endif %}">
-                                    {{ it.margen_porc }}%
-                                </span>
-                            </td>
-                        </tr>
+    <!-- TABLA AJUSTADA A LA PANTALLA CON SCROLL INTERNO -->
+    <div class="table-viewport-container shadow-sm">
+        <table class="table table-hover table-striped align-middle table-rentabilidad">
+            <!-- DISTRIBUCIÓN CALIBRADA DEL 100% DEL ANCHO -->
+            <colgroup>
+                <col style="width: 7%;">   <!-- FECHA -->
+                <col style="width: 6%;">   <!-- COMPROBANTE -->
+                <col style="width: 9%;">   <!-- CLIENTE -->
+                <col style="width: 4%;">   <!-- SUC -->
+                <col style="width: 8%;">   <!-- SKU PROVEEDOR -->
+                <col style="width: 15%;">  <!-- REPUESTO -->
+                <col style="width: 3.5%;"> <!-- CANT -->
+                <col style="width: 6.5%;"> <!-- COSTO U. -->
+                <col style="width: 6.5%;"> <!-- IVA COMP. -->
+                <col style="width: 7.5%;"> <!-- COSTO TOT. -->
+                <col style="width: 6.5%;"> <!-- PRECIO U. -->
+                <col style="width: 6%;">   <!-- DESC. -->
+                <col style="width: 7.5%;"> <!-- VENTA TOTAL -->
+                <col style="width: 6%;">   <!-- GANANCIA -->
+                <col style="width: 5%;">   <!-- MARGEN -->
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="ps-2">FECHA</th>
+                    <th>COMPROBANTE</th>
+                    <th>CLIENTE</th>
+                    <th>SUC.</th>
+                    <th class="text-primary">SKU PROVEEDOR</th>
+                    <th>REPUESTO / DESCRIPCIÓN</th>
+                    <th class="text-center">CANT</th>
+                    <th class="text-center:""">COSTO U.</th>
+                    <th class="text-center:"" text-info bg-dark bg-opacity-75">IVA COMP.</th>
+                    <th class="text-center:"" text-light bg-dark bg-opacity-75">COSTO TOT. (c/ IVA)</th>
+                    
+                    <th class="text-center:""">PRECIO U.</th>
+                    <th class="text-center:"" text-warning bg-dark bg-opacity-75">DESC. ($)</th>
+                    <th class="text-center:""">VENTA TOTAL</th>
+                    <th class="text-center:""">GANANCIA</th>
+                    <th class="text-center:"" pe-2">MARGEN</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for i in items %}
+                <tr>
+                    <td class="ps-2">{{ i.fecha.strftime('%d/%m/%y %H:%M') if i.fecha else 'S/F' }}</td>
+                    <td>
+                        <span class="badge bg-secondary-subtle text-dark border px-1" style="font-size: 0.65rem;">
+                            {{ i.tipo_comp[:3] }} #{{ i.venta_id }}
+                        </span>
+                    </td>
+                    <td>
+                        <div class="cell-truncate" title="{{ i.cliente }}">{{ i.cliente }}</div>
+                    </td>
+                    <td>
+                        <span class="badge bg-light text-dark border px-1" style="font-size: 0.62rem;">{{ i.sucursal[:4] }}</span>
+                    </td>
+                    <td class="fw-bold text-primary font-monospace" style="font-size: 0.72rem;">{{ i.sku_proveedor }}</td>
+                    <td>
+                        <div class="cell-truncate-lg" title="{{ i.nombre }}">{{ i.nombre }}</div>
+                    </td>
+                    <td class="text-center fw-bold">{{ i.cantidad }}</td>
+                    <td class="text-center:"" text-muted font-monospace">$ {{ "{:,.2f}".format(i.costo_unitario) }}</td>
+                    
+                    <!-- IVA COMPRAS: DEL VALOR REAL DE COMPRA -->
+                    <td class="text-center:"" font-monospace text-info">
+                        {% if i.iva_compra > 0 %}
+                            $ {{ "{:,.2f}".format(i.iva_compra) }}
+                            <span class="badge bg-info-subtle text-info border border-info badge-iva">{{ "{:,.0f}".format(i.alicuota_iva_compra) }}%</span>
                         {% else %}
-                        <tr>
-                            <td colspan="13" class="text-center py-5 text-muted fst-italic">
-                                No se registraron ventas en el período seleccionado.
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                    <tfoot class="table-dark fw-bold">
-                        <tr>
-                            <td colspan="6" class="text-uppercase text-end">TOTALES DEL PERÍODO (NETO):</td>
-                            <td class="text-center text-info">{{ total_unidades }}</td>
-                            <td></td>
-                            <td class="text-end text-danger">${{ "{:,.2f}".format(total_costo) }}</td>
-                            <td></td>
-                            <td class="text-end text-primary">${{ "{:,.2f}".format(total_venta) }}</td>
-                            <td class="text-end text-success">${{ "{:,.2f}".format(ganancia_global) }}</td>
-                            <td class="text-center text-warning">{{ margen_global }}%</td>
-                        </tr>
-                    </tfoot>
-                </table>
+                            <span class="text-muted opacity-25">-</span>
+                        {% endif %}
+                    </td>
+                    
+                     <!-- COSTO TOTAL: COSTO UNITARIO BASE * CANTIDAD + IVA COMPRAS -->
+                    <td class="text-center:"" fw-bold font-monospace text-dark">$ {{ "{:,.2f}".format(i.costo_total) }}</td>
+                    
+
+                    <td class="text-center:"" font-monospace">$ {{ "{:,.2f}".format(i.precio_unitario) }}</td>
+
+                    <!-- DESCUENTO EN VENTA DEL ÍTEM -->
+                    <td class="text-center:"" font-monospace text-warning fw-semibold">
+                        {% if i.descuento > 0 %}
+                            -$ {{ "{:,.2f}".format(i.descuento) }}
+                        {% else %}
+                            <span class="text-muted opacity-25">-</span>
+                        {% endif %}
+                    </td>
+
+                    <td class="text-center:"" fw-bold font-monospace text-dark">$ {{ "{:,.2f}".format(i.venta_total) }}</td>
+                    <td class="text-center:"" fw-bold font-monospace {% if i.ganancia >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        $ {{ "{:,.2f}".format(i.ganancia) }}
+                    </td>
+                    <td class="text-center:"" pe-2 fw-bold font-monospace {% if i.margen_porc >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        {{ "{:,.1f}".format(i.margen_porc) }}%
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="15" class="text-center py-4 text-muted">
+                        <i class="bi bi-inbox fs-4 d-block mb-1"></i>
+                        No se encontraron ventas para los filtros seleccionados.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <!-- PIE DE TOTALES FIJO AL FONDO -->
+            <tfoot class="fw-bold">
+                <tr>
+                    <td colspan="6" class="ps-2 text-uppercase">TOTALES GENERALES (PERÍODO):</td>
+                    <td class="text-center">{{ total_unidades }}</td>
+                    <td class="text-center:""">-</td>
+                    
+                    <td class="text-center:"" font-monospace text-info">$ {{ "{:,.2f}".format(total_iva_compras) }}</td>
+                    <td class="text-center:"" font-monospace text-white">$ {{ "{:,.2f}".format(total_costo) }}</td>
+                    <td class="text-center:""">-</td>
+                    <td class="text-center:"" font-monospace text-warning">-$ {{ "{:,.2f}".format(total_descuentos) }}</td>
+                    <td class="text-center:"" font-monospace text-white">$ {{ "{:,.2f}".format(total_venta_bruto - total_descuentos) }}</td>
+                    <td class="text-center:"" font-monospace {% if ganancia_global >= 0 %}text-success{% else %}text-danger{% endif %}">
+                        $ {{ "{:,.2f}".format(ganancia_global) }}
+                    </td>
+                    <td class="text-center:"" pe-2 font-monospace text-info">{{ "{:,.2f}".format(margen_global) }}%</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+<!-- MODAL DE DETALLE DE DEVOLUCIONES -->
+<div class="modal fade" id="modalDevoluciones" tabindex="-1" aria-labelledby="modalDevolucionesLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header bg-danger text-white py-2">
+                <h6 class="modal-title fw-bold" id="modalDevolucionesLabel">
+                    <i class="bi bi-arrow-return-left me-1"></i>Detalle de Devoluciones del Período
+                </h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-striped mb-0" style="font-size: 0.75rem;">
+                        <thead class="table-light">
+                            <tr>
+                                <th>FECHA</th>
+                                <th>ORIGEN</th>
+                                <th>CUENTA / CAJA</th>
+                                <th>MOTIVO / DESCRIPCIÓN</th>
+                                <th class="text-end pe-3">MONTO</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for d in devoluciones %}
+                            <tr>
+                                <td>{{ d.fecha.strftime('%d/%m/%Y %H:%M') if d.fecha else 'S/F' }}</td>
+                                <td><span class="badge bg-secondary">{{ d.tipo }}</span></td>
+                                <td>{{ d.cuenta }}</td>
+                                <td>{{ d.motivo }}</td>
+                                <td class="text-end pe-3 text-danger fw-bold font-monospace">-$ {{ "{:,.2f}".format(d.monto) }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="5" class="text-center py-3 text-muted">No hubo devoluciones en este período.</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="table-light fw-bold">
+                            <tr>
+                                <td colspan="4" class="text-uppercase text-end">Total Devoluciones:</td>
+                                <td class="text-end pe-3 text-danger font-monospace">-$ {{ "{:,.2f}".format(total_devoluciones) }}</td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer py-1">
+                <button type="button" class="btn btn-secondary btn-sm py-0" data-bs-dismiss="modal">Cerrar</button>
             </div>
         </div>
     </div>
 </div>
+
+!-- SCRIPT DE DESCARGA A EXCEL -->
+<script>
+function exportarExcel() {
+    const form = document.querySelector('form');
+    const params = form ? new URLSearchParams(new FormData(form)) : new URLSearchParams();
+    params.set('export', 'excel');
+    window.location.href = "{{ url_for('admin.reporte_rentabilidad_ventas') }}?" + params.toString();
+}
+</script>
 {% endblock %}
+

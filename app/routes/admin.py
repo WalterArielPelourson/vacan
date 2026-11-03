@@ -3532,8 +3532,179 @@ def procesar_devolucion():
     except Exception as e:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(e)}), 500
-    
+
+import io
+from flask import send_file
+import csv    
+from datetime import datetime, date
+from decimal import Decimal
+from flask import render_template, request
+from flask_login import login_required, current_user
+from sqlalchemy import or_
 from sqlalchemy.orm import joinedload
+
+# Intentar importar modelos de compras reales de forma segura
+try:
+    from app.models import DetalleCompra, Compra
+except Exception:
+    try:
+        from app.models.inventory import DetalleCompra, Compra
+    except Exception:
+        DetalleCompra, Compra = None, None
+
+
+# Helper para limpiar y convertir números de forma ultra segura (soporta Decimal, float, int y strings con '$' o '%')
+def parse_monto_seguro(val):
+    if val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    if isinstance(val, Decimal):
+        return float(val)
+    if isinstance(val, str):
+        s = val.replace('$', '').replace('%', '').replace(' ', '').replace(',', '.').strip()
+        try:
+            return float(s)
+        except (ValueError, TypeError):
+            return 0.0
+    return 0.0
+
+
+def obtener_datos_compra_repuesto(d, detalle_compra_model=None):
+    """
+    Obtiene el costo unitario base y la alícuota de IVA compra
+    inspeccionando el Repuesto y la última compra real registrada.
+    """
+    rep = getattr(d, 'repuesto', None)
+
+    # 1. Costo unitario base
+    costo_u = 0.0
+    if rep:
+        for attr in ['costo', 'precio_costo', 'costo_unitario', 'ultimo_costo', 'costo_base', 'precio_compra', 'costo_promedio']:
+            c = parse_monto_seguro(getattr(rep, attr, None))
+            if c > 0:
+                costo_u = c
+                break
+
+    if costo_u == 0.0:
+        for attr in ['costo', 'costo_unitario', 'precio_costo']:
+            c = parse_monto_seguro(getattr(d, attr, None))
+            if c > 0:
+                costo_u = c
+                break
+
+    # 2. Detección de IVA Compras y Alícuota
+    alicuota_iva = 0.0
+    compra_con_iva = False
+
+    # A) Buscar en el Repuesto (campo exacto del modelo: iva_porcentaje)
+    if rep:
+        raw_iva = getattr(rep, 'iva_porcentaje', None)
+        if raw_iva is None:
+            for attr_ali in ['porcentaje_iva', 'alicuota_iva', 'iva', 'alicuota', 'tasa_iva']:
+                v = getattr(rep, attr_ali, None)
+                if v is not None:
+                    raw_iva = v
+                    break
+
+        num_iva = parse_monto_seguro(raw_iva)
+        if num_iva > 0:
+            compra_con_iva = True
+            alicuota_iva = num_iva * 100.0 if num_iva < 1.0 else num_iva
+
+        # Si viene como indicador booleano o texto afirmativo
+        if not compra_con_iva:
+            for attr_flag in ['compra_con_iva', 'con_iva', 'iva_compras', 'comprado_con_iva', 'aplica_iva', 'lleva_iva', 'con_factura']:
+                v_flag = getattr(rep, attr_flag, None)
+                if v_flag is True or str(v_flag).strip().lower() in ('si', 's', 'true', '1', 'con iva', 'con_iva'):
+                    compra_con_iva = True
+                    alicuota_iva = 21.0
+                    break
+
+        # Búsqueda en __dict__ del repuesto
+        if not compra_con_iva:
+            for k, val_k in getattr(rep, '__dict__', {}).items():
+                if not k.startswith('_') and any(term in k.lower() for term in ['iva_porc', 'porc_iva', 'alicuota', 'compra_con_iva', 'con_iva']):
+                    num_k = parse_monto_seguro(val_k)
+                    if num_k > 0:
+                        compra_con_iva = True
+                        alicuota_iva = num_k * 100.0 if num_k < 1.0 else num_k
+                        break
+                    elif val_k is True or str(val_k).strip().lower() in ('si', 's', 'true', '1'):
+                        compra_con_iva = True
+                        alicuota_iva = 21.0
+                        break
+
+    # B) Buscar en la última COMPRA REAL registrada para este repuesto (DetalleCompra)
+    if detalle_compra_model and getattr(d, 'repuesto_id', None):
+        try:
+            ultimo_det = detalle_compra_model.query.filter_by(
+                repuesto_id=d.repuesto_id
+            ).order_by(detalle_compra_model.id.desc()).first()
+
+            if ultimo_det:
+                # Si no teníamos costo_u, tomar el costo real pactado en la compra
+                if costo_u == 0.0:
+                    for attr in ['costo', 'precio_costo', 'costo_unitario', 'precio_unitario']:
+                        c = parse_monto_seguro(getattr(ultimo_det, attr, None))
+                        if c > 0:
+                            costo_u = c
+                            break
+
+                # Buscar iva_porcentaje en la compra real
+                for attr_ali in ['iva_porcentaje', 'porcentaje_iva', 'alicuota_iva', 'iva', 'alicuota']:
+                    v = getattr(ultimo_det, attr_ali, None)
+                    num_v = parse_monto_seguro(v)
+                    if num_v > 0:
+                        compra_con_iva = True
+                        alicuota_iva = num_v * 100.0 if num_v < 1.0 else num_v
+                        break
+                    elif v is True or str(v).strip().lower() in ('si', 's', 'true', '1'):
+                        compra_con_iva = True
+                        alicuota_iva = 21.0
+                        break
+
+                # Si la cabecera de la compra indica Factura A o con IVA
+                if not compra_con_iva and hasattr(ultimo_det, 'compra') and ultimo_det.compra:
+                    c_obj = ultimo_det.compra
+                    tipo_c = str(getattr(c_obj, 'tipo_comprobante', '') or getattr(c_obj, 'tipo_factura', '')).upper()
+                    if 'FACTURA A' in tipo_c or tipo_c == 'A' or 'CON IVA' in tipo_c:
+                        compra_con_iva = True
+                        alicuota_iva = 21.0
+                    else:
+                        num_c = parse_monto_seguro(getattr(c_obj, 'iva_porcentaje', None))
+                        if num_c > 0:
+                            compra_con_iva = True
+                            alicuota_iva = num_c * 100.0 if num_c < 1.0 else num_c
+        except Exception:
+            pass
+
+    # C) Buscar en relación ORM del repuesto (detalles_compra / compras)
+    if not compra_con_iva and rep:
+        for rel in ['detalles_compra', 'compras', 'detalles_compras']:
+            detalles_comp = getattr(rep, rel, None)
+            if detalles_comp:
+                try:
+                    ultimo = list(detalles_comp)[-1]
+                    for attr_ali in ['iva_porcentaje', 'porcentaje_iva', 'alicuota_iva', 'iva', 'alicuota']:
+                        num_v = parse_monto_seguro(getattr(ultimo, attr_ali, None))
+                        if num_v > 0:
+                            compra_con_iva = True
+                            alicuota_iva = num_v * 100.0 if num_v < 1.0 else num_v
+                            break
+                    if costo_u == 0.0:
+                        for attr in ['costo', 'precio_costo', 'costo_unitario', 'precio_unitario']:
+                            c = parse_monto_seguro(getattr(ultimo, attr, None))
+                            if c > 0:
+                                costo_u = c
+                                break
+                except Exception:
+                    pass
+                if compra_con_iva:
+                    break
+
+    return costo_u, compra_con_iva, alicuota_iva
+
 
 @admin_bp.route('/reportes/rentabilidad-ventas')
 @login_required
@@ -3544,14 +3715,24 @@ def reporte_rentabilidad_ventas():
     hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
     f_sucursal = request.args.get('sucursal_id', type=int)
     f_cliente = request.args.get('cliente_id', type=int)
+    formato_export = request.args.get('export', '').lower().strip()
 
-    desde = datetime.strptime(desde_str, '%Y-%m-%d')
-    hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+    try:
+        desde = datetime.strptime(desde_str, '%Y-%m-%d')
+    except Exception:
+        desde = datetime.combine(date.today().replace(day=1), datetime.min.time())
+        desde_str = desde.strftime('%Y-%m-%d')
+
+    try:
+        hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        hasta = datetime.combine(date.today(), datetime.max.time())
+        hasta_str = date.today().strftime('%Y-%m-%d')
 
     if current_user.rol == 'admin':
         f_sucursal = current_user.sucursal_id
 
-    # 2. Consulta de Ventas del período
+    # 2. Consulta de Ventas del período con relaciones precargadas
     query = Venta.query.options(
         joinedload(Venta.cliente),
         joinedload(Venta.sucursal),
@@ -3568,48 +3749,187 @@ def reporte_rentabilidad_ventas():
     # 3. Procesar ítems vendidos
     items_reporte = []
     total_venta_bruto = 0.0
-    total_costo_bruto = 0.0
+    total_descuentos = 0.0
+    total_costo_base = 0.0
+    total_costo_total = 0.0      # Costo Base + IVA Compras
+    total_iva_compras = 0.0
     total_unidades = 0
 
     for v in ventas:
-        for d in v.detalles:
-            cant = d.cantidad or 0
-            precio_u = d.precio_unitario or 0.0
-            costo_u = (d.repuesto.costo if d.repuesto and d.repuesto.costo else 0.0)
-            
-            subtotal_venta = cant * precio_u
-            subtotal_costo = cant * costo_u
-            ganancia_item = subtotal_venta - subtotal_costo
+        detalles_venta = list(v.detalles or [])
+        if not detalles_venta:
+            continue
 
-            if subtotal_costo > 0:
-                margen_porc = round(((subtotal_venta / subtotal_costo) - 1) * 100, 2)
+        suma_bruta_comprobante = sum(
+            (int(det.cantidad or 0) * parse_monto_seguro(det.precio_unitario))
+            for det in detalles_venta
+        )
+
+        # -------------------------------------------------------------
+        # 3.A. DETECCIÓN DEL DESCUENTO A NIVEL VENTA (CABECERA)
+        # -------------------------------------------------------------
+        desc_global_venta = 0.0
+
+        for attr in ['descuento', 'descuento_monto', 'monto_descuento', 'total_descuento', 'bonificacion', 'monto_bonificacion']:
+            val = parse_monto_seguro(getattr(v, attr, None))
+            if val > 0:
+                es_porc = (
+                    getattr(v, 'tipo_descuento', '') in ('PORCENTAJE', '%', 'porcentaje') or
+                    getattr(v, 'es_porcentaje', False) or
+                    (hasattr(v, 'porcentaje_descuento') and parse_monto_seguro(getattr(v, 'porcentaje_descuento')) == val)
+                )
+                if es_porc:
+                    desc_global_venta = suma_bruta_comprobante * (val / 100.0)
+                else:
+                    desc_global_venta = val
+                break
+
+        if desc_global_venta == 0.0:
+            for attr in ['porcentaje_descuento', 'descuento_porcentaje', 'descuento_porc', 'porc_descuento', 'porc_desc', 'porcentaje_bonificacion']:
+                val = parse_monto_seguro(getattr(v, attr, None))
+                if val > 0:
+                    desc_global_venta = suma_bruta_comprobante * (val / 100.0)
+                    break
+
+        if desc_global_venta == 0.0:
+            for k, val_raw in getattr(v, '__dict__', {}).items():
+                if not k.startswith('_') and any(t in k.lower() for t in ['desc', 'dto', 'bonif']):
+                    val = parse_monto_seguro(val_raw)
+                    if val > 0:
+                        if 'porc' in k.lower() or '%' in k.lower() or val <= 100.0:
+                            desc_global_venta = suma_bruta_comprobante * (val / 100.0)
+                        else:
+                            desc_global_venta = val
+                        break
+
+        if desc_global_venta == 0.0 and suma_bruta_comprobante > 0:
+            for attr in ['total', 'total_venta', 'monto_total', 'importe_total', 'total_final', 'monto', 'importe']:
+                val_total = parse_monto_seguro(getattr(v, attr, None))
+                if 0 < val_total < (suma_bruta_comprobante - 0.05):
+                    desc_global_venta = suma_bruta_comprobante - val_total
+                    break
+
+        # -------------------------------------------------------------
+        # 3.B. PROCESAR CADA LÍNEA / ÍTEM DE LA VENTA
+        # -------------------------------------------------------------
+        for d in detalles_venta:
+            cant = int(d.cantidad or 0)
+            precio_u = parse_monto_seguro(d.precio_unitario)
+
+            costo_u, compra_con_iva, alicuota_iva = obtener_datos_compra_repuesto(d, DetalleCompra)
+
+            subtotal_bruto = cant * precio_u
+            subtotal_costo_base = cant * costo_u
+
+            # DESCUENTO EN EL ÍTEM
+            desc_item = 0.0
+
+            for attr in ['descuento', 'descuento_monto', 'monto_descuento', 'dto', 'bonificacion', 'monto_bonificacion']:
+                val = parse_monto_seguro(getattr(d, attr, None))
+                if val > 0:
+                    if getattr(d, 'tipo_descuento', '') in ('PORCENTAJE', '%', 'porcentaje') or getattr(d, 'es_porcentaje', False):
+                        desc_item = subtotal_bruto * (val / 100.0)
+                    elif val <= 100.0 and (val < subtotal_bruto) and hasattr(d, 'porcentaje_descuento'):
+                        desc_item = subtotal_bruto * (val / 100.0)
+                    else:
+                        desc_item = val
+                    break
+
+            if desc_item == 0.0:
+                for attr in ['porcentaje_descuento', 'descuento_porcentaje', 'descuento_porc', 'porc_descuento', 'porc_desc', 'dto']:
+                    val = parse_monto_seguro(getattr(d, attr, None))
+                    if val > 0:
+                        desc_item = subtotal_bruto * (val / 100.0)
+                        break
+
+            if desc_item == 0.0 and subtotal_bruto > 0:
+                for attr in ['subtotal', 'total', 'importe', 'monto', 'total_linea', 'subtotal_neto']:
+                    val_sub = parse_monto_seguro(getattr(d, attr, None))
+                    if 0 < val_sub < (subtotal_bruto - 0.05):
+                        desc_item = subtotal_bruto - val_sub
+                        break
+
+            if desc_item == 0.0:
+                for k, val_raw in getattr(d, '__dict__', {}).items():
+                    if not k.startswith('_') and any(t in k.lower() for t in ['desc', 'dto', 'bonif']):
+                        val = parse_monto_seguro(val_raw)
+                        if val > 0:
+                            if 'porc' in k.lower() or '%' in k.lower():
+                                desc_item = subtotal_bruto * (val / 100.0)
+                            else:
+                                desc_item = val
+                            break
+
+            if desc_item == 0.0 and desc_global_venta > 0.0 and suma_bruta_comprobante > 0.0:
+                desc_item = desc_global_venta * (subtotal_bruto / suma_bruta_comprobante)
+
+            desc_item = round(desc_item, 2)
+            subtotal_venta = max(0.0, round(subtotal_bruto - desc_item, 2))
+
+            # IVA COMPRAS
+            if compra_con_iva and alicuota_iva > 0 and subtotal_costo_base > 0:
+                iva_compra_item = round(subtotal_costo_base * (alicuota_iva / 100.0), 2)
+            else:
+                iva_compra_item = 0.0
+                compra_con_iva = False
+
+            # COSTO TOTAL = BASE + IVA COMPRAS
+            costo_total_linea = round(subtotal_costo_base + iva_compra_item, 2)
+            ganancia_item = round(subtotal_venta - costo_total_linea, 2)
+
+            if costo_total_linea > 0:
+                margen_porc = round(((subtotal_venta / costo_total_linea) - 1) * 100, 2)
             elif subtotal_venta > 0:
                 margen_porc = 100.0
             else:
                 margen_porc = 0.0
 
+            sku_proveedor_val = 'MANUAL'
+            if d.repuesto:
+                sku_proveedor_val = (
+                    getattr(d.repuesto, 'sku_proveedor', None) or
+                    getattr(d.repuesto, 'codigo_proveedor', None) or
+                    getattr(d.repuesto, 'cod_proveedor', None) or
+                    getattr(d.repuesto, 'sku', None) or
+                    getattr(d.repuesto, 'codigo', None) or
+                    f"ART-{d.repuesto.id}"
+                )
+
+            # Diccionario con soporte para ambos nombres de campos (evita KeyError)
             items_reporte.append({
                 'fecha': v.fecha,
                 'venta_id': v.id,
                 'tipo_comp': v.tipo_comprobante or 'REMITO',
                 'cliente': v.cliente.razon_social if v.cliente else 'Consumidor Final',
                 'sucursal': v.sucursal.nombre if v.sucursal else 'S/D',
-                'sku': d.repuesto.sku if d.repuesto else 'MANUAL',
+                'sku': sku_proveedor_val,
+                'sku_proveedor': sku_proveedor_val,
                 'nombre': d.nombre_item or (d.repuesto.nombre if d.repuesto else 'S/D'),
                 'cantidad': cant,
                 'costo_unitario': costo_u,
-                'costo_total': subtotal_costo,
+                'costo_total': costo_total_linea,
+                'compra_con_iva': compra_con_iva,
+                'alicuota_iva_compra': alicuota_iva,
+                'iva_porcentaje': alicuota_iva,      # Alias seguro
+                'iva_compra': iva_compra_item,
                 'precio_unitario': precio_u,
+                'venta_bruta': subtotal_bruto,
+                'descuento': desc_item,
+                'descuento_monto': desc_item,        # Alias seguro
                 'venta_total': subtotal_venta,
+                'subtotal_venta': subtotal_venta,    # Alias seguro
                 'ganancia': ganancia_item,
                 'margen_porc': margen_porc
             })
 
-            total_venta_bruto += subtotal_venta
-            total_costo_bruto += subtotal_costo
+            total_venta_bruto += subtotal_bruto
+            total_descuentos += desc_item
+            total_costo_base += subtotal_costo_base
+            total_costo_total += costo_total_linea
+            total_iva_compras += iva_compra_item
             total_unidades += cant
 
-    # 4. CAPTURAR Y CALCULAR DEVOLUCIONES DEL PERÍODO (Caja y Cta Cte)
+    # 4. DEVOLUCIONES
     q_dev_caja = MovimientoFinanciero.query.filter(
         or_(
             MovimientoFinanciero.metodo_detalle == 'DEVOLUCION',
@@ -3632,16 +3952,17 @@ def reporte_rentabilidad_ventas():
     if f_cliente:
         q_dev_cta = q_dev_cta.filter(MovimientoCtaCte.cliente_id == f_cliente)
 
-    devs_caja_monto = sum(m.monto for m in q_dev_caja.all())
-    devs_cta_monto = sum(abs(m.monto) for m in q_dev_cta.all())
+    devs_caja_monto = float(sum(parse_monto_seguro(m.monto) for m in q_dev_caja.all()) or 0.0)
+    devs_cta_monto = float(sum(abs(parse_monto_seguro(m.monto)) for m in q_dev_cta.all()) or 0.0)
     total_devoluciones = devs_caja_monto + devs_cta_monto
 
-    # 5. CÁLCULOS NETOS REALES
-    venta_neta_real = total_venta_bruto - total_devoluciones
-    ganancia_neta_real = venta_neta_real - total_costo_bruto
+    # 5. CÁLCULOS NETOS
+    total_venta_neta_items = total_venta_bruto - total_descuentos
+    venta_neta_real = total_venta_neta_items - total_devoluciones
+    ganancia_neta_real = venta_neta_real - total_costo_total
 
-    if total_costo_bruto > 0:
-        margen_global_porc = round(((venta_neta_real / total_costo_bruto) - 1) * 100, 2)
+    if total_costo_total > 0:
+        margen_global_porc = round(((venta_neta_real / total_costo_total) - 1) * 100, 2)
     elif venta_neta_real > 0:
         margen_global_porc = 100.0
     else:
@@ -3649,34 +3970,235 @@ def reporte_rentabilidad_ventas():
 
     margen_sobre_venta = round((ganancia_neta_real / venta_neta_real * 100), 2) if venta_neta_real > 0 else 0.0
 
-    # Lista consolidada de devoluciones para el modal/detalle
     lista_devoluciones = []
     for dc in q_dev_caja.all():
         lista_devoluciones.append({
-            'fecha': dc.fecha, 'tipo': 'CAJA / EFECTIVO', 
+            'fecha': dc.fecha,
+            'tipo': 'CAJA / EFECTIVO',
             'cuenta': dc.caja.nombre if dc.caja else 'Caja',
-            'motivo': dc.motivo, 'monto': dc.monto
+            'motivo': dc.motivo,
+            'monto': parse_monto_seguro(dc.monto)
         })
     for dcta in q_dev_cta.all():
         lista_devoluciones.append({
-            'fecha': dcta.fecha, 'tipo': 'CTA CTE (CRÉDITO)', 
+            'fecha': dcta.fecha,
+            'tipo': 'CTA CTE (CRÉDITO)',
             'cuenta': dcta.cliente.razon_social if dcta.cliente else 'Cliente',
-            'motivo': dcta.descripcion, 'monto': abs(dcta.monto)
+            'motivo': dcta.descripcion,
+            'monto': abs(parse_monto_seguro(dcta.monto))
         })
+
+    # Diccionario 'totales' para que el Excel lo tenga disponible sin error
+    totales = {
+        'venta_bruta': round(total_venta_bruto, 2),
+        'descuentos': round(total_descuentos, 2),
+        'devoluciones': round(total_devoluciones, 2),
+        'venta_neta': round(venta_neta_real, 2),
+        'costo_total': round(total_costo_total, 2),
+        'iva_compras': round(total_iva_compras, 2),
+        'ganancia_neta': round(ganancia_neta_real, 2),
+        'margen_global': margen_global_porc,
+        'unidades': total_unidades
+    }
+
+    # -------------------------------------------------------------
+    # 6. DESCARGA EXCEL GARANTIZADA (.xlsx con openpyxl o .csv Excel)
+    # -------------------------------------------------------------
+    def descargar_buffer(buffer_datos, nombre_archivo, tipo_mime):
+        buffer_datos.seek(0)
+        try:
+            return send_file(
+                buffer_datos,
+                as_attachment=True,
+                download_name=nombre_archivo,
+                mimetype=tipo_mime
+            )
+        except TypeError:
+            return send_file(
+                buffer_datos,
+                as_attachment=True,
+                attachment_filename=nombre_archivo,
+                mimetype=tipo_mime
+            )
+
+    if formato_export in ['excel', 'xlsx', 'csv']:
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment
+
+            wb = openpyxl.Workbook()
+            ws = wb.active
+            ws.title = "Rentabilidad Ventas"
+
+            header_fill = PatternFill(start_color="111827", end_color="111827", fill_type="solid")
+            header_font = Font(name="Arial", size=9, bold=True, color="FFFFFF")
+            iva_header_fill = PatternFill(start_color="0B3B48", end_color="0B3B48", fill_type="solid")
+            desc_header_fill = PatternFill(start_color="4D3800", end_color="4D3800", fill_type="solid")
+            total_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+
+            headers = [
+                "FECHA", "COMPROBANTE", "CLIENTE", "SUCURSAL", "SKU PROVEEDOR",
+                "REPUESTO / DESCRIPCIÓN", "CANT", "COSTO U. ($)", "IVA COMPRA ($)",
+                "% IVA COMP.", "COSTO TOT. c/ IVA ($)", "PRECIO U. ($)", "DESC. ($)",
+                "VENTA NETA ($)", "GANANCIA ($)", "MARGEN (%)"
+            ]
+            ws.append(headers)
+
+            for col_idx, cell in enumerate(ws[1], start=1):
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                if col_idx in [9, 10]:
+                    cell.fill = iva_header_fill
+                elif col_idx == 13:
+                    cell.fill = desc_header_fill
+                else:
+                    cell.fill = header_fill
+
+            for i in items_reporte:
+                ws.append([
+                    i['fecha'].strftime('%d/%m/%Y %H:%M') if i['fecha'] else '',
+                    f"{i['tipo_comp']} #{i['venta_id']}",
+                    i['cliente'],
+                    i['sucursal'],
+                    i['sku_proveedor'],
+                    i['nombre'],
+                    i['cantidad'],
+                    i['costo_unitario'],
+                    i['iva_compra'],
+                    (i['iva_porcentaje'] / 100.0) if i['iva_porcentaje'] else 0.0,
+                    i['costo_total'],
+                    i['precio_unitario'],
+                    i['descuento'],
+                    i['venta_total'],
+                    i['ganancia'],
+                    (i['margen_porc'] / 100.0) if i['margen_porc'] else 0.0
+                ])
+
+            for row in ws.iter_rows(min_row=2, max_row=ws.max_row):
+                row[6].number_format = '#,##0'
+                row[6].alignment = Alignment(horizontal="center")
+                for col_idx in [7, 8, 10, 11, 12, 13, 14]:
+                    row[col_idx].number_format = '$#,##0.00'
+                    row[col_idx].alignment = Alignment(horizontal="right")
+                row[9].number_format = '0.0%'
+                row[9].alignment = Alignment(horizontal="right")
+                row[15].number_format = '0.00%'
+                row[15].alignment = Alignment(horizontal="right")
+
+            ws.append([
+                "TOTALES GENERALES", "", "", "", "", "",
+                totales['unidades'],
+                "-",
+                totales['iva_compras'],
+                "",
+                totales['costo_total'],
+                "-",
+                totales['descuentos'],
+                totales['venta_neta'],
+                totales['ganancia_neta'],
+                (totales['margen_global'] / 100.0)
+            ])
+
+            last_row = ws.max_row
+            ws.merge_cells(start_row=last_row, start_column=1, end_row=last_row, end_column=6)
+            for cell in ws[last_row]:
+                cell.font = Font(name="Arial", size=9, bold=True, color="FFFFFF")
+                cell.fill = total_fill
+            ws.cell(row=last_row, column=7).alignment = Alignment(horizontal="center")
+            ws.cell(row=last_row, column=7).number_format = '#,##0'
+            for col_idx in [9, 11, 13, 14, 15]:
+                c = ws.cell(row=last_row, column=col_idx)
+                c.number_format = '$#,##0.00'
+                c.alignment = Alignment(horizontal="right")
+            ws.cell(row=last_row, column=16).number_format = '0.00%'
+            ws.cell(row=last_row, column=16).alignment = Alignment(horizontal="right")
+
+            for col in ws.columns:
+                max_len = max(len(str(cell.value or '')) for cell in col)
+                col_letter = openpyxl.utils.get_column_letter(col[0].column)
+                ws.column_dimensions[col_letter].width = max(max_len + 3, 11)
+
+            output = io.BytesIO()
+            wb.save(output)
+            filename = f"Rentabilidad_Ventas_{desde_str}_al_{hasta_str}.xlsx"
+            return descargar_buffer(
+                output,
+                filename,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+        except Exception as e:
+            current_app.logger.warning(f"Fallback a CSV por error en openpyxl: {e}")
+            si = io.StringIO()
+            si.write('\ufeff')
+            cw = csv.writer(si, delimiter=';')
+
+            cw.writerow([
+                "FECHA", "COMPROBANTE", "CLIENTE", "SUCURSAL", "SKU PROVEEDOR",
+                "REPUESTO / DESCRIPCIÓN", "CANT", "COSTO UNITARIO", "IVA COMPRA",
+                "% IVA COMP.", "COSTO TOTAL (c/ IVA)", "PRECIO UNITARIO", "DESCUENTO",
+                "VENTA TOTAL", "GANANCIA", "MARGEN %"
+            ])
+
+            for i in items_reporte:
+                cw.writerow([
+                    i['fecha'].strftime('%d/%m/%Y %H:%M') if i['fecha'] else '',
+                    f"{i['tipo_comp']} #{i['venta_id']}",
+                    i['cliente'],
+                    i['sucursal'],
+                    i['sku_proveedor'],
+                    i['nombre'],
+                    i['cantidad'],
+                    str(i['costo_unitario']).replace('.', ','),
+                    str(i['iva_compra']).replace('.', ','),
+                    f"{i['iva_porcentaje']}%",
+                    str(i['costo_total']).replace('.', ','),
+                    str(i['precio_unitario']).replace('.', ','),
+                    str(i['descuento']).replace('.', ','),
+                    str(i['venta_total']).replace('.', ','),
+                    str(i['ganancia']).replace('.', ','),
+                    f"{i['margen_porc']}%"
+                ])
+
+            cw.writerow([
+                "TOTALES GENERALES", "", "", "", "", "",
+                totales['unidades'],
+                "-",
+                str(totales['iva_compras']).replace('.', ','),
+                "",
+                str(totales['costo_total']).replace('.', ','),
+                "-",
+                str(totales['descuentos']).replace('.', ','),
+                str(totales['venta_neta']).replace('.', ','),
+                str(totales['ganancia_neta']).replace('.', ','),
+                f"{totales['margen_global']}%"
+            ])
+
+            output_bytes = io.BytesIO(si.getvalue().encode('utf-8-sig'))
+            filename = f"Rentabilidad_Ventas_{desde_str}_al_{hasta_str}.csv"
+            return descargar_buffer(
+                output_bytes,
+                filename,
+                "text/csv"
+            )
 
     sucursales = Sucursal.query.filter_by(activo=True).all()
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
 
     return render_template('admin/reporte_rentabilidad_ventas.html',
                            items=items_reporte,
+                           totales=totales,
                            total_venta_bruto=total_venta_bruto,
+                           total_descuentos=total_descuentos,
+                           total_costo_base=total_costo_base,
+                           total_costo=total_costo_total,
+                           total_iva_compras=total_iva_compras,
                            total_devoluciones=total_devoluciones,
                            devs_caja_monto=devs_caja_monto,
                            devs_cta_monto=devs_cta_monto,
-                           total_venta=venta_neta_real,          # Venta neta final
-                           total_costo=total_costo_bruto,
-                           ganancia_global=ganancia_neta_real,   # Ganancia neta real
-                           margen_global=margen_global_porc,     # Margen neto real
+                           total_venta=venta_neta_real,
+                           ganancia_global=ganancia_neta_real,
+                           margen_global=margen_global_porc,
                            margen_sobre_venta=margen_sobre_venta,
                            total_unidades=total_unidades,
                            devoluciones=lista_devoluciones,
@@ -3688,7 +4210,6 @@ def reporte_rentabilidad_ventas():
                                'sucursal_id': f_sucursal,
                                'cliente_id': f_cliente
                            })
-    
     
     
     
