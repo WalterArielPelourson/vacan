@@ -1,0 +1,833 @@
+{% extends "base.html" %}
+{% block title %}Reporte Integral de Stock, Movimientos y Valorización{% endblock %}
+
+{% block content %}
+<style>
+    /* ============================================================
+       ESTÉTICA ERP OSCURA COMPACTA - 100% VISIBLE EN PANTALLA
+       ============================================================ */
+    .stock-erp-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 4px 6px;
+    }
+
+    /* BARRA DE FILTROS COMPACTA */
+    .filtros-erp-card {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: #e5e7eb;
+    }
+    .filtros-erp-card label {
+        font-size: 0.62rem;
+        text-transform: uppercase;
+        font-weight: 700;
+        color: #9ca3af;
+        margin-bottom: 2px;
+        display: block;
+        letter-spacing: 0.4px;
+    }
+    .filtros-erp-card .form-control,
+    .filtros-erp-card .form-select {
+        background-color: #1f2937;
+        border-color: #374151;
+        color: #f9fafb;
+        font-size: 0.72rem;
+        padding: 3px 6px;
+        height: 27px;
+    }
+    .filtros-erp-card .form-control:focus,
+    .filtros-erp-card .form-select:focus {
+        border-color: #38bdf8;
+        box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
+    }
+
+    /* TIRA DE 8 KPIs PRINCIPALES */
+    .kpi-strip-stock {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 6px;
+    }
+    @media (max-width: 1400px) {
+        .kpi-strip-stock { grid-template-columns: repeat(4, 1fr); }
+    }
+    @media (max-width: 768px) {
+        .kpi-strip-stock { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    .kpi-box {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 6px 9px;
+        color: #fff;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+    }
+    .kpi-box-title {
+        font-size: 0.61rem;
+        text-transform: uppercase;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: #9ca3af;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .kpi-box-val {
+        font-size: 1.02rem;
+        font-weight: 800;
+        line-height: 1.2;
+        font-family: monospace;
+    }
+    .kpi-box-sub {
+        font-size: 0.60rem;
+        color: #9ca3af;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* PANEL DE GRÁFICAS ANALÍTICAS */
+    .charts-grid {
+        display: grid;
+        grid-template-columns: 1.5fr 1fr 0.9fr;
+        gap: 8px;
+    }
+    .charts-grid-bottom {
+        display: grid;
+        grid-template-columns: 1.3fr 1fr;
+        gap: 8px;
+        margin-top: 8px;
+    }
+    @media (max-width: 1200px) {
+        .charts-grid, .charts-grid-bottom {
+            grid-template-columns: 1fr;
+        }
+    }
+    .chart-card {
+        background: #111827;
+        border: 1px solid #1f2937;
+        border-radius: 8px;
+        padding: 8px 10px;
+        color: #f3f4f6;
+    }
+    .chart-card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 6px;
+        border-bottom: 1px solid #1f2937;
+        padding-bottom: 4px;
+    }
+    .chart-card-title {
+        font-size: 0.70rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.4px;
+        color: #e5e7eb;
+    }
+    .chart-canvas-wrap {
+        position: relative;
+        height: 210px;
+        width: 100%;
+    }
+
+    /* CONTENEDOR DE TABLA SIN SCROLL HORIZONTAL */
+    .table-viewport-container {
+        width: 100%;
+        max-width: 100%;
+        overflow-x: hidden !important;
+        overflow-y: auto;
+        height: calc(100vh - 285px);
+        min-height: 360px;
+        border: 1px solid #374151;
+        border-radius: 6px;
+        background: #fff;
+    }
+    .table-viewport-container.expanded-mode {
+        height: calc(100vh - 240px);
+    }
+
+    .table-stock-erp {
+        width: 100%;
+        table-layout: fixed !important;
+        margin-bottom: 0;
+        font-size: 0.64rem !important;
+        border-collapse: separate;
+        border-spacing: 0;
+    }
+
+    .table-stock-erp thead th {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background: #111827;
+        color: #f9fafb;
+        font-size: 0.59rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        padding: 5px 3px !important;
+        border-bottom: 2px solid #374151;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        vertical-align: middle;
+    }
+
+    .th-compras {
+        background: #0B3B48 !important;
+        color: #67e8f9 !important;
+    }
+    .th-ventas {
+        background: #4D3800 !important;
+        color: #fde047 !important;
+    }
+    .th-cierre {
+        background: #064E3B !important;
+        color: #6ee7b7 !important;
+    }
+
+    .table-stock-erp tbody td {
+        padding: 3px 3px !important;
+        vertical-align: middle;
+        border-bottom: 1px solid #e5e7eb;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .table-stock-erp tbody tr {
+        cursor: pointer;
+        transition: background-color 0.1s ease;
+    }
+    .table-stock-erp tbody tr:hover {
+        background-color: #eff6ff !important;
+    }
+
+    .table-stock-erp tfoot td {
+        position: sticky;
+        bottom: 0;
+        z-index: 10;
+        background: #111827 !important;
+        color: #fff !important;
+        font-weight: 800;
+        font-size: 0.64rem;
+        padding: 5px 3px !important;
+        border-top: 2px solid #374151;
+        font-family: monospace;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .num-mono {
+        font-family: monospace;
+        font-weight: 600;
+        letter-spacing: -0.3px;
+    }
+
+    .cell-truncate {
+        display: block;
+        width: 100%;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .badge-erp {
+        font-size: 0.56rem;
+        padding: 2px 4px;
+        border-radius: 4px;
+        font-weight: 700;
+        display: inline-block;
+    }
+</style>
+
+<div class="stock-erp-wrapper">
+    <!-- ENCABEZADO Y BOTONES DE ACCIÓN -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 px-1">
+        <div>
+            <h5 class="mb-0 fw-bold text-dark d-flex align-items-center gap-2">
+                <span>📦 Reporte Integral de Stock, Compras, Ventas y Valorización</span>
+                <span class="badge bg-dark text-info border border-info" style="font-size: 0.65rem;">
+                    Inicio: {{ desde }} | Cierre: {{ hasta }} ({{ dias_periodo }}d)
+                </span>
+            </h5>
+        </div>
+        <div class="d-flex gap-2">
+            <button type="button" id="btnToggleCharts" class="btn btn-sm btn-dark fw-semibold" onclick="toggleGraficas()">
+                📊 Ocultar Gráficas
+            </button>
+            <button type="button" class="btn btn-sm btn-success fw-bold" onclick="exportarExcel()">
+                📥 Exportar Excel Completo (.xlsx)
+            </button>
+        </div>
+    </div>
+
+    <!-- PANEL DE TODOS LOS FILTROS -->
+    <form id="filtrosStockForm" method="GET" action="{{ url_for('admin.reporte_stock_integral') }}" class="filtros-erp-card shadow-sm">
+        <div class="row g-1 align-items-end">
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Stock al Inicio</label>
+                <input type="date" name="desde" value="{{ desde }}" class="form-control">
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Stock al Cierre</label>
+                <input type="date" name="hasta" value="{{ hasta }}" class="form-control">
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Sucursal</label>
+                <select name="sucursal_id" class="form-select">
+                    <option value="">Todas</option>
+                    {% for s in sucursales %}
+                    <option value="{{ s.id }}" {% if sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Proveedor</label>
+                <select name="proveedor_id" class="form-select">
+                    <option value="">Todos</option>
+                    {% for p in proveedores %}
+                    <option value="{{ p.id }}" {% if proveedor_id == p.id %}selected{% endif %}>{{ p.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Categoría</label>
+                <select name="categoria" class="form-select">
+                    <option value="">Todas</option>
+                    {% for c in categorias %}
+                    <option value="{{ c }}" {% if categoria_sel == c %}selected{% endif %}>{{ c }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Marca</label>
+                <select name="marca" class="form-select">
+                    <option value="">Todas</option>
+                    {% for m in marcas %}
+                    <option value="{{ m }}" {% if marca_sel == m %}selected{% endif %}>{{ m }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Cliente (Vtas)</label>
+                <select name="cliente_id" class="form-select">
+                    <option value="">Todos</option>
+                    {% for cl in clientes %}
+                    <option value="{{ cl.id }}" {% if cliente_id == cl.id %}selected{% endif %}>{{ cl.nombre }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Estado Stock</label>
+                <select name="estado_stock" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="optimo" {% if estado_stock_sel == 'optimo' %}selected{% endif %}>Óptimo</option>
+                    <option value="critico" {% if estado_stock_sel == 'critico' %}selected{% endif %}>Crítico (<= Mín)</option>
+                    <option value="sin_stock" {% if estado_stock_sel == 'sin_stock' %}selected{% endif %}>Sin Stock (<=0)</option>
+                    <option value="inmovilizado" {% if estado_stock_sel == 'inmovilizado' %}selected{% endif %}>Inmovilizado</option>
+                    <option value="sobrestock" {% if estado_stock_sel == 'sobrestock' %}selected{% endif %}>Sobrestock</option>
+                </select>
+            </div>
+            <div class="col-6 col-md-2 col-xl-1">
+                <label>Movimientos</label>
+                <select name="actividad" class="form-select">
+                    <option value="">Todos</option>
+                    <option value="con_movimiento" {% if actividad_sel == 'con_movimiento' %}selected{% endif %}>Con Movimiento</option>
+                    <option value="solo_ventas" {% if actividad_sel == 'solo_ventas' %}selected{% endif %}>Solo con Ventas</option>
+                    <option value="solo_compras" {% if actividad_sel == 'solo_compras' %}selected{% endif %}>Solo con Compras</option>
+                    <option value="sin_movimiento" {% if actividad_sel == 'sin_movimiento' %}selected{% endif %}>Sin Movimientos</option>
+                </select>
+            </div>
+            <div class="col-4 col-md-1 col-xl-1">
+                <label>ABC</label>
+                <select name="clase_abc" class="form-select">
+                    <option value="">Todo</option>
+                    <option value="A" {% if clase_abc_sel == 'A' %}selected{% endif %}>Clase A</option>
+                    <option value="B" {% if clase_abc_sel == 'B' %}selected{% endif %}>Clase B</option>
+                    <option value="C" {% if clase_abc_sel == 'C' %}selected{% endif %}>Clase C</option>
+                </select>
+            </div>
+            <div class="col-8 col-md-3 col-xl-1">
+                <label>Ordenar Por</label>
+                <select name="orden" class="form-select">
+                    <option value="venta_desc" {% if orden_sel == 'venta_desc' %}selected{% endif %}>Mayor Venta ($)</option>
+                    <option value="ganancia_desc" {% if orden_sel == 'ganancia_desc' %}selected{% endif %}>Mayor Ganancia</option>
+                    <option value="compra_desc" {% if orden_sel == 'compra_desc' %}selected{% endif %}>Mayor Compra</option>
+                    <option value="val_cierre_desc" {% if orden_sel == 'val_cierre_desc' %}selected{% endif %}>Val. Cierre ($)</option>
+                    <option value="stock_cierre_desc" {% if orden_sel == 'stock_cierre_desc' %}selected{% endif %}>Stock Cierre (U)</option>
+                    <option value="stock_inicio_desc" {% if orden_sel == 'stock_inicio_desc' %}selected{% endif %}>Stock Inicio (U)</option>
+                    <option value="rotacion_desc" {% if orden_sel == 'rotacion_desc' %}selected{% endif %}>Mayor Rotación</option>
+                    <option value="alfabetico" {% if orden_sel == 'alfabetico' %}selected{% endif %}>Nombre (A-Z)</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-4 col-xl-1 d-flex gap-1">
+                <div class="flex-grow-1">
+                    <label>Buscar SKU/Nombre</label>
+                    <input type="text" name="q" value="{{ q }}" placeholder="SKU o nombre..." class="form-control">
+                </div>
+                <button type="submit" class="btn btn-sm btn-primary fw-bold align-self-end" style="height: 25px; padding: 0 0.5px;">🔍</button>
+                <a href="{{ url_for('admin.reporte_stock_integral') }}" class="btn btn-sm btn-outline-secondary align-self-end" style="height: 25px; padding: 1px 0.5px;" title="Limpiar Filtros">↺</a>
+            </div>
+        </div>
+    </form>
+
+    <!-- 8 TARJETAS KPI -->
+    <div class="kpi-strip-stock">
+        <div class="kpi-box">
+            <div class="kpi-box-title">Stock Inicio ({{ desde }})</div>
+            <div class="kpi-box-val text-light">{{ "{:,.0f}".format(totales.stock_inicio_u) }} <small style="font-size:0.65rem;">u.</small></div>
+            <div class="kpi-box-sub">Val: ${{ "{:,.2f}".format(totales.val_inicio_costo) }}</div>
+        </div>
+        <div class="kpi-box" style="border-color: #0e7490;">
+            <div class="kpi-box-title text-info">Compras Período</div>
+            <div class="kpi-box-val text-info">${{ "{:,.2f}".format(totales.comp_total) }}</div>
+            <div class="kpi-box-sub">{{ "{:,.0f}".format(totales.comp_cant) }} u. (IVA: ${{ "{:,.0f}".format(totales.comp_iva) }})</div>
+        </div>
+        <div class="kpi-box" style="border-color: #a16207;">
+            <div class="kpi-box-title text-warning">Ventas Netas</div>
+            <div class="kpi-box-val text-warning">${{ "{:,.2f}".format(totales.vent_total) }}</div>
+            <div class="kpi-box-sub">{{ "{:,.0f}".format(totales.vent_cant) }} u. | Desc: ${{ "{:,.0f}".format(totales.vent_descuento) }}</div>
+        </div>
+        <div class="kpi-box">
+            <div class="kpi-box-title">CMV (Costo Vendido)</div>
+            <div class="kpi-box-val text-secondary">${{ "{:,.2f}".format(totales.costo_cmv) }}</div>
+            <div class="kpi-box-sub">{{ totales.items_count }} productos listados</div>
+        </div>
+        <div class="kpi-box" style="border-color: #15803d;">
+            <div class="kpi-box-title text-success">Ganancia Bruta</div>
+            <div class="kpi-box-val {% if totales.ganancia >= 0 %}text-success{% else %}text-danger{% endif %}">
+                ${{ "{:,.2f}".format(totales.ganancia) }}
+            </div>
+            <div class="kpi-box-sub">Margen Prom: {{ "{:.1f}".format(totales.margen_promedio) }}%</div>
+        </div>
+        <div class="kpi-box" style="border-color: #047857;">
+            <div class="kpi-box-title" style="color:#6ee7b7;">Stock Cierre ({{ hasta }})</div>
+            <div class="kpi-box-val" style="color:#34d399;">{{ "{:,.0f}".format(totales.stock_cierre_u) }} <small style="font-size:0.65rem;">u.</small></div>
+            <div class="kpi-box-sub">Var. Período: {{ "{:+,.0f}".format(totales.variacion_stock_u) }} u.</div>
+        </div>
+        <div class="kpi-box" style="border-color: #047857;">
+            <div class="kpi-box-title" style="color:#6ee7b7;">Val. Cierre (Costo / Vta)</div>
+            <div class="kpi-box-val text-white">${{ "{:,.0f}".format(totales.val_cierre_costo) }}</div>
+            <div class="kpi-box-sub text-info">A Vta: ${{ "{:,.0f}".format(totales.val_cierre_venta) }}</div>
+        </div>
+        <div class="kpi-box" style="border-color: #991b1b;">
+            <div class="kpi-box-title text-danger">Alertas Inventario</div>
+            <div class="kpi-box-val text-danger">{{ totales.sin_stock_count + totales.critico_count }}</div>
+            <div class="kpi-box-sub">0 Stk: {{ totales.sin_stock_count }} | Crít: {{ totales.critico_count }} | Inm: {{ totales.inmovilizado_count }}</div>
+        </div>
+    </div>
+
+    <!-- PANEL DE 5 GRÁFICAS INTERACTIVAS (CHART.JS) -->
+    <div id="chartsSection">
+        <div class="charts-grid">
+            <!-- Gráfica 1: Evolución Diaria -->
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">📈 Flujo Diario: Compras vs Ventas vs Ganancia ($)</span>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-xs btn-outline-info py-0 px-2" style="font-size:0.62rem;" onclick="switchEvolucion('monto')">Dinero ($)</button>
+                        <button type="button" class="btn btn-xs btn-outline-warning py-0 px-2" style="font-size:0.62rem;" onclick="switchEvolucion('unidades')">Unidades</button>
+                    </div>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartEvolucion"></canvas>
+                </div>
+            </div>
+
+            <!-- Gráfica 2: Top 10 Repuestos -->
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">🏆 Top 10 Repuestos</span>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-xs btn-outline-warning py-0 px-2" style="font-size:0.62rem;" onclick="switchTop10('ventas')">Por Venta</button>
+                        <button type="button" class="btn btn-xs btn-outline-success py-0 px-2" style="font-size:0.62rem;" onclick="switchTop10('stock')">Por Capital Stock</button>
+                    </div>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartTop10"></canvas>
+                </div>
+            </div>
+
+            <!-- Gráfica 3: Salud de Stock -->
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">🩺 Salud del Stock al Cierre</span>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartEstados"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="charts-grid-bottom">
+            <!-- Gráfica 4: Comparativa por Categoría -->
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">📊 Balance Valorizado por Categoría (Inicio vs Compras vs Ventas vs Cierre)</span>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartCategorias"></canvas>
+                </div>
+            </div>
+
+            <!-- Gráfica 5: Clasificación ABC -->
+            <div class="chart-card">
+                <div class="chart-card-header">
+                    <span class="chart-card-title">🎯 Matriz ABC (Facturación vs Capital Inmovilizado)</span>
+                </div>
+                <div class="chart-canvas-wrap">
+                    <canvas id="chartABC"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TABLA PRINCIPAL COMPACTA SIN SCROLL HORIZONTAL -->
+    <div id="tableContainer" class="table-viewport-container shadow-sm">
+        <table class="table table-hover table-striped align-middle table-stock-erp">
+            <colgroup>
+                <col style="width: 6.5%;">   <!-- SKU -->
+                <col style="width: 15.0%;">  <!-- REPUESTO -->
+                <col style="width: 7.0%;">   <!-- CAT / MARCA -->
+                <col style="width: 6.5%;">   <!-- PROVEEDOR -->
+                <col style="width: 4.5%;">   <!-- STK INICIO -->
+                <col style="width: 6.5%;">   <!-- VAL INICIO -->
+                <col style="width: 4.5%;">   <!-- COMP U -->
+                <col style="width: 6.5%;">   <!-- COMP $ -->
+                <col style="width: 4.5%;">   <!-- VENT U -->
+                <col style="width: 6.5%;">   <!-- VENT $ -->
+                <col style="width: 6.5%;">   <!-- GANANCIA -->
+                <col style="width: 4.5%;">   <!-- MARGEN -->
+                <col style="width: 4.5%;">   <!-- STK CIERRE -->
+                <col style="width: 6.5%;">   <!-- VAL CIERRE -->
+                <col style="width: 5.0%;">   <!-- ROT / DIAS -->
+                <col style="width: 5.0%;">   <!-- ESTADO / ABC -->
+            </colgroup>
+            <thead>
+                <tr>
+                    <th class="ps-2">SKU / CÓD.</th>
+                    <th>REPUESTO / DESCRIPCIÓN</th>
+                    <th>CAT. / MARCA</th>
+                    <th>PROVEEDOR</th>
+                    <th class="text-center">STK INI</th>
+                    <th class="text-end">VAL. INI ($)</th>
+                    <th class="text-center th-compras">COMP (U)</th>
+                    <th class="text-end th-compras">COMP. ($)</th>
+                    <th class="text-center th-ventas">VENT (U)</th>
+                    <th class="text-end th-ventas">VENTA ($)</th>
+                    <th class="text-end">GANANCIA</th>
+                    <th class="text-center">MARG.</th>
+                    <th class="text-center th-cierre">STK CIE</th>
+                    <th class="text-end th-cierre">VAL. CIE ($)</th>
+                    <th class="text-center">ROT / COB</th>
+                    <th class="text-center pe-2">EST / ABC</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for i in items %}
+                <tr onclick='abrirDetalleItem({{ i | tojson | safe }})' title="Click para ver ficha completa del repuesto">
+                    <td class="ps-2 fw-bold text-primary">
+                        <span class="cell-truncate" title="{{ i.sku }}">{{ i.sku }}</span>
+                    </td>
+                    <td class="fw-semibold text-dark">
+                        <span class="cell-truncate" title="{{ i.descripcion }}">{{ i.descripcion }}</span>
+                    </td>
+                    <td class="text-muted">
+                        <span class="cell-truncate" title="{{ i.categoria }} / {{ i.marca }}">{{ i.categoria }}</span>
+                    </td>
+                    <td class="text-muted">
+                        <span class="cell-truncate" title="{{ i.proveedor }}">{{ i.proveedor }}</span>
+                    </td>
+                    <td class="text-center num-mono">{{ "{:,.0f}".format(i.stock_inicio) }}</td>
+                    <td class="text-end num-mono text-secondary">${{ "{:,.0f}".format(i.val_inicio_costo) }}</td>
+
+                    <td class="text-center num-mono fw-bold" style="color:#0891b2; background:rgba(14,116,144,0.06);">
+                        {{ "{:,.0f}".format(i.comp_cant) }}
+                    </td>
+                    <td class="text-end num-mono" style="color:#0e7490; background:rgba(14,116,144,0.06);">
+                        ${{ "{:,.0f}".format(i.comp_total) }}
+                    </td>
+
+                    <td class="text-center num-mono fw-bold" style="color:#b45309; background:rgba(217,119,6,0.06);">
+                        {{ "{:,.0f}".format(i.vent_cant) }}
+                    </td>
+                    <td class="text-end num-mono fw-bold" style="color:#92400e; background:rgba(217,119,6,0.06);">
+                        ${{ "{:,.0f}".format(i.vent_total) }}
+                    </td>
+
+                    <td class="text-end num-mono fw-bold {% if i.ganancia > 0 %}text-success{% elif i.ganancia < 0 %}text-danger{% else %}text-muted{% endif %}">
+                        ${{ "{:,.0f}".format(i.ganancia) }}
+                    </td>
+                    <td class="text-center num-mono {% if i.margen_pct >= 25 %}text-success{% elif i.margen_pct > 0 %}text-dark{% else %}text-danger{% endif %}">
+                        {{ "{:.0f}".format(i.margen_pct) }}%
+                    </td>
+
+                    <td class="text-center num-mono fw-bold {% if i.stock_cierre <= 0 %}text-danger{% elif i.estado_code == 'critico' %}text-warning{% else %}text-success{% endif %}" style="background:rgba(6,78,59,0.06);">
+                        {{ "{:,.0f}".format(i.stock_cierre) }}
+                    </td>
+                    <td class="text-end num-mono fw-bold text-dark" style="background:rgba(6,78,59,0.06);">
+                        ${{ "{:,.0f}".format(i.val_cierre_costo) }}
+                    </td>
+
+                    <td class="text-center num-mono text-muted">
+                        {{ "{:.1f}".format(i.rotacion) }}x / {{ "∞" if i.dias_cobertura >= 999 else ("{:.0f}d".format(i.dias_cobertura)) }}
+                    </td>
+                    <td class="text-center pe-2">
+                        {% if i.estado_code == 'sin_stock' %}
+                            <span class="badge-erp bg-danger text-white">0</span>
+                        {% elif i.estado_code == 'critico' %}
+                            <span class="badge-erp bg-warning text-dark">CRIT</span>
+                        {% elif i.estado_code == 'inmovilizado' %}
+                            <span class="badge-erp bg-secondary text-white">INM</span>
+                        {% elif i.estado_code == 'sobrestock' %}
+                            <span class="badge-erp bg-info text-dark">SOB</span>
+                        {% else %}
+                            <span class="badge-erp bg-success text-white">OK</span>
+                        {% endif %}
+                        <span class="badge-erp bg-dark text-light">{{ i.clase_abc }}</span>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="16" class="text-center py-4 text-muted fw-semibold">
+                        No se encontraron repuestos con los filtros seleccionados.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="4" class="ps-2">TOTALES ({{ totales.items_count }} ÍTEMS)</td>
+                    <td class="text-center">{{ "{:,.0f}".format(totales.stock_inicio_u) }}</td>
+                    <td class="text-end">${{ "{:,.0f}".format(totales.val_inicio_costo) }}</td>
+                    <td class="text-center text-info">{{ "{:,.0f}".format(totales.comp_cant) }}</td>
+                    <td class="text-end text-info">${{ "{:,.0f}".format(totales.comp_total) }}</td>
+                    <td class="text-center text-warning">{{ "{:,.0f}".format(totales.vent_cant) }}</td>
+                    <td class="text-end text-warning">${{ "{:,.0f}".format(totales.vent_total) }}</td>
+                    <td class="text-end text-success">${{ "{:,.0f}".format(totales.ganancia) }}</td>
+                    <td class="text-center">{{ "{:.1f}".format(totales.margen_promedio) }}%</td>
+                    <td class="text-center" style="color:#6ee7b7;">{{ "{:,.0f}".format(totales.stock_cierre_u) }}</td>
+                    <td class="text-end" style="color:#6ee7b7;">${{ "{:,.0f}".format(totales.val_cierre_costo) }}</td>
+                    <td colspan="2" class="text-center pe-2">A VTA: ${{ "{:,.0f}".format(totales.val_cierre_venta) }}</td>
+                </tr>
+            </tfoot>
+        </table>
+    </div>
+</div>
+
+<!-- MODAL FICHA DETALLADA DEL REPUESTO -->
+<div class="modal fade" id="modalDetalleStock" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content bg-dark text-light border-secondary">
+            <div class="modal-header border-secondary py-2">
+                <h6 class="modal-title fw-bold" id="modalTituloRepuesto">Ficha de Inventario</h6>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body" id="modalBodyRepuesto" style="font-size: 0.82rem;"></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+    const graficasData = {{ graficas | tojson | safe }};
+
+    function exportarExcel() {
+        const form = document.getElementById('filtrosStockForm');
+        const params = new URLSearchParams(new FormData(form));
+        params.set('export', 'excel');
+        window.location.href = "{{ url_for('admin.reporte_stock_integral') }}?" + params.toString();
+    }
+
+    function toggleGraficas() {
+        const sec = document.getElementById('chartsSection');
+        const tbl = document.getElementById('tableContainer');
+        const btn = document.getElementById('btnToggleCharts');
+        if (sec.style.display === 'none') {
+            sec.style.display = 'block';
+            tbl.classList.remove('expanded-mode');
+            btn.innerText = '📊 Ocultar Gráficas';
+        } else {
+            sec.style.display = 'none';
+            tbl.classList.add('expanded-mode');
+            btn.innerText = '📊 Ver Gráficas';
+        }
+    }
+
+    function abrirDetalleItem(item) {
+        document.getElementById('modalTituloRepuesto').innerText = `[${item.sku}] ${item.descripcion}`;
+        const fmt = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const fmtU = (n) => Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
+
+        document.getElementById('modalBodyRepuesto').innerHTML = `
+            <div class="row g-2">
+                <div class="col-md-6">
+                    <div class="p-2 rounded border border-secondary bg-black bg-opacity-25">
+                        <div class="text-secondary text-uppercase fw-bold mb-1" style="font-size:0.7rem;">Identificación & Costos</div>
+                        <div><b>Categoría:</b> ${item.categoria} | <b>Marca:</b> ${item.marca}</div>
+                        <div><b>Proveedor:</b> ${item.proveedor} | <b>Ubicación:</b> ${item.ubicacion}</div>
+                        <div><b>Costo Base U.:</b> ${fmt(item.costo_base_u)} (IVA ${item.alicuota_iva}%)</div>
+                        <div><b>Costo U. c/IVA:</b> ${fmt(item.costo_con_iva_u)}</div>
+                        <div><b>Precio Venta U.:</b> <span class="text-warning fw-bold">${fmt(item.precio_venta_u)}</span></div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-2 rounded border border-secondary bg-black bg-opacity-25">
+                        <div class="text-secondary text-uppercase fw-bold mb-1" style="font-size:0.7rem;">Saldos & Salud</div>
+                        <div><b>Stock Inicio ({{ desde }}):</b> ${fmtU(item.stock_inicio)} u. (${fmt(item.val_inicio_costo)})</div>
+                        <div><b>Stock Cierre ({{ hasta }}):</b> <span class="text-success fw-bold">${fmtU(item.stock_cierre)} u.</span></div>
+                        <div><b>Stock Actual Hoy:</b> ${fmtU(item.stock_actual_hoy)} u. | <b>Mínimo:</b> ${fmtU(item.stock_minimo)} u.</div>
+                        <div><b>Val. Cierre Costo:</b> ${fmt(item.val_cierre_costo)} | <b>A Venta:</b> ${fmt(item.val_cierre_venta)}</div>
+                        <div><b>Rotación:</b> ${item.rotacion.toFixed(2)}x | <b>Estado:</b> ${item.estado_label} (Clase ${item.clase_abc})</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-2 rounded border border-info bg-black bg-opacity-25">
+                        <div class="text-info text-uppercase fw-bold mb-1" style="font-size:0.7rem;">Compras en el Período</div>
+                        <div><b>Unidades Compradas:</b> ${fmtU(item.comp_cant)} u. (${item.comp_ops} ítems)</div>
+                        <div><b>Neto:</b> ${fmt(item.comp_neto)} | <b>IVA:</b> ${fmt(item.comp_iva)}</div>
+                        <div><b>Total Comprado:</b> <span class="text-info fw-bold">${fmt(item.comp_total)}</span></div>
+                        <div><b>Último Costo Unit. Compra:</b> ${fmt(item.ultimo_costo_comp)}</div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="p-2 rounded border border-warning bg-black bg-opacity-25">
+                        <div class="text-warning text-uppercase fw-bold mb-1" style="font-size:0.7rem;">Ventas & Rentabilidad</div>
+                        <div><b>Unidades Vendidas:</b> ${fmtU(item.vent_cant)} u. (${item.vent_ops} ops)</div>
+                        <div><b>Descuentos:</b> ${fmt(item.vent_descuento)} | <b>Venta Neta:</b> <span class="text-warning fw-bold">${fmt(item.vent_total)}</span></div>
+                        <div><b>CMV:</b> ${fmt(item.costo_cmv)} | <b>Ganancia:</b> <span class="text-success fw-bold">${fmt(item.ganancia)}</span></div>
+                        <div><b>Margen Neto:</b> ${item.margen_pct.toFixed(1)}% | <b>Ajustes Stock:</b> ${fmtU(item.ajustes)} u.</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        new bootstrap.Modal(document.getElementById('modalDetalleStock')).show();
+    }
+
+    // Configuración global Chart.js modo oscuro ERP
+    Chart.defaults.color = '#9ca3af';
+    Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
+    Chart.defaults.font.size = 10;
+
+    // 1. Gráfica Evolución Diaria
+    let chartEvolucion = new Chart(document.getElementById('chartEvolucion'), {
+        type: 'bar',
+        data: {
+            labels: graficasData.fechas_labels,
+            datasets: [
+                { label: 'Compras ($)', data: graficasData.compras_diarias, backgroundColor: 'rgba(34, 211, 238, 0.55)', borderColor: '#22d3ee', borderWidth: 1 },
+                { label: 'Ventas ($)', data: graficasData.ventas_diarias, backgroundColor: 'rgba(250, 204, 21, 0.65)', borderColor: '#facc15', borderWidth: 1 },
+                { label: 'Ganancia ($)', data: graficasData.ganancias_diarias, type: 'line', borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.15)', tension: 0.3, pointRadius: 2 }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10 } } } }
+    });
+
+    function switchEvolucion(modo) {
+        if (modo === 'unidades') {
+            chartEvolucion.data.datasets = [
+                { label: 'Compras (U)', data: graficasData.unidades_comp_diarias, backgroundColor: 'rgba(34, 211, 238, 0.6)' },
+                { label: 'Ventas (U)', data: graficasData.unidades_vent_diarias, backgroundColor: 'rgba(250, 204, 21, 0.7)' }
+            ];
+        } else {
+            chartEvolucion.data.datasets = [
+                { label: 'Compras ($)', data: graficasData.compras_diarias, backgroundColor: 'rgba(34, 211, 238, 0.55)', borderColor: '#22d3ee', borderWidth: 1 },
+                { label: 'Ventas ($)', data: graficasData.ventas_diarias, backgroundColor: 'rgba(250, 204, 21, 0.65)', borderColor: '#facc15', borderWidth: 1 },
+                { label: 'Ganancia ($)', data: graficasData.ganancias_diarias, type: 'line', borderColor: '#34d399', tension: 0.3, pointRadius: 2 }
+            ];
+        }
+        chartEvolucion.update();
+    }
+
+    // 2. Gráfica Top 10
+    let chartTop10 = new Chart(document.getElementById('chartTop10'), {
+        type: 'bar',
+        data: {
+            labels: graficasData.top_ventas_labels,
+            datasets: [
+                { label: 'Venta ($)', data: graficasData.top_ventas_monto, backgroundColor: '#facc15' },
+                { label: 'Ganancia ($)', data: graficasData.top_ventas_ganancia, backgroundColor: '#34d399' }
+            ]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { position: 'top', labels: { boxWidth: 10 } } }
+        }
+    });
+
+    function switchTop10(modo) {
+        if (modo === 'stock') {
+            chartTop10.data.labels = graficasData.top_stock_labels;
+            chartTop10.data.datasets = [
+                { label: 'Val. Costo Cierre ($)', data: graficasData.top_stock_val_costo, backgroundColor: '#38bdf8' },
+                { label: 'Val. Venta Cierre ($)', data: graficasData.top_stock_val_venta, backgroundColor: '#a78bfa' }
+            ];
+        } else {
+            chartTop10.data.labels = graficasData.top_ventas_labels;
+            chartTop10.data.datasets = [
+                { label: 'Venta ($)', data: graficasData.top_ventas_monto, backgroundColor: '#facc15' },
+                { label: 'Ganancia ($)', data: graficasData.top_ventas_ganancia, backgroundColor: '#34d399' }
+            ];
+        }
+        chartTop10.update();
+    }
+
+    // 3. Gráfica Dona Salud de Stock
+    new Chart(document.getElementById('chartEstados'), {
+        type: 'doughnut',
+        data: {
+            labels: graficasData.estados_labels,
+            datasets: [{
+                data: graficasData.estados_counts,
+                backgroundColor: ['#10b981', '#f59e0b', '#ef4444', '#6b7280', '#06b6d4'],
+                borderColor: '#111827',
+                borderWidth: 2
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            cutout: '58%',
+            plugins: { legend: { position: 'right', labels: { boxWidth: 10, font: { size: 10 } } } }
+        }
+    });
+
+    // 4. Gráfica Categorías
+    new Chart(document.getElementById('chartCategorias'), {
+        type: 'bar',
+        data: {
+            labels: graficasData.cat_labels,
+            datasets: [
+                { label: 'Val. Inicio', data: graficasData.cat_val_ini, backgroundColor: '#64748b' },
+                { label: 'Compras', data: graficasData.cat_compras, backgroundColor: '#22d3ee' },
+                { label: 'Ventas', data: graficasData.cat_ventas, backgroundColor: '#facc15' },
+                { label: 'Val. Cierre', data: graficasData.cat_val_cie, backgroundColor: '#10b981' }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10 } } } }
+    });
+
+    // 5. Gráfica ABC Pareto
+    new Chart(document.getElementById('chartABC'), {
+        type: 'bar',
+        data: {
+            labels: graficasData.abc_labels,
+            datasets: [
+                { label: 'Facturación Ventas ($)', data: graficasData.abc_ventas, backgroundColor: '#f59e0b' },
+                { label: 'Capital Stock Cierre ($)', data: graficasData.abc_val_stock, backgroundColor: '#38bdf8' }
+            ]
+        },
+        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10 } } } }
+    });
+</script>
+{% endblock %}

@@ -1,5 +1,8 @@
 import pandas as pd
 import os
+import io
+import csv
+
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, make_response, send_file, current_app
 from flask_login import login_required, current_user
 from datetime import datetime, date 
@@ -15,6 +18,10 @@ from flask import make_response
 from sqlalchemy.orm import joinedload
 from datetime import timedelta
 from app.utils.security import roles_required, sucursal_filter, check_owner
+from collections import defaultdict
+
+
+
 
 
 
@@ -4259,5 +4266,806 @@ def editar_cliente_rapido(id):
     # Redirige de regreso a la misma ficha de detalle del cliente
     return redirect(url_for('admin.detalle_cta_cte', cliente_id=id))
 
+
+
+
+#Reporte se stock integral
+
+# Asegúrate de tener importados tus modelos base y decoradores:
+# from app.utils.security import roles_required
+# from app.models import Repuesto, Venta, DetalleVenta, Sucursal, Cliente
+
+
+@admin_bp.route('/reportes/stock-integral')
+@login_required
+@roles_required('admin', 'superadmin')
+def reporte_stock_integral():
+    import io
+    import csv
+    import app.models as app_models
+
+    # Modelos opcionales detectados dinámicamente para evitar ImportError
+    Compra = getattr(app_models, 'Compra', None)
+    DetalleCompra = getattr(app_models, 'DetalleCompra', None)
+    Proveedor = getattr(app_models, 'Proveedor', None)
+    StockSucursal = getattr(app_models, 'StockSucursal', None)
+    MovimientoStock = getattr(app_models, 'MovimientoStock', None)
+    Categoria = getattr(app_models, 'Categoria', None)
+    Marca = getattr(app_models, 'Marca', None)
+
+    # -------------------------------------------------------------
+    # 1. CAPTURA DE TODOS LOS FILTROS
+    # -------------------------------------------------------------
+    desde_str = request.args.get('desde', date.today().replace(day=1).strftime('%Y-%m-%d'))
+    hasta_str = request.args.get('hasta', date.today().strftime('%Y-%m-%d'))
+    f_sucursal = request.args.get('sucursal_id', type=int)
+    f_proveedor = request.args.get('proveedor_id', type=int)
+    f_cliente = request.args.get('cliente_id', type=int)
+    f_categoria = request.args.get('categoria', '').strip()
+    f_marca = request.args.get('marca', '').strip()
+    f_estado_stock = request.args.get('estado_stock', '').strip()   # sin_stock, critico, optimo, sobrestock, inmovilizado
+    f_actividad = request.args.get('actividad', '').strip()         # con_movimiento, solo_ventas, solo_compras, sin_movimiento
+    f_abc = request.args.get('clase_abc', '').strip()               # A, B, C
+    f_busqueda = request.args.get('q', '').strip().lower()
+    f_orden = request.args.get('orden', 'venta_desc').strip()
+    formato_export = request.args.get('export', '').lower().strip()
+
+    try:
+        desde = datetime.strptime(desde_str, '%Y-%m-%d')
+    except Exception:
+        desde = datetime.combine(date.today().replace(day=1), datetime.min.time())
+        desde_str = desde.strftime('%Y-%m-%d')
+
+    try:
+        hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
+    except Exception:
+        hasta = datetime.combine(date.today(), datetime.max.time())
+        hasta_str = date.today().strftime('%Y-%m-%d')
+
+    if hasta < desde:
+        hasta = datetime.combine(desde.date(), datetime.max.time())
+        hasta_str = desde.strftime('%Y-%m-%d')
+
+    dias_periodo = max((hasta.date() - desde.date()).days + 1, 1)
+
+    if getattr(current_user, 'rol', '') == 'admin' and getattr(current_user, 'sucursal_id', None):
+        f_sucursal = current_user.sucursal_id
+
+    # Helpers de lectura segura de atributos/relaciones
+    def texto_rel(obj, attrs, default='-'):
+        for attr in attrs:
+            val = getattr(obj, attr, None)
+            if val is not None:
+                if isinstance(val, str):
+                    if val.strip():
+                        return val.strip()
+                else:
+                    nombre = getattr(val, 'nombre', None) or getattr(val, 'descripcion', None)
+                    if nombre:
+                        return str(nombre).strip()
+        return default
+
+    def num_attr(obj, attrs, default=0.0):
+        for attr in attrs:
+            val = getattr(obj, attr, None)
+            if val is not None:
+                try:
+                    return float(val)
+                except Exception:
+                    pass
+        return float(default)
+
+    # -------------------------------------------------------------
+    # 2. CATÁLOGO BASE DE REPUESTOS Y STOCK ACTUAL
+    # -------------------------------------------------------------
+    rep_query = Repuesto.query
+    if hasattr(Repuesto, 'activo'):
+        # Mantenemos incluso inactivos si tienen stock o movimiento, o puedes filtrar aquí si lo deseas
+        pass
+    repuestos = rep_query.all()
+
+    # Mapa de stock actual por repuesto (considerando StockSucursal si existe y/o filtro sucursal)
+    stock_actual_map = defaultdict(float)
+    if StockSucursal is not None:
+        ss_query = StockSucursal.query
+        if f_sucursal and hasattr(StockSucursal, 'sucursal_id'):
+            ss_query = ss_query.filter(StockSucursal.sucursal_id == f_sucursal)
+        for ss in ss_query.all():
+            rid = getattr(ss, 'repuesto_id', None)
+            if rid:
+                stock_actual_map[rid] += num_attr(ss, ['cantidad', 'stock', 'stock_actual'], 0.0)
+    else:
+        for r in repuestos:
+            stock_actual_map[r.id] = num_attr(r, ['stock', 'stock_actual', 'cantidad'], 0.0)
+
+    # -------------------------------------------------------------
+    # 3. CONSULTA DE VENTAS (PERÍODO + POSTERIORES A HASTA)
+    # -------------------------------------------------------------
+    ventas_periodo_data = defaultdict(lambda: {
+        'cant': 0.0, 'venta_neta': 0.0, 'descuento': 0.0,
+        'costo_cmv': 0.0, 'num_ops': 0, 'ultima_fecha': None
+    })
+    ventas_post_hasta = defaultdict(float)
+    ventas_diarias_map = defaultdict(lambda: {'venta': 0.0, 'costo': 0.0, 'unidades': 0.0})
+
+    v_query = Venta.query.options(
+        joinedload(Venta.detalles)
+    ).filter(Venta.fecha >= desde)
+
+    if f_sucursal and hasattr(Venta, 'sucursal_id'):
+        v_query = v_query.filter(Venta.sucursal_id == f_sucursal)
+    if f_cliente and hasattr(Venta, 'cliente_id'):
+        v_query = v_query.filter(Venta.cliente_id == f_cliente)
+    if hasattr(Venta, 'estado'):
+        v_query = v_query.filter(~Venta.estado.in_(['ANULADA', 'anulada', 'CANCELADA', 'cancelada']))
+
+    for v in v_query.all():
+        es_nc = getattr(v, 'tipo_comprobante', '').upper() in ['NC', 'NOTA DE CREDITO', 'NOTA_CREDITO']
+        signo = -1.0 if es_nc else 1.0
+        detalles = list(getattr(v, 'detalles', []) or [])
+        desc_global = num_attr(v, ['descuento_monto', 'descuento'], 0.0)
+        subtotal_raw_sum = sum(
+            num_attr(d, ['subtotal'], num_attr(d, ['precio_unitario'], 0.0) * num_attr(d, ['cantidad'], 0.0))
+            for d in detalles
+        )
+        fecha_v = getattr(v, 'fecha', None)
+        dia_key = fecha_v.strftime('%Y-%m-%d') if fecha_v else None
+
+        for d in detalles:
+            rid = getattr(d, 'repuesto_id', None)
+            if not rid:
+                continue
+            cant_abs = num_attr(d, ['cantidad'], 0.0)
+            cant = cant_abs * signo
+            if cant == 0:
+                continue
+
+            if fecha_v and fecha_v > hasta:
+                # Ventas posteriores al cierre para retroceder el stock
+                ventas_post_hasta[rid] += cant
+            elif fecha_v and desde <= fecha_v <= hasta:
+                precio_u = num_attr(d, ['precio_unitario', 'precio'], 0.0)
+                costo_u_d = num_attr(d, ['costo_unitario', 'costo'], 0.0)
+                desc_linea = num_attr(d, ['descuento_monto', 'descuento'], 0.0)
+                sub_linea = num_attr(d, ['subtotal'], precio_u * cant_abs)
+                desc_prorr = ((sub_linea / subtotal_raw_sum) * desc_global) if (subtotal_raw_sum > 0 and desc_global > 0) else 0.0
+                desc_item = (desc_linea + desc_prorr) * signo
+
+                venta_neta_item = (precio_u * cant) - desc_item
+                cmv_item = costo_u_d * cant
+
+                vp = ventas_periodo_data[rid]
+                vp['cant'] += cant
+                vp['venta_neta'] += venta_neta_item
+                vp['descuento'] += desc_item
+                vp['costo_cmv'] += cmv_item
+                vp['num_ops'] += 1
+                if vp['ultima_fecha'] is None or fecha_v > vp['ultima_fecha']:
+                    vp['ultima_fecha'] = fecha_v
+
+                if dia_key:
+                    ventas_diarias_map[dia_key]['venta'] += venta_neta_item
+                    ventas_diarias_map[dia_key]['costo'] += cmv_item
+                    ventas_diarias_map[dia_key]['unidades'] += cant
+
+    # -------------------------------------------------------------
+    # 4. CONSULTA DE COMPRAS (PERÍODO + POSTERIORES A HASTA)
+    # -------------------------------------------------------------
+    compras_periodo_data = defaultdict(lambda: {
+        'cant': 0.0, 'costo_neto': 0.0, 'iva': 0.0, 'costo_total': 0.0,
+        'ultimo_costo': 0.0, 'num_ops': 0, 'ultima_fecha': None
+    })
+    compras_post_hasta = defaultdict(float)
+    compras_diarias_map = defaultdict(lambda: {'total': 0.0, 'unidades': 0.0})
+
+    if Compra is not None:
+        fecha_col_compra = getattr(Compra, 'fecha', getattr(Compra, 'fecha_compra', None))
+        if fecha_col_compra is not None:
+            c_query = Compra.query
+            if hasattr(Compra, 'detalles'):
+                c_query = c_query.options(joinedload(Compra.detalles))
+            c_query = c_query.filter(fecha_col_compra >= desde)
+
+            if f_sucursal and hasattr(Compra, 'sucursal_id'):
+                c_query = c_query.filter(Compra.sucursal_id == f_sucursal)
+            if f_proveedor and hasattr(Compra, 'proveedor_id'):
+                c_query = c_query.filter(Compra.proveedor_id == f_proveedor)
+            if hasattr(Compra, 'estado'):
+                c_query = c_query.filter(~Compra.estado.in_(['ANULADA', 'anulada', 'CANCELADA', 'cancelada']))
+
+            for c in c_query.all():
+                fecha_c = getattr(c, 'fecha', getattr(c, 'fecha_compra', None))
+                dia_key = fecha_c.strftime('%Y-%m-%d') if fecha_c else None
+                es_nc_comp = getattr(c, 'tipo_comprobante', '').upper() in ['NC', 'NOTA DE CREDITO', 'NOTA_CREDITO']
+                signo_c = -1.0 if es_nc_comp else 1.0
+                detalles_c = list(getattr(c, 'detalles', []) or [])
+
+                for dc in detalles_c:
+                    rid = getattr(dc, 'repuesto_id', None)
+                    if not rid:
+                        continue
+                    cant_c = num_attr(dc, ['cantidad'], 0.0) * signo_c
+                    if cant_c == 0:
+                        continue
+
+                    if fecha_c and fecha_c > hasta:
+                        compras_post_hasta[rid] += cant_c
+                    elif fecha_c and desde <= fecha_c <= hasta:
+                        costo_u_c = num_attr(dc, ['costo_unitario', 'precio_unitario', 'costo'], 0.0)
+                        iva_pct_c = num_attr(dc, ['iva_porcentaje', 'alicuota_iva'], 21.0)
+                        neto_c = costo_u_c * cant_c
+                        iva_c = neto_c * (iva_pct_c / 100.0)
+                        total_c = num_attr(dc, ['subtotal_con_iva'], neto_c + iva_c)
+
+                        cp = compras_periodo_data[rid]
+                        cp['cant'] += cant_c
+                        cp['costo_neto'] += neto_c
+                        cp['iva'] += iva_c
+                        cp['costo_total'] += total_c
+                        cp['num_ops'] += 1
+                        if cp['ultima_fecha'] is None or fecha_c >= cp['ultima_fecha']:
+                            cp['ultima_fecha'] = fecha_c
+                            cp['ultimo_costo'] = costo_u_c
+
+                        if dia_key:
+                            compras_diarias_map[dia_key]['total'] += total_c
+                            compras_diarias_map[dia_key]['unidades'] += cant_c
+
+    # -------------------------------------------------------------
+    # 5. AJUSTES / TRANSFERENCIAS OPCIONALES (MovimientoStock)
+    # -------------------------------------------------------------
+    ajustes_periodo = defaultdict(float)
+    ajustes_post_hasta = defaultdict(float)
+    if MovimientoStock is not None and hasattr(MovimientoStock, 'fecha'):
+        m_query = MovimientoStock.query.filter(MovimientoStock.fecha >= desde)
+        if f_sucursal and hasattr(MovimientoStock, 'sucursal_id'):
+            m_query = m_query.filter(MovimientoStock.sucursal_id == f_sucursal)
+        for m in m_query.all():
+            tipo_m = str(getattr(m, 'tipo', getattr(m, 'origen', ''))).upper()
+            # Evitar duplicar ventas/compras si ya fueron procesadas desde sus tablas principales
+            if any(k in tipo_m for k in ['VENTA', 'COMPRA']):
+                continue
+            rid = getattr(m, 'repuesto_id', None)
+            if not rid:
+                continue
+            delta = num_attr(m, ['cantidad', 'diferencia'], 0.0)
+            if any(k in tipo_m for k in ['EGRESO', 'SALIDA', 'BAJA', 'RESTA']) and delta > 0:
+                delta = -delta
+            fecha_m = getattr(m, 'fecha', None)
+            if fecha_m and fecha_m > hasta:
+                ajustes_post_hasta[rid] += delta
+            elif fecha_m and desde <= fecha_m <= hasta:
+                ajustes_periodo[rid] += delta
+
+    # -------------------------------------------------------------
+    # 6. CONSOLIDACIÓN POR REPUESTO + CÁLCULO DE STOCK INICIO / CIERRE
+    # -------------------------------------------------------------
+    categorias_set = set()
+    marcas_set = set()
+    items_raw = []
+
+    for r in repuestos:
+        cat_nombre = texto_rel(r, ['categoria_obj', 'categoria', 'rubro'], 'Sin Categoría')
+        marca_nombre = texto_rel(r, ['marca_obj', 'marca'], 'Genérica')
+        prov_nombre = texto_rel(r, ['proveedor_obj', 'proveedor'], 'Sin Proveedor')
+        prov_id_rep = getattr(r, 'proveedor_id', None)
+
+        categorias_set.add(cat_nombre)
+        marcas_set.add(marca_nombre)
+
+        # Filtros propios del repuesto (categoría, marca, proveedor, buscador)
+        if f_categoria and cat_nombre != f_categoria:
+            continue
+        if f_marca and marca_nombre != f_marca:
+            continue
+        if f_proveedor and prov_id_rep and prov_id_rep != f_proveedor:
+            # Si el repuesto pertenece a otro proveedor y no tuvo compras de ese proveedor
+            if compras_periodo_data[r.id]['cant'] == 0:
+                continue
+
+        sku = getattr(r, 'sku_proveedor', None) or getattr(r, 'codigo', None) or getattr(r, 'codigo_proveedor', None) or f"ID-{r.id}"
+        descripcion = getattr(r, 'nombre', None) or getattr(r, 'descripcion', None) or 'Repuesto sin nombre'
+        ubicacion = getattr(r, 'ubicacion', None) or getattr(r, 'estanteria', None) or '-'
+
+        if f_busqueda:
+            haystack = f"{sku} {descripcion} {cat_nombre} {marca_nombre} {prov_nombre}".lower()
+            if f_busqueda not in haystack:
+                continue
+
+        # Datos de stock
+        stock_actual_hoy = stock_actual_map.get(r.id, num_attr(r, ['stock', 'stock_actual'], 0.0))
+        stock_minimo = num_attr(r, ['stock_minimo', 'minimo'], 0.0)
+
+        vp = ventas_periodo_data[r.id]
+        cp = compras_periodo_data[r.id]
+
+        comp_cant = cp['cant']
+        vent_cant = vp['cant']
+        ajus_cant = ajustes_periodo[r.id]
+
+        # Retroceso matemático exacto
+        stock_cierre = stock_actual_hoy - compras_post_hasta[r.id] + ventas_post_hasta[r.id] - ajustes_post_hasta[r.id]
+        stock_inicio = stock_cierre - comp_cant + vent_cant - ajus_cant
+
+        # Costos y precios unitarios
+        costo_base_u = num_attr(r, ['costo', 'costo_unitario'], 0.0)
+        alicuota_iva = num_attr(r, ['iva_porcentaje', 'iva'], 21.0)
+        costo_con_iva_u = costo_base_u * (1.0 + alicuota_iva / 100.0)
+        precio_venta_u = num_attr(r, ['precio_venta', 'precio', 'precio_publico'], 0.0)
+
+        # Si el detalle de venta no guardó costo_unitario, estimamos CMV con costo_con_iva_u
+        costo_cmv = vp['costo_cmv'] if vp['costo_cmv'] != 0 else (vent_cant * costo_con_iva_u)
+        venta_neta = vp['venta_neta']
+        ganancia = venta_neta - costo_cmv
+        margen_pct = (ganancia / venta_neta * 100.0) if venta_neta != 0 else 0.0
+
+        # Valorizaciones de Inventario
+        val_inicio_costo = stock_inicio * costo_con_iva_u
+        val_cierre_costo = stock_cierre * costo_con_iva_u
+        val_cierre_venta = stock_cierre * precio_venta_u
+
+        # Rotación y Cobertura
+        stock_promedio = (max(stock_inicio, 0.0) + max(stock_cierre, 0.0)) / 2.0
+        rotacion = (vent_cant / stock_promedio) if stock_promedio > 0 else (vent_cant if vent_cant > 0 else 0.0)
+        venta_diaria_prom = vent_cant / dias_periodo
+        dias_cobertura = (stock_cierre / venta_diaria_prom) if (venta_diaria_prom > 0 and stock_cierre > 0) else (999 if stock_cierre > 0 else 0)
+
+        # Estado Semáforo de Stock
+        if stock_cierre <= 0:
+            estado_code = 'sin_stock'
+            estado_label = 'SIN STOCK'
+        elif stock_minimo > 0 and stock_cierre <= stock_minimo:
+            estado_code = 'critico'
+            estado_label = 'CRÍTICO'
+        elif vent_cant <= 0 and stock_cierre > 0:
+            estado_code = 'inmovilizado'
+            estado_label = 'INMOVILIZADO'
+        elif stock_minimo > 0 and stock_cierre >= (stock_minimo * 4) and dias_cobertura > 90:
+            estado_code = 'sobrestock'
+            estado_label = 'SOBRESTOCK'
+        else:
+            estado_code = 'optimo'
+            estado_label = 'ÓPTIMO'
+
+        # Filtro de Actividad
+        tiene_compra = comp_cant != 0
+        tiene_venta = vent_cant != 0
+        if f_actividad == 'con_movimiento' and not (tiene_compra or tiene_venta or ajus_cant != 0):
+            continue
+        elif f_actividad == 'solo_ventas' and not tiene_venta:
+            continue
+        elif f_actividad == 'solo_compras' and not tiene_compra:
+            continue
+        elif f_actividad == 'sin_movimiento' and (tiene_compra or tiene_venta or ajus_cant != 0):
+            continue
+
+        # Filtro de Estado de Stock
+        if f_estado_stock and estado_code != f_estado_stock:
+            continue
+
+        items_raw.append({
+            'repuesto_id': r.id,
+            'sku': str(sku),
+            'descripcion': str(descripcion),
+            'categoria': cat_nombre,
+            'marca': marca_nombre,
+            'proveedor': prov_nombre,
+            'ubicacion': str(ubicacion),
+            'stock_inicio': stock_inicio,
+            'val_inicio_costo': val_inicio_costo,
+            'comp_cant': comp_cant,
+            'comp_neto': cp['costo_neto'],
+            'comp_iva': cp['iva'],
+            'comp_total': cp['costo_total'],
+            'comp_ops': cp['num_ops'],
+            'ultimo_costo_comp': cp['ultimo_costo'],
+            'ultima_fecha_comp': cp['ultima_fecha'],
+            'vent_cant': vent_cant,
+            'vent_descuento': vp['descuento'],
+            'vent_total': venta_neta,
+            'vent_ops': vp['num_ops'],
+            'ultima_fecha_vent': vp['ultima_fecha'],
+            'costo_cmv': costo_cmv,
+            'ganancia': ganancia,
+            'margen_pct': margen_pct,
+            'ajustes': ajus_cant,
+            'stock_cierre': stock_cierre,
+            'stock_actual_hoy': stock_actual_hoy,
+            'stock_minimo': stock_minimo,
+            'costo_base_u': costo_base_u,
+            'alicuota_iva': alicuota_iva,
+            'costo_con_iva_u': costo_con_iva_u,
+            'precio_venta_u': precio_venta_u,
+            'val_cierre_costo': val_cierre_costo,
+            'val_cierre_venta': val_cierre_venta,
+            'rotacion': rotacion,
+            'dias_cobertura': dias_cobertura,
+            'estado_code': estado_code,
+            'estado_label': estado_label,
+            'clase_abc': 'C'
+        })
+
+    # -------------------------------------------------------------
+    # 7. CLASIFICACIÓN ABC (PARETO POR VENTAS $)
+    # -------------------------------------------------------------
+    total_ventas_abc = sum(max(i['vent_total'], 0.0) for i in items_raw)
+    items_orden_abc = sorted(items_raw, key=lambda x: x['vent_total'], reverse=True)
+    acumulado_abc = 0.0
+    for item in items_orden_abc:
+        if total_ventas_abc > 0 and item['vent_total'] > 0:
+            acumulado_abc += item['vent_total']
+            pct_acum = (acumulado_abc / total_ventas_abc) * 100.0
+            if pct_acum <= 80.0:
+                item['clase_abc'] = 'A'
+            elif pct_acum <= 95.0:
+                item['clase_abc'] = 'B'
+            else:
+                item['clase_abc'] = 'C'
+        else:
+            item['clase_abc'] = 'C'
+
+    # Aplicar filtro de Clase ABC si el usuario lo seleccionó
+    if f_abc:
+        items_reporte = [i for i in items_raw if i['clase_abc'] == f_abc]
+    else:
+        items_reporte = items_raw
+
+    # -------------------------------------------------------------
+    # 8. ORDENAMIENTO FINAL DE LA TABLA
+    # -------------------------------------------------------------
+    orden_map = {
+        'venta_desc': (lambda x: x['vent_total'], True),
+        'ganancia_desc': (lambda x: x['ganancia'], True),
+        'compra_desc': (lambda x: x['comp_total'], True),
+        'stock_cierre_desc': (lambda x: x['stock_cierre'], True),
+        'val_cierre_desc': (lambda x: x['val_cierre_costo'], True),
+        'rotacion_desc': (lambda x: x['rotacion'], True),
+        'stock_inicio_desc': (lambda x: x['stock_inicio'], True),
+        'alfabetico': (lambda x: x['descripcion'].lower(), False),
+    }
+    key_fn, is_rev = orden_map.get(f_orden, (lambda x: x['vent_total'], True))
+    items_reporte.sort(key=key_fn, reverse=is_rev)
+
+    # -------------------------------------------------------------
+    # 9. TOTALES CONSOLIDADOS (KPIs) Y DATOS PARA GRÁFICAS
+    # -------------------------------------------------------------
+    totales = {
+        'items_count': len(items_reporte),
+        'stock_inicio_u': sum(i['stock_inicio'] for i in items_reporte),
+        'val_inicio_costo': sum(i['val_inicio_costo'] for i in items_reporte),
+        'comp_cant': sum(i['comp_cant'] for i in items_reporte),
+        'comp_neto': sum(i['comp_neto'] for i in items_reporte),
+        'comp_iva': sum(i['comp_iva'] for i in items_reporte),
+        'comp_total': sum(i['comp_total'] for i in items_reporte),
+        'vent_cant': sum(i['vent_cant'] for i in items_reporte),
+        'vent_total': sum(i['vent_total'] for i in items_reporte),
+        'vent_descuento': sum(i['vent_descuento'] for i in items_reporte),
+        'costo_cmv': sum(i['costo_cmv'] for i in items_reporte),
+        'ganancia': sum(i['ganancia'] for i in items_reporte),
+        'stock_cierre_u': sum(i['stock_cierre'] for i in items_reporte),
+        'val_cierre_costo': sum(i['val_cierre_costo'] for i in items_reporte),
+        'val_cierre_venta': sum(i['val_cierre_venta'] for i in items_reporte),
+        'sin_stock_count': sum(1 for i in items_reporte if i['estado_code'] == 'sin_stock'),
+        'critico_count': sum(1 for i in items_reporte if i['estado_code'] == 'critico'),
+        'inmovilizado_count': sum(1 for i in items_reporte if i['estado_code'] == 'inmovilizado'),
+    }
+    totales['margen_promedio'] = (totales['ganancia'] / totales['vent_total'] * 100.0) if totales['vent_total'] != 0 else 0.0
+    totales['variacion_stock_u'] = totales['stock_cierre_u'] - totales['stock_inicio_u']
+    totales['variacion_val_costo'] = totales['val_cierre_costo'] - totales['val_inicio_costo']
+
+    # Serie diaria continua entre desde y hasta (para Gráfica 1 y Hoja 3 de Excel)
+    fechas_labels = []
+    compras_diarias = []
+    ventas_diarias = []
+    ganancias_diarias = []
+    unidades_comp_diarias = []
+    unidades_vent_diarias = []
+    evolucion_diaria_rows = []
+
+    cursor_dia = desde.date()
+    fin_dia = hasta.date()
+    # Si el rango es enorme (>365 días), limitamos puntos diarios visuales pero manteniendo consistencia
+    while cursor_dia <= fin_dia:
+        dk = cursor_dia.strftime('%Y-%m-%d')
+        c_dia = compras_diarias_map[dk]
+        v_dia = ventas_diarias_map[dk]
+        g_dia = v_dia['venta'] - v_dia['costo']
+
+        fechas_labels.append(cursor_dia.strftime('%d/%m'))
+        compras_diarias.append(round(c_dia['total'], 2))
+        ventas_diarias.append(round(v_dia['venta'], 2))
+        ganancias_diarias.append(round(g_dia, 2))
+        unidades_comp_diarias.append(round(c_dia['unidades'], 2))
+        unidades_vent_diarias.append(round(v_dia['unidades'], 2))
+
+        evolucion_diaria_rows.append({
+            'fecha': cursor_dia.strftime('%d/%m/%Y'),
+            'comp_u': c_dia['unidades'],
+            'comp_total': c_dia['total'],
+            'vent_u': v_dia['unidades'],
+            'vent_total': v_dia['venta'],
+            'ganancia': g_dia
+        })
+        cursor_dia += timedelta(days=1)
+
+    # Top 10 por Venta y Top 10 por Valorización Cierre (Gráfica 2)
+    top_ventas = sorted(items_reporte, key=lambda x: x['vent_total'], reverse=True)[:10]
+    top_stock = sorted(items_reporte, key=lambda x: x['val_cierre_costo'], reverse=True)[:10]
+
+    # Distribución por Estado de Stock (Gráfica 3)
+    estados_orden = [
+        ('optimo', 'Óptimo'),
+        ('critico', 'Crítico'),
+        ('sin_stock', 'Sin Stock'),
+        ('inmovilizado', 'Inmovilizado'),
+        ('sobrestock', 'Sobrestock')
+    ]
+    estados_counts = [sum(1 for i in items_reporte if i['estado_code'] == k) for k, _ in estados_orden]
+    estados_valores = [round(sum(i['val_cierre_costo'] for i in items_reporte if i['estado_code'] == k), 2) for k, _ in estados_orden]
+
+    # Agrupación por Categoría (Gráfica 4)
+    cat_agg = defaultdict(lambda: {'val_ini': 0.0, 'compras': 0.0, 'ventas': 0.0, 'val_cie': 0.0})
+    for i in items_reporte:
+        ca = cat_agg[i['categoria']]
+        ca['val_ini'] += i['val_inicio_costo']
+        ca['compras'] += i['comp_total']
+        ca['ventas'] += i['vent_total']
+        ca['val_cie'] += i['val_cierre_costo']
+    top_cats = sorted(cat_agg.items(), key=lambda x: x[1]['val_cie'] + x[1]['ventas'], reverse=True)[:8]
+
+    # Distribución ABC (Gráfica 5)
+    abc_clases = ['A', 'B', 'C']
+    abc_counts = [sum(1 for i in items_reporte if i['clase_abc'] == c) for c in abc_clases]
+    abc_ventas = [round(sum(i['vent_total'] for i in items_reporte if i['clase_abc'] == c), 2) for c in abc_clases]
+    abc_val_stock = [round(sum(i['val_cierre_costo'] for i in items_reporte if i['clase_abc'] == c), 2) for c in abc_clases]
+
+    graficas_data = {
+        'fechas_labels': fechas_labels,
+        'compras_diarias': compras_diarias,
+        'ventas_diarias': ventas_diarias,
+        'ganancias_diarias': ganancias_diarias,
+        'unidades_comp_diarias': unidades_comp_diarias,
+        'unidades_vent_diarias': unidades_vent_diarias,
+        'top_ventas_labels': [i['descripcion'][:24] for i in top_ventas],
+        'top_ventas_monto': [round(i['vent_total'], 2) for i in top_ventas],
+        'top_ventas_ganancia': [round(i['ganancia'], 2) for i in top_ventas],
+        'top_stock_labels': [i['descripcion'][:24] for i in top_stock],
+        'top_stock_val_costo': [round(i['val_cierre_costo'], 2) for i in top_stock],
+        'top_stock_val_venta': [round(i['val_cierre_venta'], 2) for i in top_stock],
+        'estados_labels': [lbl for _, lbl in estados_orden],
+        'estados_counts': estados_counts,
+        'estados_valores': estados_valores,
+        'cat_labels': [k[:18] for k, _ in top_cats],
+        'cat_val_ini': [round(v['val_ini'], 2) for _, v in top_cats],
+        'cat_compras': [round(v['compras'], 2) for _, v in top_cats],
+        'cat_ventas': [round(v['ventas'], 2) for _, v in top_cats],
+        'cat_val_cie': [round(v['val_cie'], 2) for _, v in top_cats],
+        'abc_labels': ['Clase A (80% Vtas)', 'Clase B (15% Vtas)', 'Clase C (5% / Nula)'],
+        'abc_counts': abc_counts,
+        'abc_ventas': abc_ventas,
+        'abc_val_stock': abc_val_stock,
+    }
+
+    # Helper descarga compatible con cualquier versión de Flask
+    def descargar_archivo(buffer, nombre_archivo, mimetype):
+        buffer.seek(0)
+        try:
+            return send_file(buffer, as_attachment=True, download_name=nombre_archivo, mimetype=mimetype)
+        except TypeError:
+            return send_file(buffer, as_attachment=True, attachment_filename=nombre_archivo, mimetype=mimetype)
+
+    # -------------------------------------------------------------
+    # 10. EXPORTACIÓN COMPLETA A EXCEL (.xlsx MULTI-HOJA + FALLBACK CSV)
+    # -------------------------------------------------------------
+    if formato_export in ['excel', 'xlsx', 'csv']:
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, PatternFill, Alignment
+            from openpyxl.utils import get_column_letter
+
+            wb = openpyxl.Workbook()
+
+            # Estilos ERP
+            dark_fill = PatternFill(start_color="111827", end_color="111827", fill_type="solid")
+            subdark_fill = PatternFill(start_color="1F2937", end_color="1F2937", fill_type="solid")
+            comp_fill = PatternFill(start_color="0B3B48", end_color="0B3B48", fill_type="solid")
+            vent_fill = PatternFill(start_color="4D3800", end_color="4D3800", fill_type="solid")
+            cie_fill = PatternFill(start_color="064E3B", end_color="064E3B", fill_type="solid")
+            header_font = Font(name="Segoe UI", size=9, bold=True, color="FFFFFF")
+            data_font = Font(name="Segoe UI", size=9)
+            bold_font = Font(name="Segoe UI", size=9, bold=True)
+
+            # ---- HOJA 1: DETALLE STOCK Y MOVIMIENTOS ----
+            ws1 = wb.active
+            ws1.title = "Kardex Consolidado"
+
+            headers = [
+                "SKU / CÓDIGO", "REPUESTO / DESCRIPCIÓN", "CATEGORÍA", "MARCA", "PROVEEDOR", "UBICACIÓN",
+                "STOCK INICIAL (U)", "VAL. INICIO COSTO ($)",
+                "COMPRAS (U)", "COMPRAS NETO ($)", "IVA COMPRAS ($)", "COMPRAS TOTAL ($)", "ÚLT. COMPRA",
+                "VENTAS (U)", "DESCUENTOS ($)", "VENTA NETA ($)", "CMV ($)", "GANANCIA ($)", "MARGEN (%)", "ÚLT. VENTA",
+                "AJUSTES (U)", "STOCK CIERRE (U)", "STOCK HOY (U)", "STOCK MÍN.",
+                "COSTO U. c/IVA ($)", "PRECIO VENTA U. ($)", "VAL. CIERRE COSTO ($)", "VAL. CIERRE VENTA ($)",
+                "ROTACIÓN", "DÍAS COBERTURA", "ESTADO", "ABC"
+            ]
+            ws1.append(headers)
+            ws1.row_dimensions[1].height = 26
+
+            for idx, cell in enumerate(ws1[1], start=1):
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                if 9 <= idx <= 13:
+                    cell.fill = comp_fill
+                elif 14 <= idx <= 20:
+                    cell.fill = vent_fill
+                elif 22 <= idx <= 28:
+                    cell.fill = cie_fill
+                else:
+                    cell.fill = dark_fill
+
+            for i in items_reporte:
+                ws1.append([
+                    i['sku'], i['descripcion'], i['categoria'], i['marca'], i['proveedor'], i['ubicacion'],
+                    round(i['stock_inicio'], 2), round(i['val_inicio_costo'], 2),
+                    round(i['comp_cant'], 2), round(i['comp_neto'], 2), round(i['comp_iva'], 2), round(i['comp_total'], 2),
+                    i['ultima_fecha_comp'].strftime('%d/%m/%Y') if i['ultima_fecha_comp'] else '-',
+                    round(i['vent_cant'], 2), round(i['vent_descuento'], 2), round(i['vent_total'], 2),
+                    round(i['costo_cmv'], 2), round(i['ganancia'], 2), f"{round(i['margen_pct'], 1)}%",
+                    i['ultima_fecha_vent'].strftime('%d/%m/%Y') if i['ultima_fecha_vent'] else '-',
+                    round(i['ajustes'], 2), round(i['stock_cierre'], 2), round(i['stock_actual_hoy'], 2), round(i['stock_minimo'], 2),
+                    round(i['costo_con_iva_u'], 2), round(i['precio_venta_u'], 2),
+                    round(i['val_cierre_costo'], 2), round(i['val_cierre_venta'], 2),
+                    round(i['rotacion'], 2),
+                    '∞' if i['dias_cobertura'] >= 999 else round(i['dias_cobertura'], 0),
+                    i['estado_label'], i['clase_abc']
+                ])
+
+            moneda_cols = {8, 10, 11, 12, 15, 16, 17, 18, 25, 26, 27, 28}
+            for row in ws1.iter_rows(min_row=2, max_row=ws1.max_row):
+                for c_idx, cell in enumerate(row, start=1):
+                    cell.font = data_font
+                    if c_idx in moneda_cols:
+                        cell.number_format = '$#,##0.00'
+                        cell.alignment = Alignment(horizontal="right")
+                    elif c_idx in {7, 9, 14, 19, 21, 22, 23, 24, 29, 30, 31, 32}:
+                        cell.alignment = Alignment(horizontal="center")
+
+            ws1.append([
+                "TOTALES", f"{totales['items_count']} ítems", "", "", "", "",
+                round(totales['stock_inicio_u'], 2), round(totales['val_inicio_costo'], 2),
+                round(totales['comp_cant'], 2), round(totales['comp_neto'], 2), round(totales['comp_iva'], 2), round(totales['comp_total'], 2), "",
+                round(totales['vent_cant'], 2), round(totales['vent_descuento'], 2), round(totales['vent_total'], 2),
+                round(totales['costo_cmv'], 2), round(totales['ganancia'], 2), f"{round(totales['margen_promedio'], 1)}%", "",
+                "", round(totales['stock_cierre_u'], 2), "", "",
+                "", "", round(totales['val_cierre_costo'], 2), round(totales['val_cierre_venta'], 2),
+                "", "", "", ""
+            ])
+            t_row = ws1.max_row
+            for c_idx, cell in enumerate(ws1[t_row], start=1):
+                cell.fill = subdark_fill
+                cell.font = header_font
+                if c_idx in moneda_cols:
+                    cell.number_format = '$#,##0.00'
+                    cell.alignment = Alignment(horizontal="right")
+
+            for col in ws1.columns:
+                max_len = max(len(str(c.value or '')) for c in col)
+                ws1.column_dimensions[get_column_letter(col[0].column)].width = min(max(max_len + 3, 11), 38)
+
+            # ---- HOJA 2: RESUMEN Y KPIs ----
+            ws2 = wb.create_sheet("Resumen KPIs")
+            ws2.append(["REPORTE INTEGRAL DE STOCK, MOVIMIENTOS Y VALORIZACIÓN", ""])
+            ws2['A1'].font = Font(name="Segoe UI", size=12, bold=True, color="FFFFFF")
+            ws2['A1'].fill = dark_fill
+            ws2['B1'].fill = dark_fill
+            resumen_filas = [
+                ("Período Analizado", f"{desde_str} al {hasta_str} ({dias_periodo} días)"),
+                ("Total Ítems Analizados", totales['items_count']),
+                ("Stock al Inicio (Unidades)", round(totales['stock_inicio_u'], 2)),
+                ("Valorización Stock Inicio (Costo c/IVA)", round(totales['val_inicio_costo'], 2)),
+                ("Unidades Compradas", round(totales['comp_cant'], 2)),
+                ("Total Compras (c/IVA)", round(totales['comp_total'], 2)),
+                ("Unidades Vendidas", round(totales['vent_cant'], 2)),
+                ("Total Venta Neta", round(totales['vent_total'], 2)),
+                ("Costo de Mercadería Vendida (CMV)", round(totales['costo_cmv'], 2)),
+                ("Ganancia Bruta", round(totales['ganancia'], 2)),
+                ("Margen Promedio (%)", f"{round(totales['margen_promedio'], 2)}%"),
+                ("Stock al Cierre (Unidades)", round(totales['stock_cierre_u'], 2)),
+                ("Valorización Stock Cierre (Costo c/IVA)", round(totales['val_cierre_costo'], 2)),
+                ("Valorización Stock Cierre (Precio Venta)", round(totales['val_cierre_venta'], 2)),
+                ("Ítems Sin Stock / Críticos / Inmovilizados", f"{totales['sin_stock_count']} / {totales['critico_count']} / {totales['inmovilizado_count']}")
+            ]
+            for lbl, val in resumen_filas:
+                ws2.append([lbl, val])
+                ws2.cell(row=ws2.max_row, column=1).font = bold_font
+                c_val = ws2.cell(row=ws2.max_row, column=2)
+                if isinstance(val, float) and ('Valor' in lbl or 'Total' in lbl or 'Costo' in lbl or 'Ganancia' in lbl):
+                    c_val.number_format = '$#,##0.00'
+            ws2.column_dimensions['A'].width = 42
+            ws2.column_dimensions['B'].width = 32
+
+            # ---- HOJA 3: EVOLUCIÓN DIARIA ----
+            ws3 = wb.create_sheet("Evolución Diaria")
+            ws3.append(["FECHA", "COMPRAS (U)", "COMPRAS ($)", "VENTAS (U)", "VENTAS ($)", "GANANCIA ($)"])
+            for cell in ws3[1]:
+                cell.fill = dark_fill
+                cell.font = header_font
+            for er in evolucion_diaria_rows:
+                ws3.append([
+                    er['fecha'], round(er['comp_u'], 2), round(er['comp_total'], 2),
+                    round(er['vent_u'], 2), round(er['vent_total'], 2), round(er['ganancia'], 2)
+                ])
+            for row in ws3.iter_rows(min_row=2, max_row=ws3.max_row):
+                for idx_c in [3, 5, 6]:
+                    row[idx_c - 1].number_format = '$#,##0.00'
+            for col in ws3.columns:
+                ws3.column_dimensions[get_column_letter(col[0].column)].width = 16
+
+            excel_buf = io.BytesIO()
+            wb.save(excel_buf)
+            return descargar_archivo(
+                excel_buf,
+                f"Stock_Integral_{desde_str}_al_{hasta_str}.xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        except Exception:
+            csv_buf = io.StringIO()
+            csv_buf.write('\ufeff')
+            w = csv.writer(csv_buf, delimiter=';')
+            w.writerow([
+                "SKU", "REPUESTO", "CATEGORIA", "MARCA", "PROVEEDOR",
+                "STK INICIO", "VAL INICIO ($)", "COMPRAS (U)", "COMPRAS ($)",
+                "VENTAS (U)", "VENTAS ($)", "GANANCIA ($)", "MARGEN %",
+                "STK CIERRE", "VAL CIERRE COSTO ($)", "VAL CIERRE VENTA ($)",
+                "ROTACION", "ESTADO", "ABC"
+            ])
+            for i in items_reporte:
+                w.writerow([
+                    i['sku'], i['descripcion'], i['categoria'], i['marca'], i['proveedor'],
+                    i['stock_inicio'], f"{i['val_inicio_costo']:.2f}".replace('.', ','),
+                    i['comp_cant'], f"{i['comp_total']:.2f}".replace('.', ','),
+                    i['vent_cant'], f"{i['vent_total']:.2f}".replace('.', ','),
+                    f"{i['ganancia']:.2f}".replace('.', ','), f"{i['margen_pct']:.1f}%",
+                    i['stock_cierre'], f"{i['val_cierre_costo']:.2f}".replace('.', ','),
+                    f"{i['val_cierre_venta']:.2f}".replace('.', ','),
+                    f"{i['rotacion']:.2f}".replace('.', ','), i['estado_label'], i['clase_abc']
+                ])
+            return descargar_archivo(
+                io.BytesIO(csv_buf.getvalue().encode('utf-8-sig')),
+                f"Stock_Integral_{desde_str}_al_{hasta_str}.csv",
+                "text/csv; charset=utf-8"
+            )
+
+    # -------------------------------------------------------------
+    # 11. LISTAS PARA SELECTS DE FILTROS Y RENDER
+    # -------------------------------------------------------------
+    sucursales = Sucursal.query.all() if 'Sucursal' in globals() else []
+    clientes = Cliente.query.all() if 'Cliente' in globals() else []
+    proveedores = Proveedor.query.all() if Proveedor is not None else []
+
+    return render_template(
+        'admin/reporte_stock_integral.html',
+        items=items_reporte,
+        totales=totales,
+        graficas=graficas_data,
+        desde=desde_str,
+        hasta=hasta_str,
+        dias_periodo=dias_periodo,
+        sucursal_id=f_sucursal,
+        proveedor_id=f_proveedor,
+        cliente_id=f_cliente,
+        categoria_sel=f_categoria,
+        marca_sel=f_marca,
+        estado_stock_sel=f_estado_stock,
+        actividad_sel=f_actividad,
+        clase_abc_sel=f_abc,
+        q=request.args.get('q', ''),
+        orden_sel=f_orden,
+        sucursales=sucursales,
+        clientes=clientes,
+        proveedores=proveedores,
+        categorias=sorted(categorias_set),
+        marcas=sorted(marcas_set)
+    )
 
 
