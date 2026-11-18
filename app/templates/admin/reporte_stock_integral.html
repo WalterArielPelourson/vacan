@@ -13,34 +13,48 @@
         padding: 4px 6px;
     }
 
-    /* BARRA DE FILTROS COMPACTA */
+    /* BARRA DE FILTROS COMPACTA CON LETRA BLANCA GARANTIZADA */
     .filtros-erp-card {
         background: #111827;
         border: 1px solid #1f2937;
         border-radius: 8px;
         padding: 8px 10px;
-        color: #e5e7eb;
+        color: #ffffff;
     }
     .filtros-erp-card label {
         font-size: 0.62rem;
         text-transform: uppercase;
         font-weight: 700;
-        color: #9ca3af;
+        color: #ffffff !important;
         margin-bottom: 2px;
         display: block;
         letter-spacing: 0.4px;
     }
     .filtros-erp-card .form-control,
     .filtros-erp-card .form-select {
-        background-color: #1f2937;
+        background-color: #1f2937 !important;
         border-color: #374151;
-        color: #f9fafb;
+        color: #ffffff !important;
         font-size: 0.72rem;
         padding: 3px 6px;
         height: 27px;
     }
+    .filtros-erp-card .form-select {
+        background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath fill='none' stroke='%23ffffff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m2 5 6 6 6-6'/%3e%3c/svg%3e") !important;
+        padding-right: 22px;
+    }
+    .filtros-erp-card .form-select option {
+        background-color: #1f2937 !important;
+        color: #ffffff !important;
+    }
+    .filtros-erp-card .form-control::placeholder {
+        color: #d1d5db;
+        opacity: 0.85;
+    }
     .filtros-erp-card .form-control:focus,
     .filtros-erp-card .form-select:focus {
+        background-color: #1f2937 !important;
+        color: #ffffff !important;
         border-color: #38bdf8;
         box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.35);
     }
@@ -157,7 +171,7 @@
         width: 100%;
         table-layout: fixed !important;
         margin-bottom: 0;
-        font-size: 0.64rem !important;
+        font-size: 0.63rem !important;
         border-collapse: separate;
         border-spacing: 0;
     }
@@ -168,7 +182,7 @@
         z-index: 10;
         background: #111827;
         color: #f9fafb;
-        font-size: 0.59rem;
+        font-size: 0.57rem;
         font-weight: 700;
         text-transform: uppercase;
         padding: 5px 3px !important;
@@ -186,6 +200,10 @@
     .th-ventas {
         background: #4D3800 !important;
         color: #fde047 !important;
+    }
+    .th-descuento {
+        background: #4D3800 !important;
+        color: #fbbf24 !important;
     }
     .th-cierre {
         background: #064E3B !important;
@@ -216,7 +234,7 @@
         background: #111827 !important;
         color: #fff !important;
         font-weight: 800;
-        font-size: 0.64rem;
+        font-size: 0.62rem;
         padding: 5px 3px !important;
         border-top: 2px solid #374151;
         font-family: monospace;
@@ -240,7 +258,7 @@
     }
 
     .badge-erp {
-        font-size: 0.56rem;
+        font-size: 0.55rem;
         padding: 2px 4px;
         border-radius: 4px;
         font-weight: 700;
@@ -253,7 +271,7 @@
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 px-1">
         <div>
             <h5 class="mb-0 fw-bold text-dark d-flex align-items-center gap-2">
-                <span>📦 Reporte Integral de Stock, Compras, Ventas y Valorización</span>
+                <span><i class="bi bi-box-seam text-primary"></i> Reporte Integral de Stock, Compras, Ventas y Valorización</span>
                 <span class="badge bg-dark text-info border border-info" style="font-size: 0.65rem;">
                     Inicio: {{ desde }} | Cierre: {{ hasta }} ({{ dias_periodo }}d)
                 </span>
@@ -282,7 +300,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Sucursal</label>
-                <select name="sucursal_id" class="form-select">
+                <select name="sucursal_id" class="form-select text-white bg-dark">
                     <option value="">Todas</option>
                     {% for s in sucursales %}
                     <option value="{{ s.id }}" {% if sucursal_id == s.id %}selected{% endif %}>{{ s.nombre }}</option>
@@ -291,7 +309,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Proveedor</label>
-                <select name="proveedor_id" class="form-select">
+                <select name="proveedor_id" class="form-select text-white bg-dark">
                     <option value="">Todos</option>
                     {% for p in proveedores %}
                     <option value="{{ p.id }}" {% if proveedor_id == p.id %}selected{% endif %}>{{ p.nombre }}</option>
@@ -300,7 +318,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Categoría</label>
-                <select name="categoria" class="form-select">
+                <select name="categoria" class="form-select text-white bg-dark">
                     <option value="">Todas</option>
                     {% for c in categorias %}
                     <option value="{{ c }}" {% if categoria_sel == c %}selected{% endif %}>{{ c }}</option>
@@ -309,7 +327,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Marca</label>
-                <select name="marca" class="form-select">
+                <select name="marca" class="form-select text-white bg-dark">
                     <option value="">Todas</option>
                     {% for m in marcas %}
                     <option value="{{ m }}" {% if marca_sel == m %}selected{% endif %}>{{ m }}</option>
@@ -318,7 +336,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Cliente (Vtas)</label>
-                <select name="cliente_id" class="form-select">
+                <select name="cliente_id" class="form-select text-white bg-dark">
                     <option value="">Todos</option>
                     {% for cl in clientes %}
                     <option value="{{ cl.id }}" {% if cliente_id == cl.id %}selected{% endif %}>{{ cl.nombre }}</option>
@@ -327,7 +345,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Estado Stock</label>
-                <select name="estado_stock" class="form-select">
+                <select name="estado_stock" class="form-select text-white bg-dark">
                     <option value="">Todos</option>
                     <option value="optimo" {% if estado_stock_sel == 'optimo' %}selected{% endif %}>Óptimo</option>
                     <option value="critico" {% if estado_stock_sel == 'critico' %}selected{% endif %}>Crítico (<= Mín)</option>
@@ -338,7 +356,7 @@
             </div>
             <div class="col-6 col-md-2 col-xl-1">
                 <label>Movimientos</label>
-                <select name="actividad" class="form-select">
+                <select name="actividad" class="form-select text-white bg-dark">
                     <option value="">Todos</option>
                     <option value="con_movimiento" {% if actividad_sel == 'con_movimiento' %}selected{% endif %}>Con Movimiento</option>
                     <option value="solo_ventas" {% if actividad_sel == 'solo_ventas' %}selected{% endif %}>Solo con Ventas</option>
@@ -348,7 +366,7 @@
             </div>
             <div class="col-4 col-md-1 col-xl-1">
                 <label>ABC</label>
-                <select name="clase_abc" class="form-select">
+                <select name="clase_abc" class="form-select text-white bg-dark">
                     <option value="">Todo</option>
                     <option value="A" {% if clase_abc_sel == 'A' %}selected{% endif %}>Clase A</option>
                     <option value="B" {% if clase_abc_sel == 'B' %}selected{% endif %}>Clase B</option>
@@ -357,7 +375,7 @@
             </div>
             <div class="col-8 col-md-3 col-xl-1">
                 <label>Ordenar Por</label>
-                <select name="orden" class="form-select">
+                <select name="orden" class="form-select text-white bg-dark">
                     <option value="venta_desc" {% if orden_sel == 'venta_desc' %}selected{% endif %}>Mayor Venta ($)</option>
                     <option value="ganancia_desc" {% if orden_sel == 'ganancia_desc' %}selected{% endif %}>Mayor Ganancia</option>
                     <option value="compra_desc" {% if orden_sel == 'compra_desc' %}selected{% endif %}>Mayor Compra</option>
@@ -373,8 +391,8 @@
                     <label>Buscar SKU/Nombre</label>
                     <input type="text" name="q" value="{{ q }}" placeholder="SKU o nombre..." class="form-control">
                 </div>
-                <button type="submit" class="btn btn-sm btn-primary fw-bold align-self-end" style="height: 25px; padding: 0 0.5px;">🔍</button>
-                <a href="{{ url_for('admin.reporte_stock_integral') }}" class="btn btn-sm btn-outline-secondary align-self-end" style="height: 25px; padding: 1px 0.5px;" title="Limpiar Filtros">↺</a>
+                <button type="submit" class="btn btn-sm btn-primary fw-bold align-self-end" style="height: 27px; padding: 0 7px;" title="Aplicar Filtros">🔍</button>
+                <a href="{{ url_for('admin.reporte_stock_integral') }}" class="btn btn-sm btn-outline-light align-self-end" style="height: 27px; padding: 2px 6px;" title="Limpiar Filtros">↺</a>
             </div>
         </div>
     </form>
@@ -394,7 +412,7 @@
         <div class="kpi-box" style="border-color: #a16207;">
             <div class="kpi-box-title text-warning">Ventas Netas</div>
             <div class="kpi-box-val text-warning">${{ "{:,.2f}".format(totales.vent_total) }}</div>
-            <div class="kpi-box-sub">{{ "{:,.0f}".format(totales.vent_cant) }} u. | Desc: ${{ "{:,.0f}".format(totales.vent_descuento) }}</div>
+            <div class="kpi-box-sub">{{ "{:,.0f}".format(totales.vent_cant) }} u. | Bruto: ${{ "{:,.0f}".format(totales.vent_bruta) }} | Desc: -${{ "{:,.0f}".format(totales.vent_descuento) }}</div>
         </div>
         <div class="kpi-box">
             <div class="kpi-box-title">CMV (Costo Vendido)</div>
@@ -428,10 +446,9 @@
     <!-- PANEL DE 5 GRÁFICAS INTERACTIVAS (CHART.JS) -->
     <div id="chartsSection">
         <div class="charts-grid">
-            <!-- Gráfica 1: Evolución Diaria -->
             <div class="chart-card">
                 <div class="chart-card-header">
-                    <span class="chart-card-title">📈 Flujo Diario: Compras vs Ventas vs Ganancia ($)</span>
+                    <span class="chart-card-title">📈 Flujo Diario: Compras vs Ventas Netas vs Ganancia ($)</span>
                     <div class="btn-group btn-group-sm">
                         <button type="button" class="btn btn-xs btn-outline-info py-0 px-2" style="font-size:0.62rem;" onclick="switchEvolucion('monto')">Dinero ($)</button>
                         <button type="button" class="btn btn-xs btn-outline-warning py-0 px-2" style="font-size:0.62rem;" onclick="switchEvolucion('unidades')">Unidades</button>
@@ -442,7 +459,6 @@
                 </div>
             </div>
 
-            <!-- Gráfica 2: Top 10 Repuestos -->
             <div class="chart-card">
                 <div class="chart-card-header">
                     <span class="chart-card-title">🏆 Top 10 Repuestos</span>
@@ -456,7 +472,6 @@
                 </div>
             </div>
 
-            <!-- Gráfica 3: Salud de Stock -->
             <div class="chart-card">
                 <div class="chart-card-header">
                     <span class="chart-card-title">🩺 Salud del Stock al Cierre</span>
@@ -468,7 +483,6 @@
         </div>
 
         <div class="charts-grid-bottom">
-            <!-- Gráfica 4: Comparativa por Categoría -->
             <div class="chart-card">
                 <div class="chart-card-header">
                     <span class="chart-card-title">📊 Balance Valorizado por Categoría (Inicio vs Compras vs Ventas vs Cierre)</span>
@@ -478,10 +492,9 @@
                 </div>
             </div>
 
-            <!-- Gráfica 5: Clasificación ABC -->
             <div class="chart-card">
                 <div class="chart-card-header">
-                    <span class="chart-card-title">🎯 Matriz ABC (Facturación vs Capital Inmovilizado)</span>
+                    <span class="chart-card-title">🎯 Matriz ABC (Facturación Neta vs Capital Inmovilizado)</span>
                 </div>
                 <div class="chart-canvas-wrap">
                     <canvas id="chartABC"></canvas>
@@ -494,26 +507,27 @@
     <div id="tableContainer" class="table-viewport-container shadow-sm">
         <table class="table table-hover table-striped align-middle table-stock-erp">
             <colgroup>
-                <col style="width: 6.5%;">   <!-- SKU -->
-                <col style="width: 15.0%;">  <!-- REPUESTO -->
-                <col style="width: 7.0%;">   <!-- CAT / MARCA -->
-                <col style="width: 6.5%;">   <!-- PROVEEDOR -->
-                <col style="width: 4.5%;">   <!-- STK INICIO -->
-                <col style="width: 6.5%;">   <!-- VAL INICIO -->
-                <col style="width: 4.5%;">   <!-- COMP U -->
-                <col style="width: 6.5%;">   <!-- COMP $ -->
-                <col style="width: 4.5%;">   <!-- VENT U -->
-                <col style="width: 6.5%;">   <!-- VENT $ -->
-                <col style="width: 6.5%;">   <!-- GANANCIA -->
-                <col style="width: 4.5%;">   <!-- MARGEN -->
-                <col style="width: 4.5%;">   <!-- STK CIERRE -->
-                <col style="width: 6.5%;">   <!-- VAL CIERRE -->
-                <col style="width: 5.0%;">   <!-- ROT / DIAS -->
+                <col style="width: 6.5%;">   <!-- SKU PROV -->
+                <col style="width: 14.5%;">  <!-- REPUESTO -->
+                <col style="width: 6.5%;">   <!-- CAT / MARCA -->
+                <col style="width: 6.0%;">   <!-- PROVEEDOR -->
+                <col style="width: 4.2%;">   <!-- STK INICIO -->
+                <col style="width: 6.0%;">   <!-- VAL INICIO -->
+                <col style="width: 4.2%;">   <!-- COMP U -->
+                <col style="width: 6.0%;">   <!-- COMP $ -->
+                <col style="width: 4.2%;">   <!-- VENT U -->
+                <col style="width: 5.3%;">   <!-- DESC $ -->
+                <col style="width: 6.2%;">   <!-- VENTA NETA $ -->
+                <col style="width: 6.0%;">   <!-- GANANCIA -->
+                <col style="width: 4.2%;">   <!-- MARGEN -->
+                <col style="width: 4.2%;">   <!-- STK CIERRE -->
+                <col style="width: 6.2%;">   <!-- VAL CIERRE -->
+                <col style="width: 4.8%;">   <!-- ROT / DIAS -->
                 <col style="width: 5.0%;">   <!-- ESTADO / ABC -->
             </colgroup>
             <thead>
                 <tr>
-                    <th class="ps-2">SKU / CÓD.</th>
+                    <th class="ps-2">SKU PROV.</th>
                     <th>REPUESTO / DESCRIPCIÓN</th>
                     <th>CAT. / MARCA</th>
                     <th>PROVEEDOR</th>
@@ -522,7 +536,8 @@
                     <th class="text-center th-compras">COMP (U)</th>
                     <th class="text-end th-compras">COMP. ($)</th>
                     <th class="text-center th-ventas">VENT (U)</th>
-                    <th class="text-end th-ventas">VENTA ($)</th>
+                    <th class="text-end th-descuento">DESC. ($)</th>
+                    <th class="text-end th-ventas">VTA NETA ($)</th>
                     <th class="text-end">GANANCIA</th>
                     <th class="text-center">MARG.</th>
                     <th class="text-center th-cierre">STK CIE</th>
@@ -535,7 +550,7 @@
                 {% for i in items %}
                 <tr onclick='abrirDetalleItem({{ i | tojson | safe }})' title="Click para ver ficha completa del repuesto">
                     <td class="ps-2 fw-bold text-primary">
-                        <span class="cell-truncate" title="{{ i.sku }}">{{ i.sku }}</span>
+                        <span class="cell-truncate" title="SKU Prov: {{ i.sku }} | Cód Int: {{ i.codigo_interno }}">{{ i.sku }}</span>
                     </td>
                     <td class="fw-semibold text-dark">
                         <span class="cell-truncate" title="{{ i.descripcion }}">{{ i.descripcion }}</span>
@@ -558,6 +573,9 @@
 
                     <td class="text-center num-mono fw-bold" style="color:#b45309; background:rgba(217,119,6,0.06);">
                         {{ "{:,.0f}".format(i.vent_cant) }}
+                    </td>
+                    <td class="text-end num-mono" style="color:#d97706; background:rgba(217,119,6,0.09);">
+                        {% if i.vent_descuento > 0 %}-${{ "{:,.0f}".format(i.vent_descuento) }}{% else %}$0{% endif %}
                     </td>
                     <td class="text-end num-mono fw-bold" style="color:#92400e; background:rgba(217,119,6,0.06);">
                         ${{ "{:,.0f}".format(i.vent_total) }}
@@ -597,7 +615,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="16" class="text-center py-4 text-muted fw-semibold">
+                    <td colspan="17" class="text-center py-4 text-muted fw-semibold">
                         No se encontraron repuestos con los filtros seleccionados.
                     </td>
                 </tr>
@@ -611,6 +629,7 @@
                     <td class="text-center text-info">{{ "{:,.0f}".format(totales.comp_cant) }}</td>
                     <td class="text-end text-info">${{ "{:,.0f}".format(totales.comp_total) }}</td>
                     <td class="text-center text-warning">{{ "{:,.0f}".format(totales.vent_cant) }}</td>
+                    <td class="text-end" style="color:#fbbf24;">-${{ "{:,.0f}".format(totales.vent_descuento) }}</td>
                     <td class="text-end text-warning">${{ "{:,.0f}".format(totales.vent_total) }}</td>
                     <td class="text-end text-success">${{ "{:,.0f}".format(totales.ganancia) }}</td>
                     <td class="text-center">{{ "{:.1f}".format(totales.margen_promedio) }}%</td>
@@ -663,7 +682,7 @@
     }
 
     function abrirDetalleItem(item) {
-        document.getElementById('modalTituloRepuesto').innerText = `[${item.sku}] ${item.descripcion}`;
+        document.getElementById('modalTituloRepuesto').innerText = `[SKU Prov: ${item.sku}] ${item.descripcion}`;
         const fmt = (n) => '$' + Number(n || 0).toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         const fmtU = (n) => Number(n || 0).toLocaleString('es-AR', { maximumFractionDigits: 2 });
 
@@ -672,10 +691,10 @@
                 <div class="col-md-6">
                     <div class="p-2 rounded border border-secondary bg-black bg-opacity-25">
                         <div class="text-secondary text-uppercase fw-bold mb-1" style="font-size:0.7rem;">Identificación & Costos</div>
+                        <div><b>SKU Proveedor:</b> ${item.sku} | <b>Cód. Interno:</b> ${item.codigo_interno}</div>
                         <div><b>Categoría:</b> ${item.categoria} | <b>Marca:</b> ${item.marca}</div>
                         <div><b>Proveedor:</b> ${item.proveedor} | <b>Ubicación:</b> ${item.ubicacion}</div>
-                        <div><b>Costo Base U.:</b> ${fmt(item.costo_base_u)} (IVA ${item.alicuota_iva}%)</div>
-                        <div><b>Costo U. c/IVA:</b> ${fmt(item.costo_con_iva_u)}</div>
+                        <div><b>Costo Base U.:</b> ${fmt(item.costo_base_u)} (IVA ${item.alicuota_iva}%) | <b>c/IVA:</b> ${fmt(item.costo_con_iva_u)}</div>
                         <div><b>Precio Venta U.:</b> <span class="text-warning fw-bold">${fmt(item.precio_venta_u)}</span></div>
                     </div>
                 </div>
@@ -695,16 +714,16 @@
                         <div><b>Unidades Compradas:</b> ${fmtU(item.comp_cant)} u. (${item.comp_ops} ítems)</div>
                         <div><b>Neto:</b> ${fmt(item.comp_neto)} | <b>IVA:</b> ${fmt(item.comp_iva)}</div>
                         <div><b>Total Comprado:</b> <span class="text-info fw-bold">${fmt(item.comp_total)}</span></div>
-                        <div><b>Último Costo Unit. Compra:</b> ${fmt(item.ultimo_costo_comp)}</div>
+                        <div><b>Últ. Compra:</b> ${item.ultima_fecha_comp} (${fmt(item.ultimo_costo_comp)})</div>
                     </div>
                 </div>
                 <div class="col-md-6">
                     <div class="p-2 rounded border border-warning bg-black bg-opacity-25">
                         <div class="text-warning text-uppercase fw-bold mb-1" style="font-size:0.7rem;">Ventas & Rentabilidad</div>
                         <div><b>Unidades Vendidas:</b> ${fmtU(item.vent_cant)} u. (${item.vent_ops} ops)</div>
-                        <div><b>Descuentos:</b> ${fmt(item.vent_descuento)} | <b>Venta Neta:</b> <span class="text-warning fw-bold">${fmt(item.vent_total)}</span></div>
-                        <div><b>CMV:</b> ${fmt(item.costo_cmv)} | <b>Ganancia:</b> <span class="text-success fw-bold">${fmt(item.ganancia)}</span></div>
-                        <div><b>Margen Neto:</b> ${item.margen_pct.toFixed(1)}% | <b>Ajustes Stock:</b> ${fmtU(item.ajustes)} u.</div>
+                        <div><b>Venta Bruta:</b> ${fmt(item.vent_bruta)} | <b>Descuentos:</b> <span class="text-danger">-${fmt(item.vent_descuento)}</span></div>
+                        <div><b>Venta Neta:</b> <span class="text-warning fw-bold">${fmt(item.vent_total)}</span> | <b>CMV:</b> ${fmt(item.costo_cmv)}</div>
+                        <div><b>Ganancia:</b> <span class="text-success fw-bold">${fmt(item.ganancia)}</span> (${item.margen_pct.toFixed(1)}%)</div>
                     </div>
                 </div>
             </div>
@@ -712,19 +731,17 @@
         new bootstrap.Modal(document.getElementById('modalDetalleStock')).show();
     }
 
-    // Configuración global Chart.js modo oscuro ERP
     Chart.defaults.color = '#9ca3af';
     Chart.defaults.borderColor = 'rgba(255,255,255,0.08)';
     Chart.defaults.font.size = 10;
 
-    // 1. Gráfica Evolución Diaria
     let chartEvolucion = new Chart(document.getElementById('chartEvolucion'), {
         type: 'bar',
         data: {
             labels: graficasData.fechas_labels,
             datasets: [
                 { label: 'Compras ($)', data: graficasData.compras_diarias, backgroundColor: 'rgba(34, 211, 238, 0.55)', borderColor: '#22d3ee', borderWidth: 1 },
-                { label: 'Ventas ($)', data: graficasData.ventas_diarias, backgroundColor: 'rgba(250, 204, 21, 0.65)', borderColor: '#facc15', borderWidth: 1 },
+                { label: 'Ventas Netas ($)', data: graficasData.ventas_diarias, backgroundColor: 'rgba(250, 204, 21, 0.65)', borderColor: '#facc15', borderWidth: 1 },
                 { label: 'Ganancia ($)', data: graficasData.ganancias_diarias, type: 'line', borderColor: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.15)', tension: 0.3, pointRadius: 2 }
             ]
         },
@@ -740,20 +757,19 @@
         } else {
             chartEvolucion.data.datasets = [
                 { label: 'Compras ($)', data: graficasData.compras_diarias, backgroundColor: 'rgba(34, 211, 238, 0.55)', borderColor: '#22d3ee', borderWidth: 1 },
-                { label: 'Ventas ($)', data: graficasData.ventas_diarias, backgroundColor: 'rgba(250, 204, 21, 0.65)', borderColor: '#facc15', borderWidth: 1 },
+                { label: 'Ventas Netas ($)', data: graficasData.ventas_diarias, backgroundColor: 'rgba(250, 204, 21, 0.65)', borderColor: '#facc15', borderWidth: 1 },
                 { label: 'Ganancia ($)', data: graficasData.ganancias_diarias, type: 'line', borderColor: '#34d399', tension: 0.3, pointRadius: 2 }
             ];
         }
         chartEvolucion.update();
     }
 
-    // 2. Gráfica Top 10
     let chartTop10 = new Chart(document.getElementById('chartTop10'), {
         type: 'bar',
         data: {
             labels: graficasData.top_ventas_labels,
             datasets: [
-                { label: 'Venta ($)', data: graficasData.top_ventas_monto, backgroundColor: '#facc15' },
+                { label: 'Venta Neta ($)', data: graficasData.top_ventas_monto, backgroundColor: '#facc15' },
                 { label: 'Ganancia ($)', data: graficasData.top_ventas_ganancia, backgroundColor: '#34d399' }
             ]
         },
@@ -775,14 +791,13 @@
         } else {
             chartTop10.data.labels = graficasData.top_ventas_labels;
             chartTop10.data.datasets = [
-                { label: 'Venta ($)', data: graficasData.top_ventas_monto, backgroundColor: '#facc15' },
+                { label: 'Venta Neta ($)', data: graficasData.top_ventas_monto, backgroundColor: '#facc15' },
                 { label: 'Ganancia ($)', data: graficasData.top_ventas_ganancia, backgroundColor: '#34d399' }
             ];
         }
         chartTop10.update();
     }
 
-    // 3. Gráfica Dona Salud de Stock
     new Chart(document.getElementById('chartEstados'), {
         type: 'doughnut',
         data: {
@@ -802,7 +817,6 @@
         }
     });
 
-    // 4. Gráfica Categorías
     new Chart(document.getElementById('chartCategorias'), {
         type: 'bar',
         data: {
@@ -810,20 +824,19 @@
             datasets: [
                 { label: 'Val. Inicio', data: graficasData.cat_val_ini, backgroundColor: '#64748b' },
                 { label: 'Compras', data: graficasData.cat_compras, backgroundColor: '#22d3ee' },
-                { label: 'Ventas', data: graficasData.cat_ventas, backgroundColor: '#facc15' },
+                { label: 'Ventas Netas', data: graficasData.cat_ventas, backgroundColor: '#facc15' },
                 { label: 'Val. Cierre', data: graficasData.cat_val_cie, backgroundColor: '#10b981' }
             ]
         },
         options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'top', labels: { boxWidth: 10 } } } }
     });
 
-    // 5. Gráfica ABC Pareto
     new Chart(document.getElementById('chartABC'), {
         type: 'bar',
         data: {
             labels: graficasData.abc_labels,
             datasets: [
-                { label: 'Facturación Ventas ($)', data: graficasData.abc_ventas, backgroundColor: '#f59e0b' },
+                { label: 'Facturación Neta ($)', data: graficasData.abc_ventas, backgroundColor: '#f59e0b' },
                 { label: 'Capital Stock Cierre ($)', data: graficasData.abc_val_stock, backgroundColor: '#38bdf8' }
             ]
         },
