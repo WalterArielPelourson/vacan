@@ -1,13 +1,13 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="row mb-4 align-items-center">
+<div class="row mb-3 align-items-center">
     <div class="col-md-6">
-        <h2 class="fw-bold"><i class="bi bi-truck text-pink"></i> Cuentas Corrientes <span class="text-pink">Proveedores</span></h2>
-        <p class="text-muted">Estado de cuenta global de deudas con fábricas y distribuidores.</p>
+        <h2 class="fw-bold mb-1"><i class="bi bi-truck text-pink"></i> Cuentas Corrientes <span class="text-pink">Proveedores</span></h2>
+        <p class="text-muted mb-0">Estado de cuenta global de deudas con fábricas y distribuidores.</p>
     </div>
-    
-    <!-- BUSCADOR INTELIGENTE (NUEVO) -->
-    <div class="col-md-6">
+
+    <!-- BUSCADOR INTELIGENTE -->
+    <div class="col-md-6 mt-2 mt-md-0">
         <div class="input-group input-group-lg shadow-sm">
             <span class="input-group-text bg-white border-dark"><i class="bi bi-search text-pink"></i></span>
             <input type="text" id="provSearch" class="form-control border-dark" placeholder="Buscar por Nombre, Iniciales o CUIT...">
@@ -15,14 +15,73 @@
     </div>
 </div>
 
+<!-- BARRA DE FILTROS DE SALDO Y ORDENAMIENTO (SIN RECARGAR NI CAMBIAR DE URL) -->
+<div class="card bg-dark text-white shadow-sm border-0 mb-3"
+     style="border-left: 5px solid var(--vacan-pink) !important;">
+    <div class="card-body p-3">
+        <div class="row g-2 align-items-end">
+            {% if current_user.rol == 'superadmin' and sucursales|default([]) %}
+            <div class="col-12 col-md-3">
+                <form method="GET">
+                    <label class="form-label text-white small text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">
+                        Sucursal
+                    </label>
+                    <select id="sucursalProv" name="sucursal_id" class="form-select form-select-sm bg-secondary bg-opacity-25 text-white border-secondary"
+                            onchange="this.form.submit()">
+                        <option value="" class="bg-dark text-white">Todas las Sucursales</option>
+                        {% for suc in sucursales %}
+                        <option value="{{ suc.id }}" class="bg-dark text-white" {% if sucursal_id == suc.id %}selected{% endif %}>
+                            {{ suc.nombre }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </form>
+            </div>
+            {% endif %}
+
+            <div class="col-6 col-md-4">
+                <label class="form-label text-white small text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">
+                    Filtrar por Saldo
+                </label>
+                <select id="filtroSaldoProv" class="form-select form-select-sm bg-secondary bg-opacity-25 text-white border-secondary">
+                    <option value="todos" class="bg-dark text-white" selected>Todos los Proveedores</option>
+                    <option value="con_saldo" class="bg-dark text-white">Con Saldo (Deuda o A Favor)</option>
+                    <option value="a_pagar" class="bg-dark text-white">Solo con Deuda a Pagar (&gt; $0)</option>
+                    <option value="sin_saldo" class="bg-dark text-white">Sin Saldo / Al Día ($0.00)</option>
+                    <option value="a_favor" class="bg-dark text-white">Con Saldo a Favor (&lt; $0)</option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-4">
+                <label class="form-label text-white small text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">
+                    Ordenar Por
+                </label>
+                <select id="ordenProv" class="form-select form-select-sm bg-secondary bg-opacity-25 text-white border-secondary">
+                    <option value="razon_asc" class="bg-dark text-white" selected>Proveedor (A - Z)</option>
+                    <option value="razon_desc" class="bg-dark text-white">Proveedor (Z - A)</option>
+                    <option value="saldo_desc" class="bg-dark text-white">Mayor Deuda primero</option>
+                    <option value="saldo_asc" class="bg-dark text-white">Menor Saldo / A Favor primero</option>
+                    <option value="cuit_asc" class="bg-dark text-white">CUIT</option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-auto d-flex gap-2 ms-auto">
+                <button type="button" class="btn btn-sm btn-outline-light" onclick="limpiarFiltrosProv()" title="Restablecer filtros">
+                    <i class="bi bi-arrow-counterclockwise"></i> Limpiar
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- PANEL DE RESUMEN: DEUDA TOTAL ACUMULADA -->
-<div class="row mb-4">
+<div class="row mb-4 g-3">
     <div class="col-md-5">
-        <div class="card bg-dark text-white shadow border-0" style="border-left: 5px solid var(--vacan-pink) !important;">
+        <div class="card bg-dark text-white shadow border-0 h-100" style="border-left: 5px solid var(--vacan-pink) !important;">
             <div class="card-body p-4 d-flex justify-content-between align-items-center">
                 <div>
                     <h6 class="text-white-50 small text-uppercase fw-bold mb-1">Deuda Total de Vacan</h6>
-                    <h1 class="fw-bold mb-0 text-pink">${{ "{:,.2f}".format(total_general or 0) }}</h1>
+                    <h1 class="fw-bold mb-0 text-pink" id="totalDeudaProv">${{ "{:,.2f}".format(total_general or 0) }}</h1>
                 </div>
                 <div class="text-end">
                     <i class="bi bi-calculator fs-1 text-white-50"></i>
@@ -30,36 +89,69 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card bg-white shadow-sm border-0 p-4 h-100">
             <h6 class="text-muted small text-uppercase fw-bold">Proveedores Filtrados</h6>
-            <!-- El ID 'countProv' se actualizará con el buscador -->
             <h2 class="fw-bold mb-0 text-dark" id="countProv">{{ proveedores|length }}</h2>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card bg-white shadow-sm border-0 p-3 h-100 d-flex justify-content-center">
+            <h6 class="text-muted small text-uppercase fw-bold mb-2">Desglose Visible</h6>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">
+                    A pagar: <strong id="badgeProvPagar">0</strong>
+                </span>
+                <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                    Al día: <strong id="badgeProvAlDia">0</strong>
+                </span>
+                <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1">
+                    A favor: <strong id="badgeProvFavor">0</strong>
+                </span>
+            </div>
         </div>
     </div>
 </div>
 
 <div class="card shadow border-0">
-    <div class="card-header bg-dark text-white fw-bold">DETALLE POR PROVEEDOR</div>
+    <div class="card-header bg-dark text-white fw-bold d-flex justify-content-between align-items-center">
+        <span>DETALLE POR PROVEEDOR</span>
+        <small class="text-white-50 fw-normal">Tip: Hacé clic en los encabezados para ordenar</small>
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0" id="tableProv">
                 <thead class="table-light">
                     <tr>
-                        <th>Proveedor</th>
-                        <th>CUIT</th>
-                        <th class="text-end">Saldo a Pagar</th>
+                        <th class="sortable-th" onclick="ordenarPorColumnaProv('razon')">
+                            Proveedor <i class="bi bi-arrow-down-up small text-muted ms-1"></i>
+                        </th>
+                        <th class="sortable-th" onclick="ordenarPorColumnaProv('cuit')">
+                            CUIT <i class="bi bi-arrow-down-up small text-muted ms-1"></i>
+                        </th>
+                        <th class="text-end sortable-th" onclick="ordenarPorColumnaProv('saldo')">
+                            Saldo a Pagar <i class="bi bi-arrow-down-up small text-muted ms-1"></i>
+                        </th>
                         <th class="text-center">Acción</th>
                     </tr>
                 </thead>
-                <tbody>
+                <tbody id="tableProvBody">
                     {% for p in proveedores %}
-                    <!-- Agregamos data-info para que el buscador lea el nombre y cuit (sin guiones) -->
-                    <tr class="prov-row" data-info="{{ p.razon_social|lower }} {{ p.cuit|replace('-', '') if p.cuit else '' }}">
+                    <tr class="prov-row"
+                        data-info="{{ p.razon_social|lower }} {{ p.cuit|replace('-', '') if p.cuit else '' }}"
+                        data-nombre="{{ p.razon_social|lower }}"
+                        data-cuit="{{ (p.cuit or '')|replace('-', '')|lower }}"
+                        data-saldo="{{ '%.2f'|format(p.saldo or 0) }}">
                         <td><strong>{{ p.razon_social }}</strong></td>
                         <td><code class="text-dark">{{ p.cuit or 'S/D' }}</code></td>
-                        <td class="text-end fw-bold {{ 'text-danger' if p.saldo > 0 else 'text-success' }}">
-                            ${{ "{:,.2f}".format(p.saldo) }}
+                        <td class="text-end fw-bold">
+                            {% if p.saldo > 0.009 %}
+                                <span class="text-danger">${{ "{:,.2f}".format(p.saldo) }}</span>
+                            {% elif p.saldo < -0.009 %}
+                                <span class="text-info">A FAVOR: ${{ "{:,.2f}".format(p.saldo|abs) }}</span>
+                            {% else %}
+                                <span class="text-success">$0.00 (Al día)</span>
+                            {% endif %}
                         </td>
                         <td class="text-center">
                             <a href="{{ url_for('admin.detalle_cta_cte_proveedor', id=p.id) }}" class="btn btn-sm btn-pink fw-bold px-3 shadow-sm">
@@ -67,105 +159,197 @@
                             </a>
                         </td>
                     </tr>
-
-                    <!-- MODAL PAGO A PROVEEDOR (Mantenido sin cambios) -->
-                    <div class="modal fade" id="modalPagoProv{{ p.id }}" tabindex="-1" aria-hidden="true">
-                        <div class="modal-dialog modal-lg modal-dialog-centered">
-                            <form action="{{ url_for('admin.registrar_pago_proveedor', id=p.id) }}" method="POST" class="modal-content">
-                                <div class="modal-header bg-dark text-white">
-                                    <h5 class="modal-title">Pagar a: {{ p.razon_social }}</h5>
-                                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                                </div>
-                                <div class="modal-body text-dark text-start" style="background-color: white !important;">
-                                    <div class="row">
-                                        <div class="col-md-6 mb-3">
-                                            <label class="form-label fw-bold">Monto a Pagar ($)</label>
-                                            <input type="number" step="0.01" name="monto" class="form-control form-control-lg border-primary" required>
-                                        </div>
-                                        <div class="col-md-6 mb-3">
-                                            <label class="form-label fw-bold">Medio de Pago</label>
-                                            <select name="medio_pago" class="form-select form-select-lg border-dark" onchange="checkMedio(this.value, {{p.id}})">
-                                                <option value="EFECTIVO">Efectivo (Caja)</option>
-                                                <option value="TRANSFERENCIA">Transferencia / Banco</option>
-                                                <option value="CHEQUE_TERCEROS">Endosar Cheque de Cliente</option>
-                                            </select>
-                                        </div>
-                                    </div>
-
-                                    <div id="div_cheques_{{p.id}}" class="d-none p-3 bg-light border border-pink rounded mb-3">
-                                        <label class="form-label fw-bold text-primary">Seleccionar Cheque de la Cartera:</label>
-                                        <select name="cheque_id" class="form-select border-primary">
-                                            <option value="" disabled selected>Elija un cheque disponible...</option>
-                                            {% for ch in cheques_en_cartera %}
-                                            <option value="{{ ch.id }}">{{ ch.banco }} - N°{{ ch.numero }} (${{ "{:,.2f}".format(ch.monto) }})</option>
-                                            {% endfor %}
-                                        </select>
-                                    </div>
-
-                                    <div id="div_cajas_{{p.id}}" class="mb-3">
-                                        <label class="form-label fw-bold">Cuenta de Origen (De donde sale la plata)</label>
-                                        <select name="caja_id" class="form-select border-dark">
-                                            {% for caja in cajas %}
-                                            <option value="{{ caja.id }}">{{ caja.nombre }} (Saldo: ${{ "{:,.2f}".format(caja.saldo_actual) }})</option>
-                                            {% endfor %}
-                                        </select>
-                                    </div>
-
-                                    <div class="mb-3">
-                                        <label class="form-label fw-bold">Referencia / Observaciones</label>
-                                        <input type="text" name="referencia" class="form-control border-dark" placeholder="Ej: N° Transferencia o Recibo">
-                                    </div>
-                                </div>
-                                <div class="modal-footer bg-light">
-                                    <button type="submit" class="btn btn-pink w-100 fw-bold py-3 shadow">CONFIRMAR PAGO AL PROVEEDOR</button>
-                                </div>
-                            </form>
-                        </div>
-                    </div>
                     {% else %}
                     <tr>
                         <td colspan="4" class="text-center py-5 text-muted">No hay proveedores con saldos pendientes.</td>
                     </tr>
                     {% endfor %}
+                    <tr id="emptyFilterProvRow" style="display: none;">
+                        <td colspan="4" class="text-center py-5 text-muted">No hay proveedores que coincidan con el filtro seleccionado.</td>
+                    </tr>
                 </tbody>
             </table>
         </div>
     </div>
 </div>
 
+<!-- MODALES PAGO A PROVEEDOR (Mantenidos completos) -->
+{% for p in proveedores %}
+<div class="modal fade" id="modalPagoProv{{ p.id }}" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <form action="{{ url_for('admin.registrar_pago_proveedor', id=p.id) }}" method="POST" class="modal-content">
+            <div class="modal-header bg-dark text-white">
+                <h5 class="modal-title">Pagar a: {{ p.razon_social }}</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body text-dark text-start" style="background-color: white !important;">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Monto a Pagar ($)</label>
+                        <input type="number" step="0.01" name="monto" class="form-control form-control-lg border-primary" required>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label fw-bold">Medio de Pago</label>
+                        <select name="medio_pago" class="form-select form-select-lg border-dark" onchange="checkMedio(this.value, {{p.id}})">
+                            <option value="EFECTIVO">Efectivo (Caja)</option>
+                            <option value="TRANSFERENCIA">Transferencia / Banco</option>
+                            <option value="CHEQUE_TERCEROS">Endosar Cheque de Cliente</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div id="div_cheques_{{p.id}}" class="d-none p-3 bg-light border border-pink rounded mb-3">
+                    <label class="form-label fw-bold text-primary">Seleccionar Cheque de la Cartera:</label>
+                    <select name="cheque_id" class="form-select border-primary">
+                        <option value="" disabled selected>Elija un cheque disponible...</option>
+                        {% for ch in cheques_en_cartera %}
+                        <option value="{{ ch.id }}">{{ ch.banco }} - N°{{ ch.numero }} (${{ "{:,.2f}".format(ch.monto) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div id="div_cajas_{{p.id}}" class="mb-3">
+                    <label class="form-label fw-bold">Cuenta de Origen (De donde sale la plata)</label>
+                    <select name="caja_id" class="form-select border-dark">
+                        {% for caja in cajas %}
+                        <option value="{{ caja.id }}">{{ caja.nombre }} (Saldo: ${{ "{:,.2f}".format(caja.saldo_actual) }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label fw-bold">Referencia / Observaciones</label>
+                    <input type="text" name="referencia" class="form-control border-dark" placeholder="Ej: N° Transferencia o Recibo">
+                </div>
+            </div>
+            <div class="modal-footer bg-light">
+                <button type="submit" class="btn btn-pink w-100 fw-bold py-3 shadow">CONFIRMAR PAGO AL PROVEEDOR</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
+
 <script>
-// --- LÓGICA DE BÚSQUEDA INTELIGENTE ---
-document.getElementById('provSearch').addEventListener('input', function(e) {
-    const term = e.target.value.toLowerCase().trim().replace(/-/g, ""); // Buscamos en minúsculas y sin guiones
-    const words = term.split(" "); // Permitimos buscar por palabras separadas (ej: "dist naci")
-    const rows = document.querySelectorAll('.prov-row');
+const provSearchEl = document.getElementById('provSearch');
+const filtroSaldoProvEl = document.getElementById('filtroSaldoProv');
+const ordenProvEl = document.getElementById('ordenProv');
+const tableProvBodyEl = document.getElementById('tableProvBody');
+
+function aplicarFiltrosYOrdenProv() {
+    const term = provSearchEl.value.toLowerCase().trim().replace(/-/g, "");
+    const words = term ? term.split(/\s+/) : [];
+    const filtro = filtroSaldoProvEl.value;
+    const orden = ordenProvEl.value;
+
+    const rows = Array.from(document.querySelectorAll('#tableProvBody .prov-row'));
+
+    // 1. Ordenar filas
+    rows.sort((a, b) => {
+        const nomA = a.getAttribute('data-nombre') || '';
+        const nomB = b.getAttribute('data-nombre') || '';
+        const cuitA = a.getAttribute('data-cuit') || '';
+        const cuitB = b.getAttribute('data-cuit') || '';
+        const salA = parseFloat(a.getAttribute('data-saldo')) || 0;
+        const salB = parseFloat(b.getAttribute('data-saldo')) || 0;
+
+        if (orden === 'saldo_desc') return salB - salA;
+        if (orden === 'saldo_asc') return salA - salB;
+        if (orden === 'razon_desc') return nomB.localeCompare(nomA, 'es');
+        if (orden === 'cuit_asc') return cuitA.localeCompare(cuitB, 'es');
+        return nomA.localeCompare(nomB, 'es');
+    });
+
+    const emptyFilterRow = document.getElementById('emptyFilterProvRow');
+    rows.forEach(row => tableProvBodyEl.insertBefore(row, emptyFilterRow));
+
+    // 2. Filtrar filas y recalcular totales
     let visibleCount = 0;
+    let deudaTotal = 0;
+    let aPagar = 0;
+    let alDia = 0;
+    let aFavor = 0;
 
     rows.forEach(row => {
-        const info = row.getAttribute('data-info');
-        
-        // El registro debe contener todas las palabras ingresadas en la búsqueda
-        const match = words.every(word => info.includes(word));
+        const info = row.getAttribute('data-info') || '';
+        const saldo = parseFloat(row.getAttribute('data-saldo')) || 0;
 
-        if (match) {
+        const matchTexto = words.every(word => info.includes(word));
+        let matchSaldo = true;
+
+        if (filtro === 'con_saldo') {
+            matchSaldo = Math.abs(saldo) >= 0.01;
+        } else if (filtro === 'a_pagar') {
+            matchSaldo = saldo > 0.009;
+        } else if (filtro === 'sin_saldo') {
+            matchSaldo = Math.abs(saldo) < 0.01;
+        } else if (filtro === 'a_favor') {
+            matchSaldo = saldo < -0.009;
+        }
+
+        if (matchTexto && matchSaldo) {
             row.style.display = '';
             visibleCount++;
+            if (saldo > 0.009) {
+                deudaTotal += saldo;
+                aPagar++;
+            } else if (saldo < -0.009) {
+                aFavor++;
+            } else {
+                alDia++;
+            }
         } else {
             row.style.display = 'none';
         }
     });
 
-    // Actualizamos el contador de resultados
+    // 3. Actualizar contadores
     document.getElementById('countProv').innerText = visibleCount + (visibleCount === 1 ? ' resultado' : ' resultados');
-});
+    document.getElementById('totalDeudaProv').innerText = '$' + deudaTotal.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+    document.getElementById('badgeProvPagar').innerText = aPagar;
+    document.getElementById('badgeProvAlDia').innerText = alDia;
+    document.getElementById('badgeProvFavor').innerText = aFavor;
 
-// --- LÓGICA DE MEDIOS DE PAGO ---
+    if (emptyFilterRow) {
+        emptyFilterRow.style.display = (rows.length > 0 && visibleCount === 0) ? '' : 'none';
+    }
+}
+
+function ordenarPorColumnaProv(col) {
+    const actual = ordenProvEl.value;
+    if (col === 'razon') {
+        ordenProvEl.value = (actual === 'razon_asc') ? 'razon_desc' : 'razon_asc';
+    } else if (col === 'saldo') {
+        ordenProvEl.value = (actual === 'saldo_desc') ? 'saldo_asc' : 'saldo_desc';
+    } else if (col === 'cuit') {
+        ordenProvEl.value = 'cuit_asc';
+    }
+    aplicarFiltrosYOrdenProv();
+}
+
+function limpiarFiltrosProv() {
+    provSearchEl.value = '';
+    filtroSaldoProvEl.value = 'todos';
+    ordenProvEl.value = 'razon_asc';
+    aplicarFiltrosYOrdenProv();
+}
+
+provSearchEl.addEventListener('input', aplicarFiltrosYOrdenProv);
+filtroSaldoProvEl.addEventListener('change', aplicarFiltrosYOrdenProv);
+ordenProvEl.addEventListener('change', aplicarFiltrosYOrdenProv);
+
+document.addEventListener('DOMContentLoaded', aplicarFiltrosYOrdenProv);
+
+// --- LÓGICA DE MEDIOS DE PAGO (Mantenida sin cambios) ---
 function checkMedio(val, id) {
     const divCh = document.getElementById('div_cheques_' + id);
     const divCj = document.getElementById('div_cajas_' + id);
     if (val === 'CHEQUE_TERCEROS') {
         divCh.classList.remove('d-none');
-        divCj.classList.add('opacity-50'); 
+        divCj.classList.add('opacity-50');
     } else {
         divCh.classList.add('d-none');
         divCj.classList.remove('opacity-50');
@@ -179,5 +363,7 @@ function checkMedio(val, id) {
     .text-pink { color: var(--vacan-pink) !important; }
     .modal-content { background-color: #ffffff !important; opacity: 1 !important; border-radius: 15px; }
     #provSearch:focus { border-color: var(--vacan-pink); box-shadow: 0 0 10px rgba(255, 0, 127, 0.2); }
+    .sortable-th { cursor: pointer; user-select: none; transition: background-color 0.15s; }
+    .sortable-th:hover { background-color: #e9ecef !important; }
 </style>
 {% endblock %}

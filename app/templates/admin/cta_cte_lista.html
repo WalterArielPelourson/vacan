@@ -1,29 +1,107 @@
 {% extends 'base.html' %}
 {% block content %}
-<div class="row mb-4 align-items-center">
+<div class="row mb-3 align-items-center">
     <div class="col-md-7">
-        <h2 class="fw-bold"><i class="bi bi-people text-pink"></i> Saldos de <span class="text-pink">Clientes</span> (Cta. Cte.)</h2>
-        <p class="text-muted">Gestión de créditos y cobranzas pendientes.</p>
+        <h2 class="fw-bold mb-1"><i class="bi bi-people text-pink"></i> Saldos de <span class="text-pink">Clientes</span> (Cta. Cte.)</h2>
+        <p class="text-muted mb-0">Gestión de créditos y cobranzas pendientes.</p>
     </div>
-    
+
     <!-- BUSCADOR INTELIGENTE -->
-    <div class="col-md-5">
+    <div class="col-md-5 mt-2 mt-md-0">
         <div class="input-group input-group-lg shadow-sm">
             <span class="input-group-text bg-white border-dark"><i class="bi bi-search text-pink"></i></span>
-            <input type="text" id="cliSearch" class="form-control border-dark" placeholder="Buscar por Nombre, DNI o CUIT...">
+            <input type="text" id="cliSearch" name="q" form="formFiltrosCtaCte" value="{{ q|default('') }}"
+                   class="form-control border-dark" placeholder="Buscar por Nombre, DNI o CUIT...">
         </div>
     </div>
 </div>
 
+<!-- BARRA DE FILTROS DE SALDO Y ORDENAMIENTO -->
+<form id="formFiltrosCtaCte" method="GET" action="{{ url_for('admin.lista_cta_cte') }}"
+      class="card bg-dark text-white shadow-sm border-0 mb-3"
+      style="border-left: 5px solid var(--vacan-pink) !important;">
+    <div class="card-body p-3">
+        <div class="row g-2 align-items-end">
+            {% if current_user.rol == 'superadmin' and sucursales|default([]) %}
+            <div class="col-12 col-md-3">
+                <label class="form-label text-white small text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">
+                    Sucursal
+                </label>
+                <select id="sucursalCli" name="sucursal_id" class="form-select form-select-sm bg-secondary bg-opacity-25 text-white border-secondary"
+                        onchange="this.form.submit()">
+                    <option value="" class="bg-dark text-white">Todas las Sucursales</option>
+                    {% for suc in sucursales %}
+                    <option value="{{ suc.id }}" class="bg-dark text-white" {% if sucursal_id == suc.id %}selected{% endif %}>
+                        {{ suc.nombre }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            {% endif %}
+
+            <div class="col-6 col-md-4">
+                <label class="form-label text-white small text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">
+                    Filtrar por Saldo
+                </label>
+                <select id="filtroSaldo" name="filtro_saldo" class="form-select form-select-sm bg-secondary bg-opacity-25 text-white border-secondary">
+                    <option value="todos" class="bg-dark text-white" {% if filtro_saldo|default('todos') == 'todos' %}selected{% endif %}>
+                        Todos los Clientes
+                    </option>
+                    <option value="con_saldo" class="bg-dark text-white" {% if filtro_saldo|default('todos') == 'con_saldo' %}selected{% endif %}>
+                        Con Saldo (Deudores o A Favor)
+                    </option>
+                    <option value="deudores" class="bg-dark text-white" {% if filtro_saldo|default('todos') == 'deudores' %}selected{% endif %}>
+                        Solo Deudores (&gt; $0)
+                    </option>
+                    <option value="sin_saldo" class="bg-dark text-white" {% if filtro_saldo|default('todos') == 'sin_saldo' %}selected{% endif %}>
+                        Sin Saldo / Al Día ($0.00)
+                    </option>
+                    <option value="a_favor" class="bg-dark text-white" {% if filtro_saldo|default('todos') == 'a_favor' %}selected{% endif %}>
+                        Con Saldo a Favor (&lt; $0)
+                    </option>
+                </select>
+            </div>
+
+            <div class="col-6 col-md-4">
+                <label class="form-label text-white small text-uppercase fw-bold mb-1" style="font-size: 0.7rem;">
+                    Ordenar Por
+                </label>
+                <select id="ordenCli" name="orden" class="form-select form-select-sm bg-secondary bg-opacity-25 text-white border-secondary">
+                    <option value="razon_asc" class="bg-dark text-white" {% if orden|default('razon_asc') == 'razon_asc' %}selected{% endif %}>
+                        Cliente (A - Z)
+                    </option>
+                    <option value="razon_desc" class="bg-dark text-white" {% if orden|default('razon_asc') == 'razon_asc' %}selected{% endif %}>
+                        Cliente (Z - A)
+                    </option>
+                    <option value="saldo_desc" class="bg-dark text-white" {% if orden|default('razon_asc') == 'saldo_desc' %}selected{% endif %}>
+                        Mayor Deuda primero
+                    </option>
+                    <option value="saldo_asc" class="bg-dark text-white" {% if orden|default('razon_asc') == 'saldo_asc' %}selected{% endif %}>
+                        Menor Saldo / A Favor primero
+                    </option>
+                    <option value="cuit_asc" class="bg-dark text-white" {% if orden|default('razon_asc') == 'cuit_asc' %}selected{% endif %}>
+                        CUIT / Identificación
+                    </option>
+                </select>
+            </div>
+
+            <div class="col-12 col-md-auto d-flex gap-2 ms-auto">
+                <button type="button" class="btn btn-sm btn-outline-light" onclick="limpiarFiltrosCtaCte()" title="Restablecer filtros">
+                    <i class="bi bi-arrow-counterclockwise"></i> Limpiar
+                </button>
+            </div>
+        </div>
+    </div>
+</form>
+
 <!-- PANEL DE RESUMEN: DEUDA TOTAL ACUMULADA -->
-<div class="row mb-4">
+<div class="row mb-4 g-3">
     <div class="col-md-5">
-        <div class="card bg-dark text-white shadow border-0" style="border-left: 5px solid var(--vacan-pink) !important;">
+        <div class="card bg-dark text-white shadow border-0 h-100" style="border-left: 5px solid var(--vacan-pink) !important;">
             <div class="card-body p-4 d-flex justify-content-between align-items-center">
                 <div>
                     <h6 class="text-white-50 small text-uppercase fw-bold mb-1">Total a Cobrar en la Calle</h6>
-                    <!-- Variable total_global calculada en Python -->
-                    <h1 class="fw-bold mb-0 text-pink">${{ "{:,.2f}".format(total_global or 0) }}</h1>
+                    <h1 class="fw-bold mb-0 text-pink" id="totalCobrar">${{ "{:,.2f}".format(total_global or 0) }}</h1>
                 </div>
                 <div class="text-end">
                     <i class="bi bi-cash-stack fs-1 text-success opacity-50"></i>
@@ -31,38 +109,68 @@
             </div>
         </div>
     </div>
-    <div class="col-md-4">
+    <div class="col-md-3">
         <div class="card bg-white shadow-sm border-0 p-4 h-100">
             <h6 class="text-muted small text-uppercase fw-bold">Clientes Filtrados</h6>
             <h2 class="fw-bold mb-0 text-dark" id="countCli">{{ saldos|length }}</h2>
         </div>
     </div>
+    <div class="col-md-4">
+        <div class="card bg-white shadow-sm border-0 p-3 h-100 d-flex justify-content-center">
+            <h6 class="text-muted small text-uppercase fw-bold mb-2">Desglose Visible</h6>
+            <div class="d-flex flex-wrap gap-2">
+                <span class="badge bg-danger-subtle text-danger border border-danger-subtle px-2 py-1">
+                    Deudores: <strong id="badgeDeudores">0</strong>
+                </span>
+                <span class="badge bg-success-subtle text-success border border-success-subtle px-2 py-1">
+                    Al día: <strong id="badgeAlDia">0</strong>
+                </span>
+                <span class="badge bg-info-subtle text-info border border-info-subtle px-2 py-1">
+                    A favor: <strong id="badgeAFavor">0</strong>
+                </span>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card shadow border-0">
-    <div class="card-header bg-dark text-white fw-bold">PADRÓN DE CUENTAS CORRIENTES</div>
+    <div class="card-header bg-dark text-white fw-bold d-flex justify-content-between align-items-center">
+        <span>PADRÓN DE CUENTAS CORRIENTES</span>
+        <small class="text-white-50 fw-normal">Tip: Hacé clic en los encabezados para ordenar</small>
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Cliente</th>
-                        <th>Identificación</th>
-                        <th>Estado de Cuenta</th>
+                        <th class="sortable-th" onclick="ordenarPorColumna('razon')">
+                            Cliente <i class="bi bi-arrow-down-up small text-muted ms-1"></i>
+                        </th>
+                        <th class="sortable-th" onclick="ordenarPorColumna('cuit')">
+                            Identificación <i class="bi bi-arrow-down-up small text-muted ms-1"></i>
+                        </th>
+                        <th class="sortable-th" onclick="ordenarPorColumna('saldo')">
+                            Estado de Cuenta <i class="bi bi-arrow-down-up small text-muted ms-1"></i>
+                        </th>
                         <th class="text-end px-4">Acción</th>
                     </tr>
                 </thead>
                 <tbody id="tableCli">
                     {% for s in saldos %}
-                    <!-- Agregamos data-info para la búsqueda inteligente -->
-                    <tr class="cli-row" data-info="{{ s.razon_social|lower }} {{ s.cuit|replace('-', '') if s.cuit else '' }}">
+                    <tr class="cli-row"
+                        data-info="{{ s.razon_social|lower }} {{ s.cuit|replace('-', '') if s.cuit else '' }}"
+                        data-nombre="{{ s.razon_social|lower }}"
+                        data-cuit="{{ (s.cuit or '')|replace('-', '')|lower }}"
+                        data-saldo="{{ '%.2f'|format(s.saldo or 0) }}">
                         <td><strong>{{ s.razon_social }}</strong></td>
                         <td><small class="text-muted">{{ s.cuit or 'S/D' }}</small></td>
                         <td>
-                            {% if s.saldo > 0 %}
+                            {% if s.saldo > 0.009 %}
                                 <span class="text-danger fw-bold">DEBE: ${{ "{:,.2f}".format(s.saldo) }}</span>
+                            {% elif s.saldo < -0.009 %}
+                                <span class="text-info fw-bold">A FAVOR: ${{ "{:,.2f}".format(s.saldo|abs) }}</span>
                             {% else %}
-                                <span class="text-success fw-bold">A FAVOR: ${{ "{:,.2f}".format(s.saldo|abs) }}</span>
+                                <span class="text-success fw-bold">AL DÍA: $0.00</span>
                             {% endif %}
                         </td>
                         <td class="text-end px-4">
@@ -72,8 +180,17 @@
                         </td>
                     </tr>
                     {% else %}
-                    <tr><td colspan="4" class="text-center py-5 text-muted">No hay clientes con movimientos de cuenta corriente.</td></tr>
+                    <tr id="emptyDbRow">
+                        <td colspan="4" class="text-center py-5 text-muted">
+                            No hay clientes con movimientos de cuenta corriente.
+                        </td>
+                    </tr>
                     {% endfor %}
+                    <tr id="emptyFilterRow" style="display: none;">
+                        <td colspan="4" class="text-center py-5 text-muted">
+                            No hay clientes que coincidan con el filtro seleccionado.
+                        </td>
+                    </tr>
                 </tbody>
             </table>
         </div>
@@ -81,29 +198,118 @@
 </div>
 
 <script>
-// --- LÓGICA DE BÚSQUEDA INTELIGENTE (Simétrica a Proveedores) ---
-document.getElementById('cliSearch').addEventListener('input', function(e) {
-    const term = e.target.value.toLowerCase().trim().replace(/-/g, ""); // Limpiamos guiones
-    const words = term.split(" "); 
-    const rows = document.querySelectorAll('.cli-row');
+const cliSearchEl = document.getElementById('cliSearch');
+const filtroSaldoEl = document.getElementById('filtroSaldo');
+const ordenCliEl = document.getElementById('ordenCli');
+const tableCliEl = document.getElementById('tableCli');
+
+function aplicarFiltrosYOrden() {
+    const term = cliSearchEl.value.toLowerCase().trim().replace(/-/g, "");
+    const words = term ? term.split(/\s+/) : [];
+    const filtro = filtroSaldoEl.value;
+    const orden = ordenCliEl.value;
+
+    const rows = Array.from(document.querySelectorAll('#tableCli .cli-row'));
+
+    // 1. Ordenar filas
+    rows.sort((a, b) => {
+        const nomA = a.getAttribute('data-nombre') || '';
+        const nomB = b.getAttribute('data-nombre') || '';
+        const cuitA = a.getAttribute('data-cuit') || '';
+        const cuitB = b.getAttribute('data-cuit') || '';
+        const salA = parseFloat(a.getAttribute('data-saldo')) || 0;
+        const salB = parseFloat(b.getAttribute('data-saldo')) || 0;
+
+        if (orden === 'saldo_desc') return salB - salA;
+        if (orden === 'saldo_asc') return salA - salB;
+        if (orden === 'razon_desc') return nomB.localeCompare(nomA, 'es');
+        if (orden === 'cuit_asc') return cuitA.localeCompare(cuitB, 'es');
+        return nomA.localeCompare(nomB, 'es'); // razon_asc por defecto
+    });
+
+    const emptyFilterRow = document.getElementById('emptyFilterRow');
+    rows.forEach(row => tableCliEl.insertBefore(row, emptyFilterRow));
+
+    // 2. Filtrar filas y recalcular totales en tiempo real
     let visibleCount = 0;
+    let totalCobrar = 0;
+    let deudores = 0;
+    let alDia = 0;
+    let aFavor = 0;
 
     rows.forEach(row => {
-        const info = row.getAttribute('data-info');
-        // El registro debe coincidir con todas las palabras ingresadas
-        const match = words.every(word => info.includes(word));
+        const info = row.getAttribute('data-info') || '';
+        const saldo = parseFloat(row.getAttribute('data-saldo')) || 0;
 
-        if (match) {
+        const matchTexto = words.every(word => info.includes(word));
+        let matchSaldo = true;
+
+        if (filtro === 'con_saldo') {
+            matchSaldo = Math.abs(saldo) >= 0.01;
+        } else if (filtro === 'deudores') {
+            matchSaldo = saldo > 0.009;
+        } else if (filtro === 'sin_saldo') {
+            matchSaldo = Math.abs(saldo) < 0.01;
+        } else if (filtro === 'a_favor') {
+            matchSaldo = saldo < -0.009;
+        }
+
+        if (matchTexto && matchSaldo) {
             row.style.display = '';
             visibleCount++;
+            if (saldo > 0.009) {
+                totalCobrar += saldo;
+                deudores++;
+            } else if (saldo < -0.009) {
+                aFavor++;
+            } else {
+                alDia++;
+            }
         } else {
             row.style.display = 'none';
         }
     });
 
-    // Actualizamos el contador dinámico
+    // 3. Actualizar KPIs y estado vacío
     document.getElementById('countCli').innerText = visibleCount;
-});
+    document.getElementById('totalCobrar').innerText = '$' + totalCobrar.toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+    });
+    document.getElementById('badgeDeudores').innerText = deudores;
+    document.getElementById('badgeAlDia').innerText = alDia;
+    document.getElementById('badgeAFavor').innerText = aFavor;
+
+    if (emptyFilterRow) {
+        emptyFilterRow.style.display = (rows.length > 0 && visibleCount === 0) ? '' : 'none';
+    }
+}
+
+function ordenarPorColumna(col) {
+    const actual = ordenCliEl.value;
+    if (col === 'razon') {
+        ordenCliEl.value = (actual === 'razon_asc') ? 'razon_desc' : 'razon_asc';
+    } else if (col === 'saldo') {
+        ordenCliEl.value = (actual === 'saldo_desc') ? 'saldo_asc' : 'saldo_desc';
+    } else if (col === 'cuit') {
+        ordenCliEl.value = 'cuit_asc';
+    }
+    aplicarFiltrosYOrden();
+}
+
+function limpiarFiltrosCtaCte() {
+    cliSearchEl.value = '';
+    filtroSaldoEl.value = 'todos';
+    ordenCliEl.value = 'razon_asc';
+    aplicarFiltrosYOrden();
+}
+
+cliSearchEl.addEventListener('input', aplicarFiltrosYOrden);
+filtroSaldoEl.addEventListener('change', aplicarFiltrosYOrden);
+ordenCliEl.addEventListener('change', aplicarFiltrosYOrden);
+
+// Inicializar contadores y orden al cargar la página
+document.addEventListener('DOMContentLoaded', aplicarFiltrosYOrden);
 </script>
 
 <style>
@@ -111,5 +317,7 @@ document.getElementById('cliSearch').addEventListener('input', function(e) {
     .btn-pink:hover { background-color: #d4006a; color: white; transform: translateY(-2px); }
     .text-pink { color: var(--vacan-pink) !important; }
     #cliSearch:focus { border-color: var(--vacan-pink); box-shadow: 0 0 12px rgba(255, 0, 127, 0.2); }
+    .sortable-th { cursor: pointer; user-select: none; transition: background-color 0.15s; }
+    .sortable-th:hover { background-color: #e9ecef !important; }
 </style>
 {% endblock %}

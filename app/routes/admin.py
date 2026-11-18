@@ -413,54 +413,248 @@ def toggle_proveedor(id):
     return redirect(url_for('admin.lista_contactos'))
 
 
-@admin_bp.route('/proveedores/saldos')
+@admin_bp.route('/cta-cte-proveedores')
 @login_required
-@roles_required('admin', 'superadmin', 'vendedor' )
-def lista_saldos_proveedores():
-    # 1. Obtener todos los proveedores
-    proveedores = Proveedor.query.all()
-    resumen = []
-    deuda_total_general = 0 
+@roles_required('admin', 'superadmin')
+def lista_cta_cte_proveedores():
+    # 1. Parámetros de Filtro y Ordenamiento
+    filtro_saldo = request.args.get('filtro_saldo', 'todos').strip()  # todos | con_saldo | a_pagar | sin_saldo | a_favor
+    orden = request.args.get('orden', 'razon_asc').strip()            # razon_asc | razon_desc | saldo_desc | saldo_asc | cuit_asc
+    q = request.args.get('q', '').strip().lower()
+    f_sucursal = request.args.get('sucursal_id', type=int)
+
+    if current_user.rol == 'admin':
+        f_sucursal = current_user.sucursal_id
+
+    # 2. Catálogo de Proveedores
+    proveedores = Proveedor.query.order_by(Proveedor.razon_social).all()
+
+    # 3. Cálculo optimizado de saldos en una sola consulta SQL
+    # (Reemplaza MovimientoProveedor por el nombre exacto de tu modelo si difiere)
+    saldos_query = db.session.query(
+        MovimientoProveedor.proveedor_id,
+        func.sum(MovimientoProveedor.monto)
+    )
+    if f_sucursal and hasattr(MovimientoProveedor, 'sucursal_id'):
+        saldos_query = saldos_query.filter(MovimientoProveedor.sucursal_id == f_sucursal)
+
+    saldos_map = {
+        pid: round(float(monto or 0.0), 2)
+        for pid, monto in saldos_query.group_by(MovimientoProveedor.proveedor_id).all()
+    }
+
+    saldos = []
+    total_a_pagar = 0.0
+    total_a_favor = 0.0
+    cant_a_pagar = 0
+    cant_al_dia = 0
+    cant_a_favor = 0
 
     for p in proveedores:
-        # --- APLICACIÓN DEL PUNTO 3-A: FILTRO DE SUCURSAL EN SALDOS ---
-        # Iniciamos la consulta de suma de movimientos para este proveedor
-        query_saldo = db.session.query(func.sum(MovimientoCtaCteProveedor.monto)).filter_by(proveedor_id=p.id)
-        
-        if current_user.rol == 'admin':
-            # El Administrador solo suma facturas y pagos realizados en SU sucursal
-            query_saldo = query_saldo.filter_by(sucursal_id=current_user.sucursal_id)
-        
-        saldo_individual = query_saldo.scalar() or 0
-        # -------------------------------------------------------------
+        saldo_individual = saldos_map.get(p.id, 0.0)
+        if abs(saldo_individual) < 0.01:
+            saldo_individual = 0.0
 
-        # Solo agregamos al proveedor a la lista si tiene movimientos en esta sucursal
-        #if saldo_individual != 0:
+        tiene_saldo = (saldo_individual != 0.0)
+
+        if saldo_individual > 0:
+            estado_saldo = 'A PAGAR'
+        elif saldo_individual < 0:
+            estado_saldo = 'A FAVOR'
+        else:
+            estado_saldo = 'AL DIA'
+
+        razon = (getattr(p, 'razon_social', None) or getattr(p, 'nombre', '') or '').strip()
+        cuit = (getattr(p, 'cuit', '') or '').strip()
+
+        if q and (q not in razon.lower() and q not in cuit.lower()):
+            continue
+
+        if filtro_saldo == 'con_saldo' and not tiene_saldo:
+            continue
+        elif filtro_saldo == 'a_pagar' and saldo_individual <= 0:
+            continue
+        elif filtro_saldo == 'sin_saldo' and tiene_saldo:
+            continue
+        elif filtro_saldo == 'a_favor' and saldo_individual >= 0:
+            continue
+
+        saldos.append({
+            'id': p.id,
+            'razon_social': razon,
+            'cuit': cuit,
+            'saldo': saldo_individual,
+            'tiene_saldo': tiene_saldo,
+            'estado': estado_saldo
+        })
+
+        if saldo_individual > 0:
+            total_a_pagar += saldo_individual
+            cant_a_pagar += 1
+        elif saldo_individual < 0:
+            total_a_favor += abs(saldo_individual)
+            cant_a_favor += 1
+        else:
+            cant_al_dia += 1
+
+    # 4. Ordenamiento
+    if orden == 'saldo_desc':
+        saldos.sort(key=lambda x: x['saldo'], reverse=True)
+    elif orden == 'saldo_asc':
+        saldos.sort(key=lambda x: x['saldo'], reverse=False)
+    elif orden == 'razon_desc':
+        saldos.sort(key=lambda x: x['razon_social'].lower(), reverse=True)
+    elif orden == 'cuit_asc':
+        saldos.sort(key=lambda x: x['cuit'].lower(), reverse=False)
+    else:
+        saldos.sort(key=lambda x: x['razon_social'].lower(), reverse=False)
+
+    sucursales = Sucursal.query.order_by(Sucursal.nombre).all() if current_user.rol == 'superadmin' else []
+
+    return render_template(
+        'admin/cta_cte_proveedores.html',
+        saldos=saldos,
+        total_global=round(total_a_pagar, 2),
+        total_a_favor=round(total_a_favor, 2),
+        cant_a_pagar=cant_a_pagar,
+        cant_al_dia=cant_al_dia,
+        cant_a_favor=cant_a_favor,
+        filtro_saldo=filtro_saldo,
+        orden=orden,
+        q=request.args.get('q', ''),
+        sucursal_id=f_sucursal,
+        sucursales=sucursales
+    )
+    
+@admin_bp.route('/proveedores/saldos')
+@login_required
+@roles_required('admin', 'superadmin', 'vendedor')
+def lista_saldos_proveedores():
+    # 1. Parámetros de Filtro y Ordenamiento
+    filtro_saldo = request.args.get('filtro_saldo', 'todos').strip()  # todos | con_saldo | a_pagar | sin_saldo | a_favor
+    orden = request.args.get('orden', 'razon_asc').strip()            # razon_asc | razon_desc | saldo_desc | saldo_asc | cuit_asc
+    q = request.args.get('q', '').strip().lower()
+    f_sucursal = request.args.get('sucursal_id', type=int)
+
+    if current_user.rol == 'admin':
+        f_sucursal = current_user.sucursal_id
+
+    # 2. Obtener todos los proveedores ordenados inicialmente por razón social
+    proveedores = Proveedor.query.order_by(Proveedor.razon_social).all()
+
+    # --- APLICACIÓN DEL PUNTO 3-A: FILTRO DE SUCURSAL EN SALDOS (1 sola consulta) ---
+    query_saldos = db.session.query(
+        MovimientoCtaCteProveedor.proveedor_id,
+        func.sum(MovimientoCtaCteProveedor.monto)
+    )
+    if current_user.rol == 'admin':
+        # El Administrador solo suma facturas y pagos realizados en SU sucursal
+        query_saldos = query_saldos.filter(MovimientoCtaCteProveedor.sucursal_id == current_user.sucursal_id)
+    elif f_sucursal:
+        # El Superadmin puede filtrar opcionalmente por una sucursal específica
+        query_saldos = query_saldos.filter(MovimientoCtaCteProveedor.sucursal_id == f_sucursal)
+
+    saldos_map = {
+        pid: round(float(monto or 0.0), 2)
+        for pid, monto in query_saldos.group_by(MovimientoCtaCteProveedor.proveedor_id).all()
+    }
+    # ------------------------------------------------------------------------------
+
+    resumen = []
+    deuda_total_general = 0.0
+    total_a_favor = 0.0
+    cant_a_pagar = 0
+    cant_al_dia = 0
+    cant_a_favor = 0
+
+    for p in proveedores:
+        saldo_individual = saldos_map.get(p.id, 0.0)
+        if abs(saldo_individual) < 0.01:
+            saldo_individual = 0.0
+
+        tiene_saldo = (saldo_individual != 0.0)
+
+        if saldo_individual > 0:
+            estado_saldo = 'A PAGAR'
+        elif saldo_individual < 0:
+            estado_saldo = 'A FAVOR'
+        else:
+            estado_saldo = 'AL DIA'
+
+        razon = (p.razon_social or '').strip()
+        cuit = (p.cuit or '').strip()
+
+        # Filtro de búsqueda por Razón Social o CUIT
+        if q and (q not in razon.lower() and q not in cuit.lower()):
+            continue
+
+        # Filtro por Estado de Saldo
+        if filtro_saldo == 'con_saldo' and not tiene_saldo:
+            continue
+        elif filtro_saldo == 'a_pagar' and saldo_individual <= 0:
+            continue
+        elif filtro_saldo == 'sin_saldo' and tiene_saldo:
+            continue
+        elif filtro_saldo == 'a_favor' and saldo_individual >= 0:
+            continue
+
         resumen.append({
-            'id': p.id, 
-            'razon_social': p.razon_social, 
-            'cuit': p.cuit, 
-            'saldo': saldo_individual
-            })
-            
-            # Sumamos al total general (solo si el saldo es deudor)
+            'id': p.id,
+            'razon_social': razon,
+            'cuit': cuit,
+            'saldo': saldo_individual,
+            'tiene_saldo': tiene_saldo,
+            'estado': estado_saldo
+        })
+
+        # Sumamos al total general (solo si el saldo es deudor) y contadores
         if saldo_individual > 0:
             deuda_total_general += saldo_individual
+            cant_a_pagar += 1
+        elif saldo_individual < 0:
+            total_a_favor += abs(saldo_individual)
+            cant_a_favor += 1
+        else:
+            cant_al_dia += 1
 
-    # 2. Variables para el Modal de Pago (FILTRADAS POR SEGURIDAD)
+    # 3. Ordenamiento
+    if orden == 'saldo_desc':
+        resumen.sort(key=lambda x: x['saldo'], reverse=True)
+    elif orden == 'saldo_asc':
+        resumen.sort(key=lambda x: x['saldo'], reverse=False)
+    elif orden == 'razon_desc':
+        resumen.sort(key=lambda x: x['razon_social'].lower(), reverse=True)
+    elif orden == 'cuit_asc':
+        resumen.sort(key=lambda x: x['cuit'].lower(), reverse=False)
+    else:
+        # Por defecto: razon_asc (A - Z)
+        resumen.sort(key=lambda x: x['razon_social'].lower(), reverse=False)
+
+    # 4. Variables para el Modal de Pago (FILTRADAS POR SEGURIDAD)
     # Usamos sucursal_filter para que el Admin solo vea sus propias cajas (Mostrador, Grande, etc.)
     todas_las_cajas = sucursal_filter(Caja.query, Caja).all()
-    
+
     # Los cheques en cartera se muestran todos (usualmente la cartera es compartida o central)
     cheques_en_cartera = Cheque.query.filter_by(estado='EN_CARTERA').all()
 
-    return render_template('admin/proveedores_saldos.html', 
-                           proveedores=resumen, 
-                           total_general=deuda_total_general, 
-                           cajas=todas_las_cajas, 
-                           cheques_en_cartera=cheques_en_cartera)
-    
-    
+    sucursales = Sucursal.query.order_by(Sucursal.nombre).all() if current_user.rol == 'superadmin' else []
+
+    return render_template(
+        'admin/proveedores_saldos.html',
+        proveedores=resumen,
+        total_general=round(deuda_total_general, 2),
+        cajas=todas_las_cajas,
+        cheques_en_cartera=cheques_en_cartera,
+        total_a_favor=round(total_a_favor, 2),
+        cant_a_pagar=cant_a_pagar,
+        cant_al_dia=cant_al_dia,
+        cant_a_favor=cant_a_favor,
+        filtro_saldo=filtro_saldo,
+        orden=orden,
+        q=request.args.get('q', ''),
+        sucursal_id=f_sucursal,
+        sucursales=sucursales
+    )      
     
 @admin_bp.route('/proveedores/pago/<int:id>', methods=['POST'])
 @login_required
@@ -674,59 +868,126 @@ def detalle_cta_cte_proveedor(id):
 @login_required
 @roles_required('admin', 'superadmin', 'vendedor')
 def lista_cta_cte():
-    saldos = []
-    total_global_sucursal = 0
+    # 1. Parámetros de Filtro y Ordenamiento
+    filtro_saldo = request.args.get('filtro_saldo', 'todos').strip()  # todos | con_saldo | deudores | sin_saldo | a_favor
+    orden = request.args.get('orden', 'razon_asc').strip()            # razon_asc | razon_desc | saldo_desc | saldo_asc | cuit_asc
+    q = request.args.get('q', '').strip().lower()
+    f_sucursal = request.args.get('sucursal_id', type=int)
 
-    # 1. Filtro de Clientes: Traer los clientes que operaron en la sucursal del Admin/Vendedor
-    # (o todos si es Superadmin)
     if current_user.rol in ['admin', 'vendedor']:
+        f_sucursal = current_user.sucursal_id
+
+    # 2. Filtro de Clientes
+    if current_user.rol in ['admin', 'vendedor'] or f_sucursal:
         clientes = Cliente.query.join(MovimientoCtaCte).filter(
-            MovimientoCtaCte.sucursal_id == current_user.sucursal_id
+            MovimientoCtaCte.sucursal_id == f_sucursal
         ).distinct().order_by(Cliente.razon_social).all()
     else:
         clientes = Cliente.query.order_by(Cliente.razon_social).all()
 
+    # 3. Cálculo optimizado de saldos en una sola consulta SQL
+    saldos_query = db.session.query(
+        MovimientoCtaCte.cliente_id,
+        func.sum(MovimientoCtaCte.monto)
+    )
+    if f_sucursal:
+        saldos_query = saldos_query.filter(MovimientoCtaCte.sucursal_id == f_sucursal)
+
+    saldos_map = {
+        cid: round(float(monto or 0.0), 2)
+        for cid, monto in saldos_query.group_by(MovimientoCtaCte.cliente_id).all()
+    }
+
+    saldos = []
+    total_global_sucursal = 0.0
+    total_a_favor = 0.0
+    cant_deudores = 0
+    cant_al_dia = 0
+    cant_a_favor = 0
+
     for c in clientes:
-        # 2. Filtro de Saldo: Sumar solo los movimientos que pertenecen a esta sucursal (Admin y Vendedor)
-        query_m = MovimientoCtaCte.query.filter_by(cliente_id=c.id)
-        if current_user.rol in ['admin', 'vendedor']:
-            query_m = query_m.filter_by(sucursal_id=current_user.sucursal_id)
-        
-        # Cálculo del saldo del cliente en esta sucursal
-        saldo_individual = db.session.query(func.sum(MovimientoCtaCte.monto)).filter(
-            MovimientoCtaCte.id.in_([m.id for m in query_m.all()])
-        ).scalar() or 0
-        
-        saldo_individual = round(float(saldo_individual), 2)
+        saldo_individual = saldos_map.get(c.id, 0.0)
+        # Normalizar posibles -0.00 por decimales flotantes
+        if abs(saldo_individual) < 0.01:
+            saldo_individual = 0.0
 
-        # 3. Determinamos si tiene saldo o no y su estado
-        tiene_saldo = (saldo_individual != 0)
-        
+        tiene_saldo = (saldo_individual != 0.0)
+
         if saldo_individual > 0:
-            estado_saldo = 'DEUDOR'       # Con deuda pendiente
+            estado_saldo = 'DEUDOR'
         elif saldo_individual < 0:
-            estado_saldo = 'A FAVOR'      # Saldo a favor del cliente
+            estado_saldo = 'A FAVOR'
         else:
-            estado_saldo = 'AL DIA'       # Saldo $0.00 (sin deuda)
+            estado_saldo = 'AL DIA'
 
-        # 4. Agregamos a la lista tengan o no saldo
+        # Filtro de búsqueda por Razón Social o CUIT
+        razon = (c.razon_social or '').strip()
+        cuit = (c.cuit or '').strip()
+        if q and (q not in razon.lower() and q not in cuit.lower()):
+            continue
+
+        # Filtro por Estado de Saldo
+        if filtro_saldo == 'con_saldo' and not tiene_saldo:
+            # Clientes con saldo distinto de $0 (Deudores o A Favor)
+            continue
+        elif filtro_saldo == 'deudores' and saldo_individual <= 0:
+            # Solo clientes que deben (> $0)
+            continue
+        elif filtro_saldo == 'sin_saldo' and tiene_saldo:
+            # Solo clientes al día ($0.00)
+            continue
+        elif filtro_saldo == 'a_favor' and saldo_individual >= 0:
+            # Solo clientes con saldo a favor (< $0)
+            continue
+
         saldos.append({
             'id': c.id,
-            'razon_social': c.razon_social,
-            'cuit': c.cuit,
+            'razon_social': razon,
+            'cuit': cuit,
             'saldo': saldo_individual,
             'tiene_saldo': tiene_saldo,
             'estado': estado_saldo
         })
 
-        # Sumamos al totalizador general de la sucursal
+        # Contadores y totales sobre el resultado filtrado
         if saldo_individual > 0:
             total_global_sucursal += saldo_individual
+            cant_deudores += 1
+        elif saldo_individual < 0:
+            total_a_favor += abs(saldo_individual)
+            cant_a_favor += 1
+        else:
+            cant_al_dia += 1
 
-    return render_template('admin/cta_cte_lista.html', 
-                           saldos=saldos, 
-                           total_global=total_global_sucursal)
-   
+    # 4. Ordenamiento
+    if orden == 'saldo_desc':
+        saldos.sort(key=lambda x: x['saldo'], reverse=True)
+    elif orden == 'saldo_asc':
+        saldos.sort(key=lambda x: x['saldo'], reverse=False)
+    elif orden == 'razon_desc':
+        saldos.sort(key=lambda x: x['razon_social'].lower(), reverse=True)
+    elif orden == 'cuit_asc':
+        saldos.sort(key=lambda x: x['cuit'].lower(), reverse=False)
+    else:
+        # Por defecto: razon_asc (A - Z)
+        saldos.sort(key=lambda x: x['razon_social'].lower(), reverse=False)
+
+    sucursales = Sucursal.query.order_by(Sucursal.nombre).all() if current_user.rol == 'superadmin' else []
+
+    return render_template(
+        'admin/cta_cte_lista.html',
+        saldos=saldos,
+        total_global=round(total_global_sucursal, 2),
+        total_a_favor=round(total_a_favor, 2),
+        cant_deudores=cant_deudores,
+        cant_al_dia=cant_al_dia,
+        cant_a_favor=cant_a_favor,
+        filtro_saldo=filtro_saldo,
+        orden=orden,
+        q=request.args.get('q', ''),
+        sucursal_id=f_sucursal,
+        sucursales=sucursales
+    )
 #@admin_bp.route('/cta-cte/<int:cliente_id>')
 #@login_required
 #def detalle_cta_cte(cliente_id):
