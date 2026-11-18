@@ -158,6 +158,70 @@ def toggle_usuario(id):
         flash(f"Usuario {user.username} ha sido {estado}", "info")
     return redirect(url_for('admin.dashboard'))
 
+#Selector de caja por id de usuario y sucursal
+
+def obtener_cajas_sucursal(sucursal_id=None, tipo=None, solo_activas=True):
+    """
+    Devuelve las cajas físicas y cuentas virtuales autorizadas:
+    - Superadmin: todas (o las de 'sucursal_id' + globales si filtró por sucursal).
+    - Admin / Vendedor: las de SU sucursal + las GLOBALES (sucursal_id IS NULL).
+      Nunca muestra cajas ni cuentas virtuales de otras sucursales.
+    """
+    query = Caja.query
+
+    if solo_activas and hasattr(Caja, 'activo'):
+        query = query.filter(or_(Caja.activo == True, Caja.activo.is_(None)))
+
+    if tipo:
+        query = query.filter(Caja.tipo == tipo)
+
+    if current_user.rol == 'superadmin':
+        if sucursal_id:
+            query = query.filter(
+                or_(Caja.sucursal_id == sucursal_id, Caja.sucursal_id.is_(None))
+            )
+    else:
+        if current_user.sucursal_id:
+            query = query.filter(
+                or_(Caja.sucursal_id == current_user.sucursal_id, Caja.sucursal_id.is_(None))
+            )
+        else:
+            query = query.filter(Caja.sucursal_id.is_(None))
+
+    cajas = query.all()
+    # Ordenamos: primero las de la sucursal, luego las globales, y alfabéticamente
+    cajas.sort(key=lambda c: (0 if c.sucursal_id else 1, c.tipo or '', (c.nombre or '').lower()))
+    return cajas
+
+
+def obtener_caja_autorizada(caja_id, solo_activas=True):
+    """
+    Valida en backend que la caja/cuenta seleccionada sea propia de la sucursal del usuario
+    o sea Global (sucursal_id is None). Superadmin tiene acceso a todas.
+    """
+    if not caja_id:
+        return None
+    try:
+        cid = int(caja_id)
+    except (TypeError, ValueError):
+        return None
+
+    caja = Caja.query.get(cid)
+    if not caja:
+        return None
+
+    if solo_activas and hasattr(Caja, 'activo') and caja.activo is False:
+        return None
+
+    if current_user.rol != 'superadmin':
+        es_su_sucursal = (current_user.sucursal_id is not None and caja.sucursal_id == current_user.sucursal_id)
+        es_global = (caja.sucursal_id is None)
+        if not (es_su_sucursal or es_global):
+            return None
+
+    return caja
+
+
 # --- SECCIÓN DE REPORTES ---
 
 @admin_bp.route('/reportes')
@@ -1162,6 +1226,17 @@ def registrar_pago(cliente_id):
     medio = request.form.get('medio_pago') # 'EFECTIVO', 'TRANSFERENCIA', 'CHEQUE'
     descripcion = request.form.get('descripcion') or f"Cobranza en {medio}"
     
+     # 1. Validamos caja/cuenta (propia de su sucursal o global)
+    caja_destino = obtener_caja_autorizada(caja_id)
+    if not caja_destino:
+        flash("Error: Debe seleccionar una caja o cuenta válida de su sucursal o global.", "danger")
+        return redirect(url_for('admin.detalle_cta_cte', cliente_id=cliente_id))
+
+    sucursal_mov = current_user.sucursal_id or caja_destino.sucursal_id
+
+    
+    
+    
     # 1. Registrar el movimiento en la Cuenta Corriente del Cliente (Resta deuda)
     nuevo_pago = MovimientoCtaCte(
         cliente_id=cliente_id,
@@ -1213,6 +1288,7 @@ def registrar_pago(cliente_id):
     db.session.commit()
     flash(f"Cobranza de ${monto} registrada con éxito en {caja_destino.nombre}.", "success")
     return redirect(url_for('admin.detalle_cta_cte', cliente_id=cliente_id))
+
 
 
 from datetime import datetime
