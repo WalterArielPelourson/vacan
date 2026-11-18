@@ -14,6 +14,75 @@ from datetime import datetime, timedelta
 
 inventory_bp = Blueprint('inventory', __name__)
 
+
+from app.models import Caja, MovimientoFinanciero
+
+def obtener_cajas_sucursal_pos(tipo=None, solo_activas=True):
+    """
+    Devuelve las cajas físicas y cuentas virtuales autorizadas en el POS:
+    - Superadmin: todas las activas.
+    - Admin / Vendedor: únicamente las de SU sucursal + las GLOBALES (sucursal_id NULL o 0).
+      Nunca muestra cajas o cuentas virtuales de otras sucursales.
+    """
+    query = Caja.query
+
+    if solo_activas and hasattr(Caja, 'activo'):
+        query = query.filter(or_(Caja.activo == True, Caja.activo.is_(None)))
+
+    if tipo:
+        query = query.filter(Caja.tipo == tipo)
+
+    rol = (getattr(current_user, 'rol', '') or '').strip().lower()
+    condicion_global = or_(Caja.sucursal_id.is_(None), Caja.sucursal_id == 0)
+
+    if rol != 'superadmin':
+        user_suc_id = getattr(current_user, 'sucursal_id', None)
+        if user_suc_id:
+            query = query.filter(or_(Caja.sucursal_id == user_suc_id, condicion_global))
+        else:
+            query = query.filter(condicion_global)
+
+    cajas = query.all()
+    # Primero las de la sucursal del usuario, luego las globales, y alfabéticamente
+    cajas.sort(key=lambda c: (
+        0 if (c.sucursal_id is not None and c.sucursal_id != 0) else 1,
+        (c.tipo or ''),
+        (c.nombre or '').lower()
+    ))
+    return cajas
+
+
+def obtener_caja_autorizada_pos(caja_id, solo_activas=True):
+    """
+    Valida en backend que la caja/cuenta elegida en el POS pertenezca a la sucursal
+    del usuario o sea Global (sucursal_id None o 0). Superadmin puede usar cualquiera activa.
+    """
+    if not caja_id:
+        return None
+    try:
+        cid = int(caja_id)
+    except (TypeError, ValueError):
+        return None
+
+    caja = Caja.query.get(cid)
+    if not caja:
+        return None
+
+    if solo_activas and hasattr(Caja, 'activo') and caja.activo is not None and not caja.activo:
+        return None
+
+    rol = (getattr(current_user, 'rol', '') or '').strip().lower()
+    if rol != 'superadmin':
+        user_suc_id = getattr(current_user, 'sucursal_id', None)
+        es_global = (caja.sucursal_id is None or caja.sucursal_id == 0)
+        es_su_sucursal = (user_suc_id is not None and caja.sucursal_id == user_suc_id)
+        if not (es_global or es_su_sucursal):
+            return None
+
+    return caja
+
+
+
 @inventory_bp.route('/dashboard')
 @inventory_bp.route('/buscar')
 @login_required
@@ -409,10 +478,11 @@ def pos():
     clientes = Cliente.query.filter_by(activo=True).all()
     
     # --- NUEVO: Traemos las cajas de la sucursal actual + las virtuales ---
-    cajas = Caja.query.filter(
-        (Caja.sucursal_id == current_user.sucursal_id) | (Caja.tipo == 'VIRTUAL')
-    ).all()
-
+    #cajas = Caja.query.filter(
+    #    (Caja.sucursal_id == current_user.sucursal_id) | (Caja.tipo == 'VIRTUAL')
+    #).all()
+     # Solo cajas físicas y cuentas virtuales de la sucursal del usuario + globales
+    cajas = obtener_cajas_sucursal_pos()
     # --- RECUPERACIÓN DE PRESUPUESTO PARA EDICIÓN / FACTURACIÓN ---
     presupuesto_recuperado = None
     if recuperar_id:
