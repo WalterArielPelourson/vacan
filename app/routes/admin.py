@@ -1923,7 +1923,7 @@ def toggle_caja(id):
 @roles_required('admin', 'superadmin')
 def cartera_cheques():
     hoy = date.today()
-    
+
     # 1. Captura de filtros
     f_tipo = request.args.get('tipo')           # 'FISICO' vs 'ECHEQ'
     f_sucursal = request.args.get('sucursal_id', type=int)
@@ -1933,36 +1933,42 @@ def cartera_cheques():
     if current_user.rol == 'admin':
         f_sucursal = current_user.sucursal_id
 
-    # 2. Consulta Base limpia (usamos Cheque.query directo sin joinedload erróneo)
+    # 2. Consulta Base limpia
     query = Cheque.query
 
     # 3. Aplicar Filtro de Tipo (Físico vs E-Cheq)
     if f_tipo:
         query = query.filter(Cheque.tipo == f_tipo)
 
-    # 4. Aplicar Filtro de Sucursal (a través de la Venta o relación)
+    # 4. Aplicar Filtro de Sucursal (sin ocultar cheques de Cta. Cte. ni Carga Manual)
     if f_sucursal:
-        query = query.outerjoin(Venta, Cheque.venta_id == Venta.id).filter(
-            Venta.sucursal_id == f_sucursal
-        )
+        query = query.outerjoin(Venta, Cheque.venta_id == Venta.id)
+        if hasattr(Cheque, 'sucursal_id'):
+            condiciones_sucursal = [
+                Cheque.sucursal_id == f_sucursal,
+                and_(Cheque.sucursal_id.is_(None), Venta.sucursal_id == f_sucursal),
+                and_(Cheque.sucursal_id.is_(None), Cheque.venta_id.is_(None))
+            ]
+        else:
+            condiciones_sucursal = [
+                Venta.sucursal_id == f_sucursal,
+                Cheque.venta_id.is_(None)
+            ]
+        query = query.filter(or_(*condiciones_sucursal))
 
     # 5. Aplicar Filtro de Estado
     if f_estado:
         query = query.filter(Cheque.estado == f_estado)
 
     cheques = query.order_by(Cheque.fecha_vencimiento.asc()).all()
-    
-    # Cajas disponibles según permisos
-    if current_user.rol == 'admin':
-        cajas = Caja.query.filter(or_(Caja.sucursal_id == current_user.sucursal_id, Caja.tipo == 'VIRTUAL')).all()
-    else:
-        cajas = Caja.query.all()
 
+    # Cajas disponibles según permisos (solo activas: sucursal + globales)
+    cajas = obtener_cajas_sucursal(sucursal_id=f_sucursal, solo_activas=True)
     sucursales = Sucursal.query.filter_by(activo=True).all()
-    
-    return render_template('admin/cheques.html', 
-                           cheques=cheques, 
-                           hoy=hoy, 
+
+    return render_template('admin/cheques.html',
+                           cheques=cheques,
+                           hoy=hoy,
                            cajas=cajas,
                            sucursales=sucursales,
                            filtros={'tipo': f_tipo, 'sucursal_id': f_sucursal, 'estado': f_estado})
@@ -2031,42 +2037,60 @@ def cambiar_estado_cheque(id, nuevo_estado):
 def rechazar_cheque(id):
     ch = Cheque.query.get_or_404(id)
     gastos_bancarios = float(request.form.get('gastos') or 0)
-    
-    total_a_reclamar = ch.monto + gastos_bancarios
+
+    total_a_reclamar = float(ch.monto or 0) + gastos_bancarios
 
     # 1. REVERSAR EN TESORERÍA (Si estaba depositado o cobrado)
     if ch.estado in ['DEPOSITADO', 'COBRADO']:
-        # Buscamos el movimiento original para saber de qué caja restar
-        ultimo_mov = MovimientoFinanciero.query.filter(MovimientoFinanciero.motivo.contains(ch.numero)).order_by(MovimientoFinanciero.id.desc()).first()
-        
-        if ultimo_mov:
+        ultimo_mov = MovimientoFinanciero.query.filter(
+            MovimientoFinanciero.motivo.contains(str(ch.numero))
+        ).order_by(MovimientoFinanciero.id.desc()).first()
+
+        if ultimo_mov and ultimo_mov.caja_id:
             caja = Caja.query.get(ultimo_mov.caja_id)
-            caja.saldo_actual -= ch.monto 
-            
-            mov_egreso = MovimientoFinanciero(
-                caja_id=caja.id,
-                monto=-ch.monto,
-                tipo='EGRESO',
-                motivo=f"RECHAZO: Cheque {ch.banco} N° {ch.numero}",
-                metodo_detalle='CHEQUE',
-                usuario_id=current_user.id
-            )
-            db.session.add(mov_egreso)
+            if caja:
+                caja.saldo_actual -= float(ch.monto or 0)
+                mov_egreso = MovimientoFinanciero(
+                    caja_id=caja.id,
+                    monto=float(ch.monto or 0),
+                    tipo='EGRESO',
+                    motivo=f"RECHAZO: Cheque {ch.banco} N° {ch.numero}",
+                    metodo_detalle='CHEQUE',
+                    usuario_id=current_user.id
+                )
+                db.session.add(mov_egreso)
 
-    # 2. CARGAR LA DEUDA AL CLIENTE NUEVAMENTE (Corrección del SyntaxError aquí)
-    nuevo_debito = MovimientoCtaCte(
-        cliente_id=ch.cliente_id,
-        monto=total_a_reclamar, # Aquí estaba el error del signo = extra
-        tipo='DEUDA',
-        descripcion=f"DÉBITO POR CHEQUE RECHAZADO N° {ch.numero} ({ch.banco})"
+    # 2. BUSCAR CLIENTE Y SUCURSAL ASOCIADOS AL CHEQUE
+    venta_asoc = Venta.query.get(ch.venta_id) if getattr(ch, 'venta_id', None) else None
+    cliente_id_final = ch.cliente_id or (venta_asoc.cliente_id if venta_asoc else None)
+    sucursal_mov = (
+        current_user.sucursal_id
+        or getattr(ch, 'sucursal_id', None)
+        or (venta_asoc.sucursal_id if venta_asoc else None)
     )
-    db.session.add(nuevo_debito)
 
-    # 3. ACTUALIZAR ESTADO
+    # 3. CARGAR LA DEUDA AL CLIENTE SOLO SI TIENE CLIENTE ASOCIADO
+    if cliente_id_final:
+        nuevo_debito = MovimientoCtaCte(
+            cliente_id=cliente_id_final,
+            venta_id=ch.venta_id if getattr(ch, 'venta_id', None) else None,
+            sucursal_id=sucursal_mov,
+            monto=total_a_reclamar,
+            tipo='DEUDA',
+            descripcion=f"DÉBITO POR CHEQUE RECHAZADO N° {ch.numero} ({ch.banco})"
+        )
+        db.session.add(nuevo_debito)
+        mensaje = f"Cheque N°{ch.numero} rechazado. Se cargó la deuda al cliente."
+        categoria = "danger"
+    else:
+        mensaje = f"Cheque N°{ch.numero} marcado como RECHAZADO (no tenía cliente asociado para cargar deuda en Cta. Cte.)."
+        categoria = "warning"
+
+    # 4. ACTUALIZAR ESTADO
     ch.estado = 'RECHAZADO'
-    
+
     db.session.commit()
-    flash(f"Cheque N°{ch.numero} rechazado. Se cargó la deuda al cliente.", "danger")
+    flash(mensaje, categoria)
     return redirect(url_for('admin.cartera_cheques'))
 
 
@@ -2455,35 +2479,47 @@ def reporte_historico_cheques():
     if f_tipo:
         query = query.filter(Cheque.tipo == f_tipo)
 
-    # B. Filtro por Sucursal (vía la Venta de donde vino el cheque)
+    # B. Filtro por Sucursal (incluye cheques de Venta, de Cta. Cte. y Carga Manual)
     if f_sucursal:
-        query = query.outerjoin(Venta, Cheque.venta_id == Venta.id).filter(
-            Venta.sucursal_id == f_sucursal
-        )
+        query = query.outerjoin(Venta, Cheque.venta_id == Venta.id)
+        if hasattr(Cheque, 'sucursal_id'):
+            condiciones_sucursal = [
+                Cheque.sucursal_id == f_sucursal,
+                and_(Cheque.sucursal_id.is_(None), Venta.sucursal_id == f_sucursal),
+                and_(Cheque.sucursal_id.is_(None), Cheque.venta_id.is_(None))
+            ]
+        else:
+            condiciones_sucursal = [
+                Venta.sucursal_id == f_sucursal,
+                Cheque.venta_id.is_(None)
+            ]
+        query = query.filter(or_(*condiciones_sucursal))
 
-    # C. Resto de filtros
+    # C. Resto de filtros explícitos sobre Cheque
     if f_estado:
-        query = query.filter_by(estado=f_estado)
+        query = query.filter(Cheque.estado == f_estado)
     if f_banco:
         query = query.filter(Cheque.banco.ilike(f"%{f_banco}%"))
     if f_cliente:
-        query = query.filter_by(cliente_id=f_cliente)
+        query = query.filter(Cheque.cliente_id == f_cliente)
     if f_inicio:
         query = query.filter(Cheque.fecha_vencimiento >= datetime.strptime(f_inicio, '%Y-%m-%d').date())
     if f_fin:
         query = query.filter(Cheque.fecha_vencimiento <= datetime.strptime(f_fin, '%Y-%m-%d').date())
     if query_busqueda:
         query = query.filter(
-            (Cheque.numero.contains(query_busqueda)) | 
-            (Cheque.emisor.ilike(f"%{query_busqueda}%"))
+            or_(
+                Cheque.numero.ilike(f"%{query_busqueda}%"),
+                Cheque.emisor.ilike(f"%{query_busqueda}%")
+            )
         )
 
     cheques = query.order_by(Cheque.fecha_vencimiento.desc()).all()
-    
+
     # 4. Estadísticas y Desglose de Físicos vs E-Cheqs
-    total_monto = sum(c.monto for c in cheques)
-    total_echeqs = sum(c.monto for c in cheques if (c.tipo or '').upper() == 'ECHEQ')
-    total_fisicos = sum(c.monto for c in cheques if (c.tipo or '').upper() == 'FISICO')
+    total_monto = sum(float(c.monto or 0) for c in cheques)
+    total_echeqs = sum(float(c.monto or 0) for c in cheques if (c.tipo or '').upper() == 'ECHEQ')
+    total_fisicos = sum(float(c.monto or 0) for c in cheques if (c.tipo or '').upper() == 'FISICO')
 
     stats = {
         'total_monto': total_monto,
@@ -2494,14 +2530,14 @@ def reporte_historico_cheques():
         'entregados': len([c for c in cheques if c.estado == 'ENTREGADO']),
         'depositados': len([c for c in cheques if c.estado in ['DEPOSITADO', 'COBRADO']])
     }
-    
+
     bancos = db.session.query(Cheque.banco).distinct().all()
     sucursales = Sucursal.query.filter_by(activo=True).all()
     clientes = Cliente.query.filter_by(activo=True).order_by(Cliente.razon_social).all()
 
-    return render_template('admin/reporte_cheques.html', 
-                           cheques=cheques, 
-                           stats=stats, 
+    return render_template('admin/reporte_cheques.html',
+                           cheques=cheques,
+                           stats=stats,
                            bancos=[b[0] for b in bancos if b[0]],
                            sucursales=sucursales,
                            clientes=clientes,
@@ -2517,7 +2553,8 @@ def reporte_historico_cheques():
                                'q': query_busqueda
                            },
                            hoy=get_argentina_time().date())
-           
+
+
 
 @admin_bp.route('/proveedores/ajuste/<int:id>', methods=['POST'])
 @login_required
@@ -3553,34 +3590,41 @@ def gestion_saldos_manual():
 def cargar_cheque_manual():
     try:
         monto = float(request.form.get('monto'))
-        caja_id = request.form.get('caja_id') # Caja física donde se guarda el papel
-        
-        # 1. Crear el Cheque en Cartera
-        nuevo_ch = Cheque(
-            banco=request.form.get('banco').upper(),
-            numero=request.form.get('numero'),
-            emisor=request.form.get('emisor').upper(),
-            monto=monto,
-            fecha_vencimiento=datetime.strptime(request.form.get('vencimiento'), '%Y-%m-%d').date(),
-            tipo=request.form.get('tipo'), # 'FISICO' o 'ECHEQ'
-            cliente_id=request.form.get('cliente_id') or None, # Opcional
-            estado='EN_CARTERA'
-        )
+        caja_id = request.form.get('caja_id')
+
+        caja = obtener_caja_autorizada(caja_id, solo_activas=True)
+        if not caja:
+            flash("Error: La caja seleccionada está inactiva o no pertenece a su sucursal.", "danger")
+            return redirect(url_for('admin.cartera_cheques'))
+
+        ch_kwargs = {
+            'banco': (request.form.get('banco') or '').upper(),
+            'numero': request.form.get('numero'),
+            'emisor': (request.form.get('emisor') or '').upper(),
+            'monto': monto,
+            'fecha_vencimiento': datetime.strptime(request.form.get('vencimiento'), '%Y-%m-%d').date(),
+            'tipo': request.form.get('tipo'),
+            'cliente_id': request.form.get('cliente_id') or None,
+            'estado': 'EN_CARTERA'
+        }
+        if hasattr(Cheque, 'caja_id'):
+            ch_kwargs['caja_id'] = caja.id
+        if hasattr(Cheque, 'sucursal_id'):
+            ch_kwargs['sucursal_id'] = current_user.sucursal_id or caja.sucursal_id
+
+        nuevo_ch = Cheque(**ch_kwargs)
         db.session.add(nuevo_ch)
 
-        # 2. Registrar el ingreso del valor a la caja física elegida
-        caja = Caja.query.get(caja_id)
-        if caja:
-            caja.saldo_actual += monto
-            mov_f = MovimientoFinanciero(
-                caja_id=caja.id,
-                monto=monto,
-                tipo='INGRESO',
-                motivo=f"CARGA INICIAL: Cheque {nuevo_ch.banco} N°{nuevo_ch.numero}",
-                metodo_detalle='CHEQUE',
-                usuario_id=current_user.id
-            )
-            db.session.add(mov_f)
+        caja.saldo_actual += monto
+        mov_f = MovimientoFinanciero(
+            caja_id=caja.id,
+            monto=monto,
+            tipo='INGRESO',
+            motivo=f"CARGA INICIAL: Cheque {nuevo_ch.banco} N°{nuevo_ch.numero}",
+            metodo_detalle='CHEQUE',
+            usuario_id=current_user.id
+        )
+        db.session.add(mov_f)
 
         db.session.commit()
         flash("Cheque cargado correctamente en cartera.", "success")
