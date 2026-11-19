@@ -3462,27 +3462,52 @@ def gestion_saldos_manual():
         sucursal_id = request.form.get('sucursal_id')
         monto = float(request.form.get('monto', 0))
         motivo = request.form.get('motivo') # SALDO INICIAL / TRABAJO REALIZADO / AJUSTE
-        obs = request.form.get('observaciones').upper()
+        obs = (request.form.get('observaciones') or '').strip().upper()
 
-        descripcion_final = f"{motivo}: {obs}"
+        if not entidad_id:
+            flash("Error: Debe buscar y seleccionar una persona o empresa de la lista.", "danger")
+            return redirect(url_for('admin.gestion_saldos_manual'))
+
+        try:
+            entidad_id_int = int(entidad_id)
+        except (TypeError, ValueError):
+            flash("Error: La persona o empresa seleccionada no es válida.", "danger")
+            return redirect(url_for('admin.gestion_saldos_manual'))
+
+        if current_user.rol == 'admin' and current_user.sucursal_id:
+            sucursal_id_final = current_user.sucursal_id
+        else:
+            sucursal_id_final = int(sucursal_id) if sucursal_id else current_user.sucursal_id
+
+        descripcion_final = f"{motivo}: {obs}" if obs else f"{motivo}"
 
         try:
             if tipo_entidad == 'CLIENTE':
+                cliente = Cliente.query.get(entidad_id_int)
+                if not cliente:
+                    flash("Error: El cliente seleccionado no existe.", "danger")
+                    return redirect(url_for('admin.gestion_saldos_manual'))
+
                 # En Clientes: (+) es Deuda (nos debe), (-) es Crédito (saldo a favor del cliente)
                 nuevo_mov = MovimientoCtaCte(
-                    cliente_id=entidad_id,
-                    sucursal_id=sucursal_id,
+                    cliente_id=cliente.id,
+                    sucursal_id=sucursal_id_final,
                     monto=monto,
                     tipo='DEUDA' if monto > 0 else 'PAGO',
                     descripcion=descripcion_final
                 )
                 db.session.add(nuevo_mov)
-            
+
             else: # PROVEEDOR
+                proveedor = Proveedor.query.get(entidad_id_int)
+                if not proveedor:
+                    flash("Error: El proveedor seleccionado no existe.", "danger")
+                    return redirect(url_for('admin.gestion_saldos_manual'))
+
                 # En Prov: (+) es Deuda nuestra, (-) es saldo a favor nuestro
                 nuevo_mov_p = MovimientoCtaCteProveedor(
-                    proveedor_id=entidad_id,
-                    sucursal_id=sucursal_id,
+                    proveedor_id=proveedor.id,
+                    sucursal_id=sucursal_id_final,
                     monto=monto,
                     tipo='COMPRA' if monto > 0 else 'PAGO',
                     descripcion=descripcion_final
@@ -3504,9 +3529,20 @@ def gestion_saldos_manual():
     if current_user.rol == 'admin':
         sucursales = [s for s in sucursales if s.id == current_user.sucursal_id]
 
-    return render_template('admin/gestion_saldos.html', 
-                           clientes=clientes, 
-                           proveedores=proveedores, 
+    clientes_json = [
+        {'id': c.id, 'razon_social': c.razon_social or '', 'cuit': c.cuit or ''}
+        for c in clientes
+    ]
+    proveedores_json = [
+        {'id': p.id, 'razon_social': p.razon_social or '', 'cuit': p.cuit or ''}
+        for p in proveedores
+    ]
+
+    return render_template('admin/gestion_saldos.html',
+                           clientes=clientes,
+                           proveedores=proveedores,
+                           clientes_json=clientes_json,
+                           proveedores_json=proveedores_json,
                            sucursales=sucursales)
     
     

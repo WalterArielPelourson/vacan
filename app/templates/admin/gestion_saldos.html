@@ -9,12 +9,12 @@
 
 <div class="row">
     <div class="col-md-7 mx-auto">
-        <div class="card shadow-lg border-0 overflow-hidden">
-            <div class="card-header bg-dark text-white p-3">
+        <div class="card shadow-lg border-0">
+            <div class="card-header bg-dark text-white p-3 rounded-top">
                 <h5 class="mb-0 fw-bold small text-uppercase">Registrar Ajuste / Trabajo</h5>
             </div>
             <div class="card-body p-4 bg-white text-dark">
-                <form method="POST">
+                <form method="POST" id="formGestionSaldo" novalidate>
                     <div class="row g-3">
                         <!-- TIPO DE CUENTA -->
                         <div class="col-md-6">
@@ -33,26 +33,45 @@
                             </select>
                         </div>
 
-                        <!-- SELECTOR CONTACTO -->
+                        <!-- BUSCADOR CONTACTO TIPEANDO NOMBRE -->
                         <div class="col-12">
                             <div class="d-flex justify-content-between align-items-end mb-1">
-                                <label class="fw-bold small text-muted">SELECCIONAR PERSONA / EMPRESA</label>
+                                <label for="buscar_entidad" class="fw-bold small text-muted">SELECCIONAR PERSONA / EMPRESA</label>
                                 <button type="button" class="btn btn-sm p-0 text-pink fw-bold text-decoration-none" data-bs-toggle="modal" data-bs-target="#modalAltaRapida">
                                     + CREAR CONTACTO NUEVO
                                 </button>
                             </div>
-                            
-                            <div id="box_clientes">
-                                <select name="entidad_id" class="form-select border-dark select2">
-                                    <option value="">-- Buscar Cliente --</option>
-                                    {% for c in clientes %}<option value="{{ c.id }}">{{ c.razon_social }} ({{ c.cuit }})</option>{% endfor %}
-                                </select>
+
+                            <input type="hidden" name="entidad_id" id="entidad_id" value="">
+
+                            <div class="position-relative" id="entidad_autocomplete_wrapper">
+                                <div class="input-group">
+                                    <span class="input-group-text bg-dark text-white border-dark">
+                                        <i class="bi bi-search"></i>
+                                    </span>
+                                    <input type="text"
+                                           id="buscar_entidad"
+                                           class="form-control border-dark"
+                                           placeholder="Escribí el nombre, razón social o CUIT del cliente..."
+                                           autocomplete="off">
+                                    <button type="button"
+                                            id="btn_limpiar_entidad"
+                                            class="btn btn-outline-dark d-none"
+                                            title="Limpiar selección"
+                                            onclick="limpiarSeleccionEntidad()">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
+
+                                <!-- LISTA FLOTANTE DE COINCIDENCIAS -->
+                                <div id="lista_sugerencias_entidad"
+                                     class="list-group shadow-lg border border-dark position-absolute w-100 d-none"
+                                     style="z-index: 1055; max-height: 250px; overflow-y: auto; top: 100%; left: 0;">
+                                </div>
                             </div>
-                            <div id="box_proveedores" class="d-none">
-                                <select name="entidad_id" id="sel_prov" class="form-select border-dark select2" disabled>
-                                    <option value="">-- Buscar Proveedor --</option>
-                                    {% for p in proveedores %}<option value="{{ p.id }}">{{ p.razon_social }} ({{ p.cuit }})</option>{% endfor %}
-                                </select>
+
+                            <div id="feedback_entidad" class="x-small mt-1 text-muted">
+                                <i class="bi bi-keyboard"></i> Comenzá a escribir el nombre o CUIT y elegí una opción de la lista.
                             </div>
                         </div>
 
@@ -69,7 +88,7 @@
                         <!-- MONTO -->
                         <div class="col-md-6">
                             <label class="fw-bold small text-muted">MONTO ($)</label>
-                            <input type="number" step="0.01" name="monto" class="form-control border-primary fw-bold" placeholder="0.00" required>
+                            <input type="number" step="0.01" name="monto" id="monto_ajuste" class="form-control border-primary fw-bold" placeholder="0.00" required>
                             <div class="x-small text-muted mt-1">
                                 <i class="bi bi-info-circle"></i> (+) Suma Deuda | (-) Saldo a favor
                             </div>
@@ -78,7 +97,7 @@
                         <!-- OBSERVACIONES -->
                         <div class="col-12">
                             <label class="fw-bold small text-muted">DETALLE / OBSERVACIONES</label>
-                            <textarea name="observaciones" rows="3" class="form-control border-dark" placeholder="Describa el trabajo realizado o el por qué del ajuste..." required></textarea>
+                            <textarea name="observaciones" id="obs_ajuste" rows="3" class="form-control border-dark" placeholder="Describa el trabajo realizado o el por qué del ajuste..." required></textarea>
                         </div>
                     </div>
 
@@ -124,20 +143,235 @@
 </div>
 
 <script>
-function switchEntidad(val) {
-    const bCli = document.getElementById('box_clientes');
-    const bProv = document.getElementById('box_proveedores');
-    const sProv = document.getElementById('sel_prov');
-    const sCli = document.querySelector('#box_clientes select');
+const CLIENTES_DATA = [
+    {% for c in clientes %}
+    { id: {{ c.id }}, nombre: {{ (c.razon_social or '')|tojson }}, cuit: {{ (c.cuit or '')|tojson }} }{% if not loop.last %},{% endif %}
+    {% endfor %}
+];
 
-    if(val === 'CLIENTE') {
-        bCli.classList.remove('d-none'); bProv.classList.add('d-none');
-        sCli.disabled = false; sProv.disabled = true;
-    } else {
-        bCli.classList.add('d-none'); bProv.classList.remove('d-none');
-        sCli.disabled = true; sProv.disabled = false;
+const PROVEEDORES_DATA = [
+    {% for p in proveedores %}
+    { id: {{ p.id }}, nombre: {{ (p.razon_social or '')|tojson }}, cuit: {{ (p.cuit or '')|tojson }} }{% if not loop.last %},{% endif %}
+    {% endfor %}
+];
+
+let tipoActual = document.getElementById('tipo_entidad').value || 'CLIENTE';
+let indiceActivo = -1;
+let resultadosActuales = [];
+
+const inputBuscar = document.getElementById('buscar_entidad');
+const inputEntidadId = document.getElementById('entidad_id');
+const listaSugerencias = document.getElementById('lista_sugerencias_entidad');
+const btnLimpiar = document.getElementById('btn_limpiar_entidad');
+const feedbackEntidad = document.getElementById('feedback_entidad');
+
+function normalizarTexto(texto) {
+    return (texto || '')
+        .toString()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+}
+
+function obtenerListadoActivo() {
+    return tipoActual === 'CLIENTE' ? CLIENTES_DATA : PROVEEDORES_DATA;
+}
+
+function switchEntidad(val) {
+    tipoActual = val;
+    limpiarSeleccionEntidad(false);
+    inputBuscar.placeholder = val === 'CLIENTE'
+        ? 'Escribí el nombre, razón social o CUIT del cliente...'
+        : 'Escribí el nombre, razón social o CUIT del proveedor...';
+    inputBuscar.focus();
+}
+
+function limpiarSeleccionEntidad(enfocar = true) {
+    inputBuscar.value = '';
+    inputEntidadId.value = '';
+    inputBuscar.classList.remove('is-invalid', 'is-valid');
+    btnLimpiar.classList.add('d-none');
+    ocultarSugerencias();
+    feedbackEntidad.className = 'x-small mt-1 text-muted';
+    feedbackEntidad.innerHTML = '<i class="bi bi-keyboard"></i> Comenzá a escribir el nombre o CUIT y elegí una opción de la lista.';
+    if (enfocar) {
+        inputBuscar.focus();
     }
 }
+
+function ocultarSugerencias() {
+    listaSugerencias.classList.add('d-none');
+    listaSugerencias.innerHTML = '';
+    indiceActivo = -1;
+    resultadosActuales = [];
+}
+
+function seleccionarEntidad(item) {
+    inputEntidadId.value = item.id;
+    inputBuscar.value = item.cuit ? `${item.nombre} (${item.cuit})` : item.nombre;
+    inputBuscar.classList.remove('is-invalid');
+    inputBuscar.classList.add('is-valid');
+    btnLimpiar.classList.remove('d-none');
+    feedbackEntidad.className = 'x-small mt-1 text-success fw-bold';
+    feedbackEntidad.innerHTML = `<i class="bi bi-check-circle-fill"></i> Seleccionado: ${escaparHtml(item.nombre)}${item.cuit ? ' — CUIT/DNI: ' + escaparHtml(item.cuit) : ''}`;
+    ocultarSugerencias();
+}
+
+function escaparHtml(str) {
+    return (str || '').replace(/[&<>"']/g, function(m) {
+        return ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        })[m];
+    });
+}
+
+function renderizarSugerencias(termino) {
+    const q = normalizarTexto(termino);
+    if (!q) {
+        ocultarSugerencias();
+        return;
+    }
+
+    const base = obtenerListadoActivo();
+    const filtrados = base.filter(item => {
+        const nom = normalizarTexto(item.nombre);
+        const cuit = normalizarTexto(item.cuit);
+        return nom.includes(q) || cuit.includes(q);
+    }).slice(0, 25);
+
+    resultadosActuales = filtrados;
+    indiceActivo = -1;
+    listaSugerencias.innerHTML = '';
+
+    if (filtrados.length === 0) {
+        const vacio = document.createElement('div');
+        vacio.className = 'list-group-item text-muted small py-2';
+        vacio.innerHTML = `<i class="bi bi-exclamation-circle"></i> No se encontraron coincidencias para "<strong>${escaparHtml(termino)}</strong>".`;
+        listaSugerencias.appendChild(vacio);
+        listaSugerencias.classList.remove('d-none');
+        return;
+    }
+
+    filtrados.forEach((item, idx) => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center py-2 sugerencia-item';
+        btn.dataset.index = idx;
+
+        const cuitBadge = item.cuit
+            ? `<span class="badge bg-light text-dark border ms-2">${escaparHtml(item.cuit)}</span>`
+            : '';
+
+        btn.innerHTML = `<span class="fw-semibold text-dark">${escaparHtml(item.nombre)}</span>${cuitBadge}`;
+
+        btn.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            seleccionarEntidad(item);
+        });
+
+        listaSugerencias.appendChild(btn);
+    });
+
+    listaSugerencias.classList.remove('d-none');
+}
+
+function actualizarResaltado() {
+    const items = listaSugerencias.querySelectorAll('.sugerencia-item');
+    items.forEach((el, idx) => {
+        if (idx === indiceActivo) {
+            el.classList.add('active', 'bg-dark', 'text-white', 'border-dark');
+            const spanNom = el.querySelector('span');
+            if (spanNom) spanNom.classList.remove('text-dark');
+            el.scrollIntoView({ block: 'nearest' });
+        } else {
+            el.classList.remove('active', 'bg-dark', 'text-white', 'border-dark');
+            const spanNom = el.querySelector('span');
+            if (spanNom) spanNom.classList.add('text-dark');
+        }
+    });
+}
+
+inputBuscar.addEventListener('input', function() {
+    inputEntidadId.value = '';
+    inputBuscar.classList.remove('is-valid', 'is-invalid');
+    if (this.value.trim().length > 0) {
+        btnLimpiar.classList.remove('d-none');
+        feedbackEntidad.className = 'x-small mt-1 text-muted';
+        feedbackEntidad.innerHTML = '<i class="bi bi-hand-index"></i> Elegí una opción de la lista desplegada.';
+        renderizarSugerencias(this.value);
+    } else {
+        btnLimpiar.classList.add('d-none');
+        feedbackEntidad.className = 'x-small mt-1 text-muted';
+        feedbackEntidad.innerHTML = '<i class="bi bi-keyboard"></i> Comenzá a escribir el nombre o CUIT y elegí una opción de la lista.';
+        ocultarSugerencias();
+    }
+});
+
+inputBuscar.addEventListener('focus', function() {
+    if (!inputEntidadId.value && this.value.trim().length > 0) {
+        renderizarSugerencias(this.value);
+    }
+});
+
+inputBuscar.addEventListener('keydown', function(e) {
+    if (listaSugerencias.classList.contains('d-none') || resultadosActuales.length === 0) {
+        if (e.key === 'Enter' && !inputEntidadId.value) {
+            e.preventDefault();
+        }
+        return;
+    }
+
+    if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        indiceActivo = (indiceActivo + 1) % resultadosActuales.length;
+        actualizarResaltado();
+    } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        indiceActivo = indiceActivo <= 0 ? resultadosActuales.length - 1 : indiceActivo - 1;
+        actualizarResaltado();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (indiceActivo >= 0 && resultadosActuales[indiceActivo]) {
+            seleccionarEntidad(resultadosActuales[indiceActivo]);
+        } else if (resultadosActuales.length === 1) {
+            seleccionarEntidad(resultadosActuales[0]);
+        }
+    } else if (e.key === 'Escape') {
+        ocultarSugerencias();
+    }
+});
+
+document.addEventListener('click', function(e) {
+    const wrapper = document.getElementById('entidad_autocomplete_wrapper');
+    if (wrapper && !wrapper.contains(e.target)) {
+        ocultarSugerencias();
+    }
+});
+
+document.getElementById('formGestionSaldo').addEventListener('submit', function(e) {
+    if (!inputEntidadId.value) {
+        e.preventDefault();
+        inputBuscar.classList.add('is-invalid');
+        feedbackEntidad.className = 'x-small mt-1 text-danger fw-bold';
+        feedbackEntidad.innerHTML = '<i class="bi bi-exclamation-triangle-fill"></i> Debe buscar por nombre y seleccionar una persona o empresa de la lista.';
+        inputBuscar.focus();
+        return false;
+    }
+
+    const montoInput = document.getElementById('monto_ajuste');
+    const obsInput = document.getElementById('obs_ajuste');
+    if (!montoInput.value || !obsInput.value.trim()) {
+        if (!this.checkValidity()) {
+            e.preventDefault();
+            this.reportValidity();
+        }
+    }
+});
 
 async function ejecutarAlta() {
     const nombre = document.getElementById('pop_nombre').value;
@@ -163,7 +397,9 @@ async function ejecutarAlta() {
 </script>
 
 <style>
-    .select2-container--bootstrap-5 { font-size: 0.85rem; }
     .x-small { font-size: 0.7rem; }
+    #lista_sugerencias_entidad .sugerencia-item:hover {
+        background-color: #f8f9fa;
+    }
 </style>
 {% endblock %}
