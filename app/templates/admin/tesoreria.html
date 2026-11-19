@@ -6,21 +6,29 @@
         <h2 class="fw-bold"><i class="bi bi-bank text-pink"></i> Tesorería y <span class="text-pink">Cajas</span></h2>
         <p class="text-muted">Gestión financiera y arqueos de Vacan Radiadores.</p>
     </div>
-    <!-- FILTRO DE FECHA -->
+    <!-- FILTRO DE FECHA Y ESTADO -->
     <div class="col-md-7">
         <form action="{{ url_for('admin.tesoreria_dashboard') }}" method="GET" class="card p-2 shadow-sm border-0">
             <div class="row g-2 align-items-end">
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="small fw-bold">Desde:</label>
-                    <input type="date" name="desde" class="form-control form-control-sm" value="{{ filtros.desde }}">
+                    <input type="date" name="desde" class="form-control form-control-sm" value="{{ filtros.desde or '' }}">
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-3">
                     <label class="small fw-bold">Hasta:</label>
-                    <input type="date" name="hasta" class="form-control form-control-sm" value="{{ filtros.hasta }}">
+                    <input type="date" name="hasta" class="form-control form-control-sm" value="{{ filtros.hasta or '' }}">
                 </div>
-                <div class="col-md-4 d-flex gap-1">
-                    <button type="submit" class="btn btn-vacan btn-sm flex-grow-1">Filtrar Periodo</button>
-                    <a href="{{ url_for('admin.tesoreria_dashboard') }}" class="btn btn-outline-secondary btn-sm"><i class="bi bi-arrow-clockwise"></i></a>
+                <div class="col-md-3">
+                    <label class="small fw-bold">Estado:</label>
+                    <select name="estado" class="form-select form-select-sm">
+                        <option value="todas" {% if (estado_filtro or 'todas') == 'todas' %}selected{% endif %}>Todas</option>
+                        <option value="activas" {% if estado_filtro == 'activas' %}selected{% endif %}>Solo Activas</option>
+                        <option value="inactivas" {% if estado_filtro == 'inactivas' %}selected{% endif %}>Solo Inactivas</option>
+                    </select>
+                </div>
+                <div class="col-md-3 d-flex gap-1">
+                    <button type="submit" class="btn btn-vacan btn-sm flex-grow-1">Filtrar</button>
+                    <a href="{{ url_for('admin.tesoreria_dashboard') }}" class="btn btn-outline-secondary btn-sm" title="Reiniciar filtros"><i class="bi bi-arrow-clockwise"></i></a>
                 </div>
             </div>
         </form>
@@ -79,13 +87,13 @@
 <div class="row mb-4 text-dark">
     <div class="col-md-6 mb-2">
         <div class="card bg-dark text-white border-0 shadow-sm p-3">
-            <h6 class="text-white-50 small">EFECTIVO EN CAJAS (HOY)</h6>
+            <h6 class="text-white-50 small">EFECTIVO EN CAJAS ACTIVAS (HOY)</h6>
             <h2 class="fw-bold mb-0 text-success">${{ "{:,.2f}".format(total_efectivo or 0) }}</h2>
         </div>
     </div>
     <div class="col-md-6 mb-2">
         <div class="card bg-dark text-white border-0 shadow-sm border-start border-pink border-5 p-3">
-            <h6 class="text-white-50 small">BANCOS / VIRTUAL (HOY)</h6>
+            <h6 class="text-white-50 small">BANCOS / VIRTUAL ACTIVAS (HOY)</h6>
             <h2 class="fw-bold mb-0 text-info">${{ "{:,.2f}".format(total_virtual or 0) }}</h2>
         </div>
     </div>
@@ -99,15 +107,35 @@
             <ul class="list-group list-group-flush">
                 {% for c in fisicas %}
                 {% set f = flujo_cajas[c.id] %}
-                <li class="list-group-item py-3">
+                {% set esta_activa = (c.activo is none or c.activo) %}
+                <li class="list-group-item py-3 {% if not esta_activa %}bg-light opacity-75{% endif %}">
                     <div class="d-flex justify-content-between align-items-start">
                         <div>
-                            <h5 class="mb-0 fw-bold">{{ c.nombre }}</h5>
+                            <div class="d-flex align-items-center flex-wrap gap-1">
+                                <h5 class="mb-0 fw-bold {% if not esta_activa %}text-muted text-decoration-line-through{% endif %}">{{ c.nombre }}</h5>
+                                {% if not c.sucursal_id %}
+                                    <span class="badge bg-info text-dark">GLOBAL</span>
+                                {% endif %}
+                                {% if not esta_activa %}
+                                    <span class="badge bg-secondary">INACTIVA</span>
+                                {% endif %}
+                            </div>
                             <small class="text-muted d-block mt-1">Saldo Real Hoy: <strong>${{ "{:,.2f}".format(c.saldo_actual) }}</strong></small>
-                            <div class="mt-2">
-                                <a href="{{ url_for('admin.detalle_caja', id=c.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none me-3 fw-bold text-primary">Ver Movimientos →</a>
-                                <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold me-1" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ c.id }}"><i class="bi bi-pencil"></i></button>
-                                <button class="btn btn-sm btn-outline-danger py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalArqueo{{ c.id }}">Arqueo</button>
+                            <div class="mt-2 d-flex flex-wrap align-items-center gap-1">
+                                <a href="{{ url_for('admin.detalle_caja', id=c.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none me-2 fw-bold text-primary">Ver Movimientos →</a>
+                                <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ c.id }}" title="Editar"><i class="bi bi-pencil"></i></button>
+                                {% if esta_activa %}
+                                    <button class="btn btn-sm btn-outline-danger py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalArqueo{{ c.id }}">Arqueo</button>
+                                {% endif %}
+                                {% if current_user.rol == 'superadmin' or (c.sucursal_id and c.sucursal_id == current_user.sucursal_id) %}
+                                    <a href="{{ url_for('admin.toggle_caja', id=c.id) }}"
+                                       class="btn btn-sm {{ 'btn-outline-secondary' if esta_activa else 'btn-outline-success' }} py-0 px-2 fw-bold"
+                                       title="{{ 'Inactivar caja' if esta_activa else 'Reactivar caja' }}"
+                                       onclick="return confirm('{{ '¿Confirmás inactivar ' ~ c.nombre ~ '? Dejará de aparecer en cobros, pagos y POS.' if esta_activa else '¿Confirmás reactivar ' ~ c.nombre ~ '?' }}');">
+                                        <i class="bi {{ 'bi-slash-circle' if esta_activa else 'bi-check-circle' }}"></i>
+                                        {{ 'Inactivar' if esta_activa else 'Activar' }}
+                                    </a>
+                                {% endif %}
                             </div>
                         </div>
                         <div class="text-end">
@@ -120,6 +148,8 @@
                         </div>
                     </div>
                 </li>
+                {% else %}
+                <li class="list-group-item text-center text-muted py-4">No hay cajas físicas para mostrar con este filtro.</li>
                 {% endfor %}
             </ul>
         </div>
@@ -132,14 +162,32 @@
             <ul class="list-group list-group-flush">
                 {% for v in virtuales %}
                 {% set f = flujo_cajas[v.id] %}
-                <li class="list-group-item py-3">
+                {% set esta_activa = (v.activo is none or v.activo) %}
+                <li class="list-group-item py-3 {% if not esta_activa %}bg-light opacity-75{% endif %}">
                     <div class="d-flex justify-content-between align-items-start">
                         <div>
-                            <h5 class="mb-0 fw-bold">{{ v.nombre }}</h5>
+                            <div class="d-flex align-items-center flex-wrap gap-1">
+                                <h5 class="mb-0 fw-bold {% if not esta_activa %}text-muted text-decoration-line-through{% endif %}">{{ v.nombre }}</h5>
+                                {% if not v.sucursal_id %}
+                                    <span class="badge bg-info text-dark">GLOBAL</span>
+                                {% endif %}
+                                {% if not esta_activa %}
+                                    <span class="badge bg-secondary">INACTIVA</span>
+                                {% endif %}
+                            </div>
                             <small class="text-muted d-block mt-1">Saldo Real Hoy: <strong>${{ "{:,.2f}".format(v.saldo_actual) }}</strong></small>
-                            <div class="mt-2">
+                            <div class="mt-2 d-flex flex-wrap align-items-center gap-1">
                                 <a href="{{ url_for('admin.detalle_caja', id=v.id) }}" class="btn btn-sm btn-link p-0 text-decoration-none text-pink fw-bold me-2">Ver Movimientos →</a>
-                                <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ v.id }}"><i class="bi bi-pencil"></i></button>
+                                <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" data-bs-toggle="modal" data-bs-target="#modalEditarCaja{{ v.id }}" title="Editar"><i class="bi bi-pencil"></i></button>
+                                {% if current_user.rol == 'superadmin' or (v.sucursal_id and v.sucursal_id == current_user.sucursal_id) %}
+                                    <a href="{{ url_for('admin.toggle_caja', id=v.id) }}"
+                                       class="btn btn-sm {{ 'btn-outline-secondary' if esta_activa else 'btn-outline-success' }} py-0 px-2 fw-bold"
+                                       title="{{ 'Inactivar cuenta virtual' if esta_activa else 'Reactivar cuenta virtual' }}"
+                                       onclick="return confirm('{{ '¿Confirmás inactivar ' ~ v.nombre ~ '? Dejará de aparecer en cobros, pagos y POS.' if esta_activa else '¿Confirmás reactivar ' ~ v.nombre ~ '?' }}');">
+                                        <i class="bi {{ 'bi-slash-circle' if esta_activa else 'bi-check-circle' }}"></i>
+                                        {{ 'Inactivar' if esta_activa else 'Activar' }}
+                                    </a>
+                                {% endif %}
                             </div>
                         </div>
                         <div class="text-end">
@@ -152,6 +200,8 @@
                         </div>
                     </div>
                 </li>
+                {% else %}
+                <li class="list-group-item text-center text-muted py-4">No hay cuentas virtuales para mostrar con este filtro.</li>
                 {% endfor %}
             </ul>
         </div>
@@ -161,6 +211,7 @@
 <!-- MODALES (Se mantienen todos sin omitir nada) -->
 
 {% for caja in fisicas + virtuales %}
+{% set esta_activa_modal = (caja.activo is none or caja.activo) %}
 <!-- MODAL EDITAR CUENTA -->
 <div class="modal fade" id="modalEditarCaja{{ caja.id }}" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -170,6 +221,7 @@
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body p-4 bg-white">
+                <input type="hidden" name="tiene_switch_activo" value="1">
                 <div class="mb-3">
                     <label class="small fw-bold text-dark">Nombre de la Cuenta</label>
                     <input type="text" name="nombre" class="form-control border-dark" value="{{ caja.nombre }}" required>
@@ -195,6 +247,15 @@
                         {% endif %}
                     </div>
                 </div>
+                <div class="form-check form-switch mt-1 p-3 bg-light rounded border">
+                    <input class="form-check-input ms-0 me-2" type="checkbox" role="switch" id="switchActivo{{ caja.id }}" name="activo" value="1" {% if esta_activa_modal %}checked{% endif %}>
+                    <label class="form-check-label fw-bold text-dark" for="switchActivo{{ caja.id }}">
+                        Cuenta Activa (visible en Cobros, Pagos y POS)
+                    </label>
+                    {% if caja.saldo_actual and (caja.saldo_actual|abs) > 0.01 %}
+                        <small class="text-muted d-block mt-1">Para poder inactivarla, su saldo actual (${{ "{:,.2f}".format(caja.saldo_actual) }}) debe estar en $0.00.</small>
+                    {% endif %}
+                </div>
             </div>
             <div class="modal-footer bg-light border-0">
                 <button type="submit" class="btn btn-pink w-100 fw-bold">GUARDAR CAMBIOS</button>
@@ -212,7 +273,11 @@
             <div class="modal-body p-4 bg-white text-dark">
                 <label class="small fw-bold">Caja a afectar</label>
                 <select name="caja_id" class="form-select mb-3 border-dark" required>
-                    {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }}</option>{% endfor %}
+                    {% for caja in fisicas + virtuales %}
+                        {% if caja.activo is none or caja.activo %}
+                            <option value="{{ caja.id }}">{{ caja.nombre }}</option>
+                        {% endif %}
+                    {% endfor %}
                 </select>
                 <div class="row">
                     <div class="col-6 mb-3">
@@ -244,11 +309,19 @@
             <div class="modal-body p-4 bg-white">
                 <label class="small fw-bold text-danger">Origen</label>
                 <select name="origen_id" class="form-select mb-3" required>
-                    {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }} (${{ "{:,.2f}".format(caja.saldo_actual) }})</option>{% endfor %}
+                    {% for caja in fisicas + virtuales %}
+                        {% if caja.activo is none or caja.activo %}
+                            <option value="{{ caja.id }}">{{ caja.nombre }} (${{ "{:,.2f}".format(caja.saldo_actual) }})</option>
+                        {% endif %}
+                    {% endfor %}
                 </select>
                 <label class="small fw-bold text-success">Destino</label>
                 <select name="destino_id" class="form-select mb-3" required>
-                    {% for caja in fisicas + virtuales %}<option value="{{ caja.id }}">{{ caja.nombre }}</option>{% endfor %}
+                    {% for caja in fisicas + virtuales %}
+                        {% if caja.activo is none or caja.activo %}
+                            <option value="{{ caja.id }}">{{ caja.nombre }}</option>
+                        {% endif %}
+                    {% endfor %}
                 </select>
                 <label class="small fw-bold">Monto a mover ($)</label>
                 <input type="number" step="0.01" name="monto" class="form-control border-primary" required>

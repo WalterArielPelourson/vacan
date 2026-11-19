@@ -283,7 +283,7 @@ class Caja(db.Model):
     sucursal_id = db.Column(db.Integer, db.ForeignKey('sucursal.id'))
     saldo_actual = db.Column(db.Float, default=0.0)
     tipo = db.Column(db.String(20))
-
+    activo = db.Column(db.Boolean, default=True)
     sucursal = db.relationship('Sucursal', back_populates='cajas')
     movimientos = db.relationship('MovimientoFinanciero', back_populates='caja')
     cierres = db.relationship('CierreCaja', back_populates='caja')

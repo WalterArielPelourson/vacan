@@ -160,11 +160,62 @@ def toggle_usuario(id):
 
 #Selector de caja por id de usuario y sucursal
 
+
+
+_caja_activo_verificada = False
+
+def asegurar_columna_activo_caja():
+    global _caja_activo_verificada
+    if _caja_activo_verificada or not hasattr(Caja, 'activo'):
+        return
+    try:
+        from sqlalchemy import inspect as sa_inspect
+        tabla = Caja.__table__.name
+        inspector = sa_inspect(db.engine)
+        columnas = [col['name'] for col in inspector.get_columns(tabla)]
+        if 'activo' not in columnas:
+            with db.engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tabla} ADD COLUMN activo BOOLEAN DEFAULT 1"))
+                conn.execute(text(f"UPDATE {tabla} SET activo = 1 WHERE activo IS NULL"))
+        _caja_activo_verificada = True
+    except Exception as e:
+        print(f"Aviso verificando columna activo en Caja: {e}")
+
+@admin_bp.before_app_request
+def _verificar_caja_activo_startup():
+    asegurar_columna_activo_caja()
+ 
+
+
+def asegurar_columna_activo_caja():
+    """
+    Verifica una vez por arranque si la tabla de Caja en la DB ya tiene la columna 'activo'.
+    Si no existe, la agrega automáticamente y marca todas las cajas actuales como activas (1).
+    """
+    global _caja_activo_verificada
+    if _caja_activo_verificada or not hasattr(Caja, 'activo'):
+        return
+    try:
+        from sqlalchemy import inspect as sa_inspect
+        tabla = Caja.__table__.name
+        inspector = sa_inspect(db.engine)
+        columnas = [col['name'] for col in inspector.get_columns(tabla)]
+        if 'activo' not in columnas:
+            db.session.execute(text(f"ALTER TABLE {tabla} ADD COLUMN activo BOOLEAN DEFAULT 1"))
+            db.session.execute(text(f"UPDATE {tabla} SET activo = 1 WHERE activo IS NULL"))
+            db.session.commit()
+        _caja_activo_verificada = True
+    except Exception as e:
+        db.session.rollback()
+        print(f"Aviso verificando columna activo en Caja: {e}")
+               
 def obtener_cajas_sucursal(sucursal_id=None, tipo=None, solo_activas=True):
     """
     Devuelve las cajas físicas y cuentas virtuales autorizadas:
+    - Si solo_activas=True (por defecto en cobros/pagos/POS/movimientos):
+      excluye estrictamente las cajas/cuentas con activo == False.
     - Superadmin: todas (o las de 'sucursal_id' + globales si filtró por sucursal).
-    - Admin / Vendedor: las de SU sucursal + las GLOBALES (sucursal_id IS NULL).
+    - Admin / Vendedor: las de SU sucursal + las GLOBALES (sucursal_id IS NULL o 0).
       Nunca muestra cajas ni cuentas virtuales de otras sucursales.
     """
     query = Caja.query
@@ -175,29 +226,36 @@ def obtener_cajas_sucursal(sucursal_id=None, tipo=None, solo_activas=True):
     if tipo:
         query = query.filter(Caja.tipo == tipo)
 
-    if current_user.rol == 'superadmin':
+    rol_usuario = (getattr(current_user, 'rol', '') or '').strip().lower()
+
+    if rol_usuario == 'superadmin':
         if sucursal_id:
             query = query.filter(
-                or_(Caja.sucursal_id == sucursal_id, Caja.sucursal_id.is_(None))
+                or_(Caja.sucursal_id == sucursal_id, Caja.sucursal_id.is_(None), Caja.sucursal_id == 0)
             )
     else:
         if current_user.sucursal_id:
             query = query.filter(
-                or_(Caja.sucursal_id == current_user.sucursal_id, Caja.sucursal_id.is_(None))
+                or_(Caja.sucursal_id == current_user.sucursal_id, Caja.sucursal_id.is_(None), Caja.sucursal_id == 0)
             )
         else:
-            query = query.filter(Caja.sucursal_id.is_(None))
+            query = query.filter(or_(Caja.sucursal_id.is_(None), Caja.sucursal_id == 0))
 
     cajas = query.all()
+
+    # Doble resguardo en Python para garantizar que jamás se filtre una inactiva
+    if solo_activas:
+        cajas = [c for c in cajas if getattr(c, 'activo', True) is not False]
+
     # Ordenamos: primero las de la sucursal, luego las globales, y alfabéticamente
-    cajas.sort(key=lambda c: (0 if c.sucursal_id else 1, c.tipo or '', (c.nombre or '').lower()))
+    cajas.sort(key=lambda c: (0 if (c.sucursal_id and c.sucursal_id != 0) else 1, c.tipo or '', (c.nombre or '').lower()))
     return cajas
 
 
 def obtener_caja_autorizada(caja_id, solo_activas=True):
     """
-    Valida en backend que la caja/cuenta seleccionada sea propia de la sucursal del usuario
-    o sea Global (sucursal_id is None). Superadmin tiene acceso a todas.
+    Valida en backend que la caja/cuenta seleccionada exista, esté activa (si solo_activas=True)
+    y sea propia de la sucursal del usuario o Global (sucursal_id is None / 0).
     """
     if not caja_id:
         return None
@@ -210,17 +268,17 @@ def obtener_caja_autorizada(caja_id, solo_activas=True):
     if not caja:
         return None
 
-    if solo_activas and hasattr(Caja, 'activo') and caja.activo is False:
+    if solo_activas and getattr(caja, 'activo', True) is False:
         return None
 
-    if current_user.rol != 'superadmin':
-        es_su_sucursal = (current_user.sucursal_id is not None and caja.sucursal_id == current_user.sucursal_id)
-        es_global = (caja.sucursal_id is None)
-        if not (es_su_sucursal or es_global):
-            return None
+    rol_usuario = (getattr(current_user, 'rol', '') or '').strip().lower()
+    if rol_usuario == 'superadmin':
+        return caja
 
-    return caja
+    if caja.sucursal_id is None or caja.sucursal_id == 0 or caja.sucursal_id == current_user.sucursal_id:
+        return caja
 
+    return None
 
 # --- SECCIÓN DE REPORTES ---
 
@@ -842,6 +900,9 @@ def detalle_cta_cte_proveedor(id):
         # Si no hay filtro, usamos el sucursal_filter estándar (que filtra si es Admin)
         cajas = sucursal_filter(Caja.query, Caja).all()
     
+     # Solo cajas físicas y cuentas virtuales ACTIVAS (Sucursal + Globales)
+    cajas = obtener_cajas_sucursal(sucursal_id=f_sucursal, solo_activas=True)
+    
     # Los cheques en cartera se mantienen globales (en mano)
     cheques_en_cartera = Cheque.query.filter_by(estado='EN_CARTERA').all()
     
@@ -1128,6 +1189,9 @@ def detalle_cta_cte(cliente_id):
         # Si el Superadmin está en vista "Global", usamos sucursal_filter (que trae las de su local o todas según el util)
         cajas = sucursal_filter(Caja.query, Caja).all()
 
+       # Solo cajas físicas y cuentas virtuales ACTIVAS (Sucursal + Globales)
+    cajas = obtener_cajas_sucursal(sucursal_id=f_sucursal, solo_activas=True)
+    
     hoy = get_argentina_time().date()
     
     return render_template('admin/cta_cte_detalle.html', 
@@ -1661,10 +1725,11 @@ def consultar_cuit_arca(cuit):
 @login_required
 @roles_required('admin', 'superadmin')
 def tesoreria_dashboard():
-    # 1. FECHAS
+    asegurar_columna_activo_caja()
     desde_str = request.args.get('desde')
     hasta_str = request.args.get('hasta')
-    
+    estado_filtro = request.args.get('estado', 'todas').strip().lower()
+
     if desde_str and hasta_str:
         desde = datetime.strptime(desde_str, '%Y-%m-%d')
         hasta = datetime.strptime(hasta_str + " 23:59:59", '%Y-%m-%d %H:%M:%S')
@@ -1673,53 +1738,56 @@ def tesoreria_dashboard():
         desde = datetime.combine(hoy, datetime.min.time())
         hasta = datetime.combine(hoy, datetime.max.time())
 
-    # 2. FILTRO DE CAJAS (Mantenido igual)
-    if current_user.rol == 'admin':
-        fisicas = Caja.query.filter_by(tipo='FISICA', sucursal_id=current_user.sucursal_id).all()
-        virtuales = Caja.query.filter(Caja.tipo == 'VIRTUAL', (Caja.sucursal_id == current_user.sucursal_id) | (Caja.sucursal_id == None)).all()
-    else:
-        fisicas = Caja.query.filter_by(tipo='FISICA').all()
-        virtuales = Caja.query.filter_by(tipo='VIRTUAL').all()
-    
-    todas_cajas = fisicas + virtuales
-    
-    # --- 3. CÁLCULO DETALLADO POR CADA CAJA PARA EL PERIODO ---
-    flujo_cajas = {} # { caja_id: {'ingresos': 0, 'egresos': 0, 'neto': 0} }
+    fisicas = obtener_cajas_sucursal(tipo='FISICA', solo_activas=False)
+    virtuales = obtener_cajas_sucursal(tipo='VIRTUAL', solo_activas=False)
 
+    def cumple_estado(c):
+        esta_activa = True if getattr(c, 'activo', True) is None else bool(c.activo)
+        if estado_filtro == 'activas':
+            return esta_activa
+        if estado_filtro == 'inactivas':
+            return not esta_activa
+        return True
+
+    fisicas = [c for c in fisicas if cumple_estado(c)]
+    virtuales = [v for v in virtuales if cumple_estado(v)]
+    todas_cajas = fisicas + virtuales
+
+    flujo_cajas = {}
     for caja in todas_cajas:
         movs = MovimientoFinanciero.query.filter(
             MovimientoFinanciero.caja_id == caja.id,
             MovimientoFinanciero.fecha.between(desde, hasta)
         ).all()
-        
+
         ing = sum(m.monto for m in movs if m.tipo == 'INGRESO')
         egr = sum(m.monto for m in movs if m.tipo == 'EGRESO')
-        
+
         flujo_cajas[caja.id] = {
             'ingresos': ing,
             'egresos': egr,
             'neto': ing - egr
         }
 
-    # Totales globales del periodo
     ingresos_p = sum(item['ingresos'] for item in flujo_cajas.values())
     egresos_p = sum(item['egresos'] for item in flujo_cajas.values())
 
-    # 4. OTROS DATOS (Categorías, Sucursales, Snapshots)
     lista_categorias = CategoriaMovimiento.query.order_by(CategoriaMovimiento.nombre).all()
     sucursales_todas = Sucursal.query.filter_by(activo=True).all()
-    total_efectivo = sum(c.saldo_actual for c in fisicas)
-    total_virtual = sum(v.saldo_actual for v in virtuales)
-    
-    return render_template('admin/tesoreria.html', 
+    total_efectivo = sum(c.saldo_actual for c in fisicas if c.activo is not False)
+    total_virtual = sum(v.saldo_actual for v in virtuales if v.activo is not False)
+
+    return render_template('admin/tesoreria.html',
                            fisicas=fisicas, virtuales=virtuales,
-                           flujo_cajas=flujo_cajas, # <--- DATA CRUCIAL
-                           categorias=lista_categorias, 
+                           flujo_cajas=flujo_cajas,
+                           categorias=lista_categorias,
                            total_efectivo=total_efectivo, total_virtual=total_virtual,
                            ingresos_p=ingresos_p, egresos_p=egresos_p,
                            sucursales_todas=sucursales_todas,
-                           filtros={'desde': desde_str, 'hasta': hasta_str})
-
+                           estado_filtro=estado_filtro,
+                           filtros={'desde': desde_str, 'hasta': hasta_str, 'estado': estado_filtro})
+    
+    
 @admin_bp.route('/tesoreria/caja/<int:id>')
 @login_required
 @roles_required('admin', 'superadmin')
@@ -1800,69 +1868,37 @@ def nueva_caja():
 
 
 
-# --- RUTA PARA ACTIVAR / DESACTIVAR CAJA RÁPIDAMENTE ---
-@admin_bp.route('/tesoreria/estado/<int:id>')
+@admin_bp.route('/tesoreria/estado/<int:id>', methods=['GET', 'POST'])
 @login_required
 @roles_required('admin', 'superadmin')
 def toggle_caja(id):
+    asegurar_columna_activo_caja()
     caja = Caja.query.get_or_404(id)
-    
-    # Si la caja está activa y tiene saldo, avisamos antes de desactivar
-    if caja.activo and caja.saldo_actual != 0:
-        flash(f"No se puede desactivar '{caja.nombre}' porque tiene un saldo de ${caja.saldo_actual:,.2f}.", "warning")
+    rol = (getattr(current_user, 'rol', '') or '').strip().lower()
+
+    if rol != 'superadmin':
+        if not current_user.sucursal_id or caja.sucursal_id != current_user.sucursal_id:
+            flash("Acceso denegado: Solo el Superadmin puede inactivar cuentas globales o de otras sucursales.", "danger")
+            return redirect(url_for('admin.tesoreria_dashboard'))
+
+    activo_actual = getattr(caja, 'activo', True)
+    esta_activa = True if activo_actual is None else bool(activo_actual)
+    saldo_actual = round(float(caja.saldo_actual or 0.0), 2)
+
+    if esta_activa and abs(saldo_actual) > 0.01:
+        flash(
+            f"No se puede inactivar '{caja.nombre}' porque tiene un saldo de ${saldo_actual:,.2f}. "
+            f"Realizá una transferencia o ajuste a $0.00 primero.",
+            "warning"
+        )
         return redirect(url_for('admin.tesoreria_dashboard'))
 
-    # Cambiamos el estado (si es True a False, si es False a True)
-    caja.activo = not caja.activo
+    caja.activo = not esta_activa
     db.session.commit()
-    
-    estado = "activada" if caja.activo else "desactivada"
+
+    estado = "activada" if caja.activo else "inactivada"
     flash(f"La cuenta '{caja.nombre}' ha sido {estado}.", "info")
     return redirect(url_for('admin.tesoreria_dashboard'))
-
-# --- RUTA PARA EDITAR LOS DATOS DE LA CAJA (MODAL) ---
-#@admin_bp.route('/tesoreria/editar/<int:id>', methods=['POST'])
-#@login_required
-#@roles_required('admin', 'superadmin')
-#def editar_caja(id):
-#    caja = Caja.query.get_or_404(id)
-#    
-#    # Actualizamos nombre y tipo
-#    caja.nombre = request.form.get('nombre').upper()
-#    caja.tipo = request.form.get('tipo')
-#    
-#    # Lógica para el Switch/Checkbox de Activo
-#    # Si el checkbox está marcado, Flask recibe el dato; si no, no envía nada.
-#    caja.activo = True if request.form.get('activo') else False
-#
-#    # Solo el Superadmin puede cambiar la sucursal de una caja
-#    if current_user.rol == 'superadmin':
-#        nueva_suc_id = request.form.get('sucursal_id')
-#        if nueva_suc_id:
-#            caja.sucursal_id = int(nueva_suc_id)
-#    
-#    try:
-#        db.session.commit()
-#        flash(f"Datos de '{caja.nombre}' actualizados.", "success")
-#    except Exception as e:
-#        db.session.rollback()
-#        flash(f"Error al guardar cambios: {str(e)}", "danger")
-#
-#    return redirect(url_for('admin.tesoreria_dashboard'))
-    
-   
-#def nueva_caja():
-    #nueva = Caja(
-    #    nombre=request.form.get('nombre').upper(),
-    #    tipo=request.form.get('tipo'),
-    #    sucursal_id=current_user.sucursal_id,
-    #    saldo_actual=0.0
-    #)
-    db.session.add(nueva)
-    db.session.commit()
-    flash(f"Cuenta/Caja '{nueva.nombre}' habilitada.", "success")
-    return redirect(url_for('admin.tesoreria_dashboard'))
-
 
 
 #CHEQUES EN CARTERA
@@ -3555,23 +3591,33 @@ def cliente_nuevo_pos():
 @roles_required('admin', 'superadmin')
 def editar_caja(id):
     caja = Caja.query.get_or_404(id)
-    
-    # 1. Actualizamos datos básicos
-    caja.nombre = request.form.get('nombre').upper()
-    caja.tipo = request.form.get('tipo') # FISICA o VIRTUAL
-    
-    # 2. Manejo de Estado (Activo/Inactivo)
-    # Si el checkbox no viene en el form, request.form.get('activo') es None (Falso)
-    #caja.activo = True if request.form.get('activo') else False
+    rol = (getattr(current_user, 'rol', '') or '').strip().lower()
 
-    # 3. Cambio de Sucursal (Solo permitido para Superadmin)
-    if current_user.rol == 'superadmin':
-        nueva_sucursal = request.form.get('sucursal_id')
-        if nueva_sucursal:
-            #caja.sucursal_id = int(nueva_sucursal)
-            sid = request.form.get('sucursal_id')
-            # Si el usuario elige la opción vacía, sid será "" -> se guarda como None
-            caja.sucursal_id = int(sid) if sid and sid != "" else None
+    if rol != 'superadmin':
+        if not current_user.sucursal_id or caja.sucursal_id != current_user.sucursal_id:
+            flash("Acceso denegado: No tiene permisos para editar esta cuenta.", "danger")
+            return redirect(url_for('admin.tesoreria_dashboard'))
+
+    caja.nombre = request.form.get('nombre').strip().upper()
+    caja.tipo = request.form.get('tipo')
+
+    # Si el modal de edición envía el switch/select de estado
+    if 'tiene_switch_activo' in request.form or 'activo' in request.form:
+        nuevo_estado = bool(request.form.get('activo')) and str(request.form.get('activo')).lower() not in ('0', 'false', 'off')
+        saldo_actual = round(float(caja.saldo_actual or 0.0), 2)
+        if not nuevo_estado and abs(saldo_actual) > 0.01:
+            flash(
+                f"No se puede inactivar '{caja.nombre}' porque tiene un saldo de ${saldo_actual:,.2f}.",
+                "warning"
+            )
+            return redirect(url_for('admin.tesoreria_dashboard'))
+        caja.activo = nuevo_estado
+
+    # Cambio de Sucursal (Solo permitido para Superadmin)
+    if rol == 'superadmin' and 'sucursal_id' in request.form:
+        sid = (request.form.get('sucursal_id') or '').strip()
+        caja.sucursal_id = int(sid) if (sid.isdigit() and int(sid) > 0) else None
+
     try:
         db.session.commit()
         flash(f"La cuenta '{caja.nombre}' fue actualizada correctamente.", "success")
